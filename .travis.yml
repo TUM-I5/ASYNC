@@ -10,7 +10,7 @@ before_install:
  - sudo apt-get update -qq
 
 install:
- - sudo apt-get install openmpi-bin openmpi-common openmpi-dev cmake
+ - sudo apt-get install -qq openmpi-bin openmpi-common libopenmpi-dev cmake
 
 script:
  - mkdir build && cd build && cmake ../
