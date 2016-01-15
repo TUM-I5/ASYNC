@@ -46,7 +46,7 @@ namespace async
  * Asynchronous call via pthreads
  */
 template<class Executor, typename Parameter>
-class AsyncSync : public Base<Executor, DefaultAllocator>
+class AsyncSync : public Base<Executor>
 {
 public:
 	AsyncSync()
@@ -69,7 +69,7 @@ public:
 
 	void init(Executor &executor, size_t bufferSize)
 	{
-		Base<Executor, DefaultAllocator>::init(executor, 0);
+		Base<Executor>::init(executor, 0);
 	}
 
 	/**
@@ -85,12 +85,12 @@ public:
 
 	void call(const Parameter &parameters)
 	{
-		Base<Executor, DefaultAllocator>::executor().exec(parameters);
+		Base<Executor>::executor().exec(parameters);
 	}
 
 	void finalize()
 	{
-		Base<Executor, DefaultAllocator>::finalize();
+		Base<Executor>::finalize();
 	}
 };
 

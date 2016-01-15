@@ -34,102 +34,34 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <mpi.h>
+
 #include <cxxtest/TestSuite.h>
 
-#include "async/AsyncThread.h"
-#include "Executor.h"
+#include "async/AsyncMPIScheduler.h"
 
-class TestAsyncThread : public CxxTest::TestSuite
+class TestAsyncMPIScheduler : public CxxTest::TestSuite
 {
-private:
-	pthread_spinlock_t m_lock;
-
-	int m_value;
+	int m_rank;
 
 public:
-	void setValue(int value)
-	{
-		// Lock the variable to test multiple threads at once
-		pthread_spin_lock(&m_lock);
-		m_value += value;
-		pthread_spin_unlock(&m_lock);
-	}
-
 	void setUp()
 	{
-		pthread_spin_init(&m_lock, PTHREAD_PROCESS_PRIVATE);
-		m_value = 0;
+		MPI_Comm_rank(MPI_COMM_WORLD, &m_rank);
 	}
 
-	void testInit()
+	void testIsExecutor()
 	{
-		Executor<TestAsyncThread> executor(this);
+		async::AsyncMPIScheduler scheduler;
+		scheduler.setCommunicator(MPI_COMM_WORLD, 3);
 
-		async::AsyncThread<Executor<TestAsyncThread>, Parameter> async;
-		async.init(executor, 0);
-
-		async.wait();
-	}
-
-	void testCall()
-	{
-		Executor<TestAsyncThread> executor(this);
-
-		async::AsyncThread<Executor<TestAsyncThread>, Parameter> async;
-		async.init(executor, 0);
-
-		async.wait();
-		Parameter parameter;
-		parameter.value = 42;
-		async.call(parameter);
-
-		async.wait(); // Make sure the call is finished
-		TS_ASSERT_EQUALS(m_value, 42);
-
-		parameter.value = 415;
-		async.call(parameter);
-
-		async.wait();
-		TS_ASSERT_EQUALS(m_value, 42+415);
-	}
-
-	void testBuffer()
-	{
-		Executor<TestAsyncThread> executor(this);
-
-		async::AsyncThread<Executor<TestAsyncThread>, Parameter> async;
-		async.init(executor, sizeof(int));
-
-		int buffer = 42;
-
-		async.wait();
-		async.fillBuffer(&buffer, sizeof(int));
-		TS_ASSERT_EQUALS(*reinterpret_cast<const int*>(async.buffer()), 42);
-	}
-
-	void testMultiple()
-	{
-		Executor<TestAsyncThread> executor(this);
-
-		async::AsyncThread<Executor<TestAsyncThread>, Parameter> async1;
-		async1.init(executor, 0);
-
-		async::AsyncThread<Executor<TestAsyncThread>, Parameter> async2;
-		async2.init(executor, 0);
-
-		async1.wait();
-		async2.wait();
-
-		Parameter parameter;
-		parameter.value = 42;
-		async1.call(parameter);
-
-		parameter.value = 13;
-		async2.call(parameter);
-
-		async1.wait();
-		async2.wait();
-
-		TS_ASSERT_EQUALS(m_value, 42+13);
+		switch (m_rank) {
+		case 2:
+		case 4:
+			TS_ASSERT(scheduler.isExecutor());
+			break;
+		default:
+			TS_ASSERT(!scheduler.isExecutor());
+		}
 	}
 };

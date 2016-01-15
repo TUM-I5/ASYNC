@@ -37,12 +37,9 @@
 #ifndef ASYNC_ASYNCTHREAD_H
 #define ASYNC_ASYNCTHREAD_H
 
-#include <pthread.h>
-#include <sched.h>
+#include <cstring>
 
-#include "utils/logger.h"
-
-#include "async/Base.h"
+#include "async/AsyncThreadBase.h"
 
 namespace async
 {
@@ -51,120 +48,43 @@ namespace async
  * Asynchronous call via pthreads
  */
 template<class Executor, typename Parameter>
-class AsyncThread : public Base<Executor, DefaultAllocator>
+class AsyncThread : public AsyncThreadBase<Executor, Parameter>
 {
 private:
-	/** Async thread */
-	pthread_t m_asyncThread;
-	
-	/** Mutex locked by the writer (caller) */
-	pthread_spinlock_t m_writerLock;
-	
-	/** Mutex locked by the reader (callee) */
-	pthread_mutex_t m_readerLock;
-
 	/** The current buffer position */
 	size_t m_bufferPos;
 
-	/** Parameters for the next call */
-	Parameter m_nextParams;
-	
-	/** Shutdown the thread */
-	bool m_shutdown;
-
 public:
 	AsyncThread()
-		: m_asyncThread(pthread_self()),
-		  m_bufferPos(0),
-		  m_shutdown(false)
+		: m_bufferPos(0)
 	{
-		pthread_spin_init(&m_writerLock, PTHREAD_PROCESS_PRIVATE);
-		pthread_mutex_init(&m_readerLock, 0L);
 	}
 	
 	~AsyncThread()
 	{
-		finalize();
 	}
 
 	/**
 	 * Will always return <code>true</code> for threads. Only
-	 * relevant in MPI mode.
+	 * for compatibility with the MPI mode.
 	 */
 	bool isExecutor() const
 	{
 		return true;
 	}
 
-	void init(Executor &executor, size_t bufferSize)
-	{
-		Base<Executor, DefaultAllocator>::init(executor, bufferSize);
-		
-		// Lock the reader until data is available
-		pthread_mutex_lock(&m_readerLock);
-
-		if (pthread_create(&m_asyncThread, 0L, asyncThread, this) != 0)
-			logError() << "Failed to start async thread";
-	}
-	
-	void setAffinity(const cpu_set_t &cpuSet)
-	{
-		pthread_setaffinity_np(m_asyncThread, sizeof(cpu_set_t), &cpuSet);
-	}
-
-	/**
-	 * Wait for the asynchronous call to finish
-	 */
-	void wait()
-	{
-		pthread_spin_lock(&m_writerLock);
-	}
-
 	void fillBuffer(const void* buffer, size_t size)
 	{
-		memcpy(Base<Executor, DefaultAllocator>::_buffer()+m_bufferPos, buffer, size);
+		memcpy(Base<Executor>::_buffer()+m_bufferPos, buffer, size);
 		m_bufferPos += size;
 	}
 	
 	void call(const Parameter &parameters)
 	{
-
-		memcpy(&m_nextParams, &parameters, sizeof(Parameter));
-		
-		pthread_mutex_unlock(&m_readerLock);
+		AsyncThreadBase<Executor, Parameter>::call(parameters);
 
 		// Reset the buffer position
 		m_bufferPos = 0;
-	}
-
-	void finalize()
-	{
-		if (!Base<Executor, DefaultAllocator>::finalize())
-			return;
-
-		// Shutdown the thread
-		m_shutdown = true;
-		pthread_mutex_unlock(&m_readerLock);
-		pthread_join(m_asyncThread, 0L);
-	}
-	
-private:
-	static void* asyncThread(void* c)
-	{
-		AsyncThread* async = reinterpret_cast<AsyncThread*>(c);
-
-		while (true) {
-			// We assume that this lock happens before any unlock from the main thread
-			pthread_mutex_lock(&async->m_readerLock);
-			if (async->m_shutdown)
-				break;
-			
-			async->executor().exec(async->m_nextParams);
-			
-			pthread_spin_unlock(&async->m_writerLock);
-		}
-
-		return 0L;
 	}
 };
 

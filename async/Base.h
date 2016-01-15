@@ -37,34 +37,13 @@
 #ifndef ASYNC_BASE_H
 #define ASYNC_BASE_H
 
-#include <cstring>
-
 namespace async
 {
 
 /**
- * Allocates a buffer using C++ allocation
- */
-class DefaultAllocator
-{
-public:
-	template<typename T>
-	static T* alloc(size_t size)
-	{
-		return new T[size];
-	}
-
-	template<typename T>
-	static void dealloc(T* mem)
-	{
-		delete [] mem;
-	}
-};
-
-/**
  * Base class for (a)synchronous communication
  */
-template<class Executor, class Allocator>
+template<class Executor>
 class Base
 {
 private:
@@ -89,13 +68,13 @@ protected:
 
 	~Base()
 	{
-		Allocator::dealloc(m_buffer);
+		delete [] m_buffer;
 	}
 
 	void init(Executor &executor, size_t bufferSize)
 	{
 		m_executor = &executor;
-		m_buffer = Allocator::template alloc<char>(bufferSize);
+		m_buffer = new char[bufferSize];
 		m_bufferSize = bufferSize;
 	}
 

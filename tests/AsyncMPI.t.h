@@ -45,6 +45,8 @@
 
 class TestAsyncMPI : public CxxTest::TestSuite
 {
+	async::AsyncMPIScheduler* m_scheduler;
+
 	int m_rank;
 
 	std::vector<int> m_values;
@@ -60,6 +62,15 @@ public:
 
 		m_async = 0L;
 		m_buffers.clear();
+
+		m_scheduler = new async::AsyncMPIScheduler();
+		m_scheduler->setCommunicator(MPI_COMM_WORLD, 3);
+	}
+
+	void tearDown()
+	{
+		//MPI_Barrier(MPI_COMM_WORLD);
+		delete m_scheduler;
 	}
 
 	void setValue(int value)
@@ -75,32 +86,16 @@ public:
 		}
 	}
 
-	void testIsExecutor()
-	{
-		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async;
-		async.setCommunicator(MPI_COMM_WORLD, 3);
-
-		switch (m_rank) {
-		case 2:
-		case 4:
-			TS_ASSERT(async.isExecutor());
-			break;
-		default:
-			TS_ASSERT(!async.isExecutor());
-		}
-	}
-
 	void testInit()
 	{
 		Executor<TestAsyncMPI> executor(this);
 
-		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async;
-		async.setCommunicator(MPI_COMM_WORLD, 3);
+		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async(*m_scheduler);
 
 		async.init(executor, 0);
 
-		if (async.isExecutor())
-			async.executorLoop();
+		if (m_scheduler->isExecutor())
+			m_scheduler->loop();
 		else
 			async.wait();
 	}
@@ -109,19 +104,16 @@ public:
 	{
 		Executor<TestAsyncMPI> executor(this);
 
-		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async;
-		async.setCommunicator(MPI_COMM_WORLD, 3);
+		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async(*m_scheduler);
 
 		async.init(executor, 0);
 
-		if (async.isExecutor()) {
-			async.executorLoop();
+		if (m_scheduler->isExecutor()) {
+			m_scheduler->loop();
 
 			TS_ASSERT_EQUALS(m_values.size(), 1);
 			TS_ASSERT_EQUALS(m_values[0], 42);
 		} else {
-			async.wait();
-
 			Parameter parameter;
 			parameter.value = 42;
 			async.initCall(parameter);
@@ -134,13 +126,12 @@ public:
 	{
 		Executor<TestAsyncMPI> executor(this);
 
-		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async;
-		async.setCommunicator(MPI_COMM_WORLD, 3);
+		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async(*m_scheduler);
 
 		async.init(executor, 0);
 
-		if (async.isExecutor()) {
-			async.executorLoop();
+		if (m_scheduler->isExecutor()) {
+			m_scheduler->loop();
 
 			TS_ASSERT_EQUALS(m_values.size(), 3);
 			TS_ASSERT_EQUALS(m_values[0], 1);
@@ -169,14 +160,13 @@ public:
 	{
 		Executor<TestAsyncMPI> executor(this);
 
-		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async;
-		async.setCommunicator(MPI_COMM_WORLD, 3);
+		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async(*m_scheduler);
 
+		async.init(executor, m_scheduler->isExecutor() ? 0 : sizeof(int));
+		m_async = &async;
 
-		async.init(executor, sizeof(int));
-
-		if (async.isExecutor()) {
-			async.executorLoop();
+		if (m_scheduler->isExecutor()) {
+			m_scheduler->loop();
 
 			for (std::vector<int>::const_iterator i = m_buffers.begin();
 					i != m_buffers.end(); i++)
@@ -192,5 +182,85 @@ public:
 
 			async.wait();
 		}
+	}
+
+	void testMultiple()
+	{
+		Executor<TestAsyncMPI> executor(this);
+
+		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async1(*m_scheduler);
+		async1.init(executor, 0);
+
+		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async2(*m_scheduler);
+		async2.init(executor, 0);
+
+		if (m_scheduler->isExecutor()) {
+			m_scheduler->loop();
+
+			TS_ASSERT_EQUALS(m_values.size(), 2);
+			TS_ASSERT_EQUALS(m_values[0], 1);
+			TS_ASSERT_EQUALS(m_values[1], 42);
+		} else {
+			async1.wait();
+			async2.wait();
+
+			Parameter parameter;
+			parameter.value = 1;
+			async1.call(parameter);
+
+			parameter.value = 42;
+			async2.call(parameter);
+
+			async1.wait();
+			async2.wait();
+		}
+	}
+
+	void testLargeBuffer()
+	{
+		Executor<TestAsyncMPI> executor(this);
+
+		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async(*m_scheduler);
+
+		size_t bufferSize = (1UL<<30) + (1UL<<29); // 1.5 GB
+		char* buffer = 0L;
+		if (m_scheduler->isExecutor()) {
+			async.init(executor, 0L);
+		} else {
+			buffer = new char[bufferSize];
+			async.init(executor, bufferSize);
+		}
+
+		if (m_scheduler->isExecutor()) {
+			m_scheduler->loop();
+
+			// Group size without the communicator
+			int groupSize = async.bufferSize() / bufferSize;
+			TS_ASSERT_LESS_THAN_EQUALS(1, groupSize);
+			TS_ASSERT_LESS_THAN_EQUALS(groupSize, 2);
+
+			TS_ASSERT_EQUALS(async.bufferSize(), bufferSize*groupSize);
+
+			const char* buf = reinterpret_cast<const char*>(async.buffer());
+			for (int i = 0; i < groupSize; i++) {
+				TS_ASSERT_EQUALS(buf[0], 'A');
+				TS_ASSERT_EQUALS(buf[bufferSize-1], 'Z');
+
+				buf += bufferSize;
+			}
+		} else {
+			async.wait();
+
+			buffer[0] = 'A';
+			buffer[bufferSize-1] = 'Z';
+			async.fillBuffer(buffer, bufferSize);
+
+			Parameter parameter;
+			async.call(parameter);
+
+			async.wait();
+		}
+
+		delete [] buffer;
 	}
 };
