@@ -96,6 +96,9 @@ private:
 	/** True of this task is an executor */
 	bool m_isExecutor;
 
+	/** The "COMM_WORLD" communicator (communicator without executors) */
+	MPI_Comm m_commWorld;
+
 	/** All async objects */
 	std::vector<Scheduled*> m_asyncCalls;
 
@@ -110,6 +113,7 @@ public:
 		: m_groupComm(MPI_COMM_NULL),
 		  m_groupRank(0), m_groupSize(0),
 		  m_isExecutor(false),
+		  m_commWorld(MPI_COMM_NULL),
 		  m_maxParamSize(0),
 		  m_finalized(false)
 	{
@@ -142,11 +146,19 @@ public:
 
 		// Is an executor?
 		m_isExecutor = rank % static_cast<int>(numExecTasks) == m_groupSize-1;
+
+		// Create the new comm world communicator
+		MPI_Comm_split(comm, (m_isExecutor ? 1 : 0), 0, &m_commWorld);
 	}
 
 	bool isExecutor() const
 	{
 		return m_isExecutor;
+	}
+
+	MPI_Comm commWorld()
+	{
+		return m_commWorld;
 	}
 
 	/**

@@ -64,4 +64,22 @@ public:
 			TS_ASSERT(!scheduler.isExecutor());
 		}
 	}
+
+	void testCommWorld()
+	{
+		async::AsyncMPIScheduler scheduler;
+		scheduler.setCommunicator(MPI_COMM_WORLD, 3);
+
+		int size;
+		MPI_Comm_size(scheduler.commWorld(), &size);
+
+		switch (m_rank) {
+		case 2:
+		case 4:
+			TS_ASSERT_EQUALS(size, 2);
+			break;
+		default:
+			TS_ASSERT_EQUALS(size, 3);
+		}
+	}
 };
