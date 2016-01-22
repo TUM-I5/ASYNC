@@ -151,6 +151,11 @@ public:
 		return m_numBuffers;
 	}
 
+	AsyncMPIScheduler& scheduler()
+	{
+		return m_scheduler;
+	}
+
 	/**
 	 * Wait for an asynchronous call to finish
 	 */

@@ -151,6 +151,11 @@ public:
 		MPI_Comm_split(comm, (m_isExecutor ? 1 : 0), 0, &m_commWorld);
 	}
 
+	int groupRank() const
+	{
+		return m_groupRank;
+	}
+
 	bool isExecutor() const
 	{
 		return m_isExecutor;
