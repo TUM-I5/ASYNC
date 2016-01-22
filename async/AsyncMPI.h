@@ -62,33 +62,41 @@ private:
 	/** The identifier for this async call */
 	int m_id;
 
+	/** Counter for buffer (we only create the buffers on the executor) */
+	unsigned int m_numBuffers;
+
 	/** Buffer offsets (only on the executor rank) */
-	unsigned long* m_bufferOffsets;
+	std::vector<const unsigned long*> m_bufferOffsets;
 
 	/** Current position of the buffer (only on the exuecutor rank) */
-	size_t* m_bufferPos;
+	std::vector<size_t*> m_bufferPos;
+
+	/** The last used buffer id */
+	unsigned int m_lastBufferId;
 
 public:
 	AsyncMPI(AsyncMPIScheduler &scheduler)
 		: m_scheduler(scheduler),
 		  m_id(0),
-		  m_bufferOffsets(0L),
-		  m_bufferPos(0L)
+		  m_numBuffers(0),
+		  m_lastBufferId(0)
 	{ }
 
 	~AsyncMPI()
 	{
 		finalize();
 
-		delete [] m_bufferOffsets;
-		delete [] m_bufferPos;
+		for (unsigned int i = 0; i < Base<Executor>::numBuffers(); i++) {
+			delete [] m_bufferOffsets[i];
+			delete [] m_bufferPos[i];
+		}
 	}
 
 	/**
-	 * @param executor
+	 *
 	 * @param bufferSize Should be 0 on the executor
 	 */
-	void init(Executor &executor, size_t bufferSize)
+	void addBuffer(size_t bufferSize)
 	{
 		assert(bufferSize == 0 || !m_scheduler.isExecutor());
 
@@ -96,30 +104,51 @@ public:
 
 		// Compute buffer size and offsets
 		unsigned long bs = bufferSize; // Use an MPI compatible datatype
-		if (m_scheduler.isExecutor())
-			m_bufferOffsets = new unsigned long[m_scheduler.groupSize()];
-		MPI_Gather(&bs, 1, MPI_UNSIGNED_LONG, m_bufferOffsets,
+		unsigned long* bufferOffsets = 0L;
+		if (m_scheduler.isExecutor()) {
+			bufferOffsets = new unsigned long[m_scheduler.groupSize()];
+			m_bufferOffsets.push_back(bufferOffsets);
+		}
+		MPI_Gather(&bs, 1, MPI_UNSIGNED_LONG, bufferOffsets,
 				1, MPI_UNSIGNED_LONG, executorRank, m_scheduler.groupComm());
 
-		bufferSize = 0;
 		if (m_scheduler.isExecutor()) {
+			// Compute offsets from the size
+			bufferSize = 0;
 			for (int i = 0; i < m_scheduler.groupSize()-1; i++) {
-				unsigned long bufSize = m_bufferOffsets[i];
-				m_bufferOffsets[i] = bufferSize;
+				unsigned long bufSize = bufferOffsets[i];
+				bufferOffsets[i] = bufferSize;
 				bufferSize += bufSize;
 			}
+
+			// Create the buffer
+			AsyncThreadBase<Executor, Parameter>::addBuffer(bufferSize);
+
+			// Initialize the current position
+			m_bufferPos.push_back(new size_t[m_scheduler.groupSize()-1]);
+			memset(m_bufferPos.back(), 0, (m_scheduler.groupSize()-1) * sizeof(size_t));
 		}
 
-		// Final initialization on the executor
-		if (m_scheduler.isExecutor()) {
-			AsyncThreadBase<Executor, Parameter>::init(executor, bufferSize);
+		// Increase the counter
+		m_numBuffers++;
+	}
 
-			m_bufferPos = new size_t[m_scheduler.groupSize()-1];
-			memset(m_bufferPos, 0, (m_scheduler.groupSize()-1) * sizeof(size_t));
-		}
+	/**
+	 * @param executor
+	 */
+	void setExecutor(Executor &executor)
+	{
+		// Initialization on the executor
+		if (m_scheduler.isExecutor())
+			AsyncThreadBase<Executor, Parameter>::setExecutor(executor);
 
 		// Add this to the scheduler
 		m_id = m_scheduler.addScheduled(this, sizeof(InitParameter), sizeof(Parameter));
+	}
+
+	unsigned int numBuffers() const
+	{
+		return m_numBuffers;
 	}
 
 	/**
@@ -131,8 +160,17 @@ public:
 		m_scheduler.wait(m_id);
 	}
 
-	void fillBuffer(const void* buffer, size_t size)
+	void fillBuffer(unsigned int id, const void* buffer, size_t size)
 	{
+		if (buffer == 0L || size == 0)
+			return;
+
+		// Select the bufferId
+		if (id != m_lastBufferId) {
+			m_scheduler.selectBuffer(m_id, id);
+			m_lastBufferId = id;
+		}
+
 		// We need to send the buffer in 1 GB chunks
 		for (size_t done = 0; done < size; done += 1UL<<30) {
 			size_t send = std::min(1UL<<30, size-done);
@@ -173,12 +211,13 @@ private:
 		Base<Executor>::executor().execInit(*param);
 	}
 
-	void* getBufferPos(int rank, int size)
+	void* getBufferPos(unsigned int id, int rank, int size)
 	{
 		assert(rank < m_scheduler.groupSize()-1);
 
-		void* buf = Base<Executor>::_buffer()+m_bufferOffsets[rank]+m_bufferPos[rank];
-		m_bufferPos[rank] += size;
+		void* buf = AsyncThreadBase<Executor, Parameter>::_buffer(id)+
+				m_bufferOffsets[id][rank]+m_bufferPos[id][rank];
+		m_bufferPos[id][rank] += size;
 		return buf;
 	}
 
@@ -188,7 +227,8 @@ private:
 		AsyncThreadBase<Executor, Parameter>::call(*param);
 
 		// Reset the buffer positions
-		memset(m_bufferPos, 0, (m_scheduler.groupSize()-1) * sizeof(size_t));
+		for (unsigned int i = 0; i < Base<Executor>::numBuffers(); i++)
+			memset(m_bufferPos[i], 0, (m_scheduler.groupSize()-1) * sizeof(size_t));
 	}
 
 	void waitOnExecutor()

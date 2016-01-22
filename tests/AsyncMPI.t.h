@@ -78,11 +78,13 @@ public:
 		m_values.push_back(value);
 
 		if (m_async) {
-			size_t size = m_async->bufferSize() / sizeof(int);
-			const int* buf = reinterpret_cast<const int*>(m_async->buffer());
+			for (unsigned int i = 0; i < m_async->numBuffers(); i++) {
+				size_t size = m_async->bufferSize(i) / sizeof(int);
+				const int* buf = reinterpret_cast<const int*>(m_async->buffer(i));
 
-			for (size_t i = 0; i < size; i++)
-				m_buffers.push_back(buf[i]);
+				for (size_t j = 0; j < size; j++)
+					m_buffers.push_back(buf[j]);
+			}
 		}
 	}
 
@@ -92,7 +94,7 @@ public:
 
 		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async(*m_scheduler);
 
-		async.init(executor, 0);
+		async.setExecutor(executor);
 
 		if (m_scheduler->isExecutor())
 			m_scheduler->loop();
@@ -106,7 +108,7 @@ public:
 
 		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async(*m_scheduler);
 
-		async.init(executor, 0);
+		async.setExecutor(executor);
 
 		if (m_scheduler->isExecutor()) {
 			m_scheduler->loop();
@@ -128,7 +130,9 @@ public:
 
 		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async(*m_scheduler);
 
-		async.init(executor, 0);
+		async.setExecutor(executor);
+
+		TS_ASSERT_EQUALS(async.numBuffers(), 0);
 
 		if (m_scheduler->isExecutor()) {
 			m_scheduler->loop();
@@ -162,8 +166,12 @@ public:
 
 		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async(*m_scheduler);
 
-		async.init(executor, m_scheduler->isExecutor() ? 0 : sizeof(int));
+		async.addBuffer(m_scheduler->isExecutor() ? 0 : sizeof(int));
+
+		async.setExecutor(executor);
 		m_async = &async;
+
+		TS_ASSERT_EQUALS(async.numBuffers(), 1);
 
 		if (m_scheduler->isExecutor()) {
 			m_scheduler->loop();
@@ -175,7 +183,46 @@ public:
 			async.wait();
 
 			int buffer = 43;
-			async.fillBuffer(&buffer, sizeof(int));
+			async.fillBuffer(0, &buffer, sizeof(int));
+
+			Parameter parameter;
+			async.call(parameter);
+
+			async.wait();
+		}
+	}
+
+	void testBuffer2()
+	{
+		Executor<TestAsyncMPI> executor(this);
+
+		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async(*m_scheduler);
+
+		async.addBuffer(m_scheduler->isExecutor() ? 0 : sizeof(int));
+		async.addBuffer(m_scheduler->isExecutor() ? 0 : sizeof(int));
+
+		async.setExecutor(executor);
+		m_async = &async;
+
+		TS_ASSERT_EQUALS(async.numBuffers(), 2);
+
+		if (m_scheduler->isExecutor()) {
+			m_scheduler->loop();
+
+			TS_ASSERT_EQUALS(m_buffers.size() % 2, 0);
+
+			for (unsigned int i = 0; i < m_buffers.size()/2; i++)
+				TS_ASSERT_EQUALS(m_buffers[i], 43);
+			for (unsigned int i = m_buffers.size()/2; i < m_buffers.size(); i++)
+				TS_ASSERT_EQUALS(m_buffers[i], 42);
+		} else {
+			async.wait();
+
+			int buffer = 43;
+			async.fillBuffer(0, &buffer, sizeof(int));
+
+			buffer = 42;
+			async.fillBuffer(1, &buffer, sizeof(int));
 
 			Parameter parameter;
 			async.call(parameter);
@@ -189,17 +236,16 @@ public:
 		Executor<TestAsyncMPI> executor(this);
 
 		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async1(*m_scheduler);
-		async1.init(executor, 0);
+		async1.setExecutor(executor);
 
 		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async2(*m_scheduler);
-		async2.init(executor, 0);
+		async2.setExecutor(executor);
 
 		if (m_scheduler->isExecutor()) {
 			m_scheduler->loop();
 
 			TS_ASSERT_EQUALS(m_values.size(), 2);
-			TS_ASSERT_EQUALS(m_values[0], 1);
-			TS_ASSERT_EQUALS(m_values[1], 42);
+			TS_ASSERT_EQUALS(m_values[0]+m_values[1], 43); // We cannot be sure with call arrives first
 		} else {
 			async1.wait();
 			async2.wait();
@@ -225,23 +271,25 @@ public:
 		size_t bufferSize = (1UL<<30) + (1UL<<29); // 1.5 GB
 		char* buffer = 0L;
 		if (m_scheduler->isExecutor()) {
-			async.init(executor, 0L);
+			async.addBuffer(0);
 		} else {
 			buffer = new char[bufferSize];
-			async.init(executor, bufferSize);
+			async.addBuffer(bufferSize);
 		}
+
+		async.setExecutor(executor);
 
 		if (m_scheduler->isExecutor()) {
 			m_scheduler->loop();
 
 			// Group size without the communicator
-			int groupSize = async.bufferSize() / bufferSize;
+			int groupSize = async.bufferSize(0) / bufferSize;
 			TS_ASSERT_LESS_THAN_EQUALS(1, groupSize);
 			TS_ASSERT_LESS_THAN_EQUALS(groupSize, 2);
 
-			TS_ASSERT_EQUALS(async.bufferSize(), bufferSize*groupSize);
+			TS_ASSERT_EQUALS(async.bufferSize(0), bufferSize*groupSize);
 
-			const char* buf = reinterpret_cast<const char*>(async.buffer());
+			const char* buf = reinterpret_cast<const char*>(async.buffer(0));
 			for (int i = 0; i < groupSize; i++) {
 				TS_ASSERT_EQUALS(buf[0], 'A');
 				TS_ASSERT_EQUALS(buf[bufferSize-1], 'Z');
@@ -253,7 +301,7 @@ public:
 
 			buffer[0] = 'A';
 			buffer[bufferSize-1] = 'Z';
-			async.fillBuffer(buffer, bufferSize);
+			async.fillBuffer(0, buffer, bufferSize);
 
 			Parameter parameter;
 			async.call(parameter);

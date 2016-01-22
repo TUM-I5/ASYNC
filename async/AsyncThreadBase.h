@@ -88,9 +88,9 @@ public:
 		finalize();
 	}
 
-	void init(Executor &executor, size_t bufferSize)
+	void setExecutor(Executor &executor)
 	{
-		Base<Executor>::init(executor, bufferSize);
+		Base<Executor>::setExecutor(executor);
 
 		// Lock the reader until data is available
 		pthread_mutex_lock(&m_readerLock);
@@ -139,7 +139,8 @@ private:
 		AsyncThreadBase* async = reinterpret_cast<AsyncThreadBase*>(c);
 
 		// Touch the memory on this thread
-		memset(async->_buffer(), 0, async->bufferSize());
+		for (unsigned int i = 0; i < async->numBuffers(); i++)
+			memset(async->_buffer(i), 0, async->bufferSize(i));
 		pthread_spin_unlock(&async->m_writerLock);
 
 		// Tell everyone that we are read to go

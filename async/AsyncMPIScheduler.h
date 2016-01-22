@@ -62,7 +62,7 @@ protected:
 private:
 	virtual void execInit(const void* parameter) = 0;
 
-	virtual void* getBufferPos(int rank, int size) = 0;
+	virtual void* getBufferPos(unsigned int id, int rank, int size) = 0;
 
 	virtual void exec(const void* parameter) = 0;
 
@@ -173,6 +173,10 @@ public:
 		unsigned int* readyTasks = new unsigned int[m_asyncCalls.size()];
 		memset(readyTasks, 0, m_asyncCalls.size() * sizeof(unsigned int));
 
+		// Selected buffer id for each rank
+		unsigned int* bufferIds = new unsigned int[m_groupSize-1];
+		memset(bufferIds, 0, (m_groupSize-1) * sizeof(unsigned int));
+
 		// Allocate buffer for parameters
 		char* paramBuffer = new char[m_maxParamSize];
 
@@ -182,8 +186,6 @@ public:
 		while (finalized < m_asyncCalls.size()) {
 			MPI_Status status;
 			int id, tag;
-
-			//bool breakLoop = false;
 
 			do {
 				MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, m_groupComm, &status);
@@ -206,12 +208,18 @@ public:
 
 					readyTasks[id]++;
 					break;
+				case SELECT_TAG:
+					MPI_Recv(&bufferIds[status.MPI_SOURCE], 1, MPI_UNSIGNED,
+							status.MPI_SOURCE, status.MPI_TAG, m_groupComm,
+							MPI_STATUS_IGNORE);
+
+					break;
 				case BUFFER_TAG:
 					// Get the size that is received
 					MPI_Get_count(&status, MPI_CHAR, &size);
 
-					// Receive the message
-					MPI_Recv(m_asyncCalls[id]->getBufferPos(status.MPI_SOURCE, size),
+					// Receive the buffer
+					MPI_Recv(m_asyncCalls[id]->getBufferPos(bufferIds[status.MPI_SOURCE], status.MPI_SOURCE, size),
 							size, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, m_groupComm,
 							MPI_STATUS_IGNORE);
 
@@ -256,6 +264,7 @@ public:
 		}
 
 		delete [] readyTasks;
+		delete [] bufferIds;
 		delete [] paramBuffer;
 	}
 
@@ -303,6 +312,13 @@ private:
 		MPI_Barrier(m_groupComm);
 	}
 
+	void selectBuffer(int id, unsigned int bufferId)
+	{
+		// Use synchronous send to avoid overtaking of message
+		MPI_Ssend(&bufferId, 1, MPI_UNSIGNED,
+				m_groupSize-1, id*NUM_TAGS+SELECT_TAG, m_groupComm);
+	}
+
 	void sendBuffer(int id, const void* buffer, int size)
 	{
 		// Use synchronous send to avoid overtaking of message
@@ -341,11 +357,12 @@ private:
 
 private:
 	static const int INIT_TAG = 0;
-	static const int BUFFER_TAG = 1;
-	static const int PARAM_TAG = 2;
-	static const int WAIT_TAG = 3;
-	static const int FINALIZE_TAG = 4;
-	static const int NUM_TAGS = 5;
+	static const int SELECT_TAG = 1;
+	static const int BUFFER_TAG = 2;
+	static const int PARAM_TAG = 3;
+	static const int WAIT_TAG = 4;
+	static const int FINALIZE_TAG = 5;
+	static const int NUM_TAGS = 6;
 };
 
 }

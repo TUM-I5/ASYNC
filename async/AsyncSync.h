@@ -48,6 +48,10 @@ namespace async
 template<class Executor, typename Parameter>
 class AsyncSync : public Base<Executor>
 {
+private:
+	/** The current buffer position */
+	std::vector<size_t> m_bufferPos;
+
 public:
 	AsyncSync()
 	{
@@ -55,21 +59,22 @@ public:
 
 	~AsyncSync()
 	{
-		finalize();
+		Base<Executor>::finalize();
+	}
+
+	void addBuffer(size_t bufferSize)
+	{
+		Base<Executor>::addBuffer(bufferSize);
+		m_bufferPos.push_back(0);
 	}
 
 	/**
-	 * Will always return <code>true</code> for threads. Only
+	 * Will always return <code>false</code>. Only
 	 * relevant in MPI mode.
 	 */
 	bool isExecutor() const
 	{
-		return true;
-	}
-
-	void init(Executor &executor, size_t bufferSize)
-	{
-		Base<Executor>::init(executor, 0);
+		return false;
 	}
 
 	/**
@@ -79,18 +84,21 @@ public:
 	{
 	}
 
-	void fillBuffer(const void* buffer, size_t size)
+	void fillBuffer(unsigned int id, const void* buffer, size_t size)
 	{
+		assert(id < Base<Executor>::numBuffers());
+
+		memcpy(Base<Executor>::_buffer(id)+m_bufferPos[id], buffer, size);
+		m_bufferPos[id] += size;
 	}
 
 	void call(const Parameter &parameters)
 	{
 		Base<Executor>::executor().exec(parameters);
-	}
 
-	void finalize()
-	{
-		Base<Executor>::finalize();
+		// Reset the buffer positions
+		for (unsigned int i = 0; i < Base<Executor>::numBuffers(); i++)
+			m_bufferPos[i] = 0;
 	}
 };
 

@@ -37,6 +37,8 @@
 #ifndef ASYNC_BASE_H
 #define ASYNC_BASE_H
 
+#include <vector>
+
 namespace async
 {
 
@@ -50,11 +52,11 @@ private:
 	/** The executor for the asynchronous call */
 	Executor* m_executor;
 
-	/** The buffer */
-	char* m_buffer;
+	/** The buffers */
+	std::vector<char*> m_buffer;
 
 	/** The size of the buffer */
-	size_t m_bufferSize;
+	std::vector<size_t> m_bufferSize;
 
 	/** Already cleanup everything? */
 	bool m_finalized;
@@ -62,29 +64,49 @@ private:
 protected:
 	Base()
 		: m_executor(0L),
-		  m_buffer(0L), m_bufferSize(0),
 		  m_finalized(false)
 	{ }
 
 	~Base()
 	{
-		delete [] m_buffer;
-	}
-
-	void init(Executor &executor, size_t bufferSize)
-	{
-		m_executor = &executor;
-		m_buffer = new char[bufferSize];
-		m_bufferSize = bufferSize;
+		for (unsigned int i = 0; i < m_buffer.size(); i++)
+			delete [] m_buffer[i];
 	}
 
 	Executor& executor() {
 		return *m_executor;
 	}
 
-	char* _buffer()
+	char* _buffer(unsigned int id)
 	{
-		return m_buffer;
+		return m_buffer[id];
+	}
+
+public:
+	void addBuffer(size_t bufferSize)
+	{
+		m_buffer.push_back(new char[bufferSize]);
+		m_bufferSize.push_back(bufferSize);
+	}
+
+	void setExecutor(Executor &executor)
+	{
+		m_executor = &executor;
+	}
+
+	unsigned int numBuffers() const
+	{
+		return m_buffer.size();
+	}
+
+	const void* buffer(unsigned int id) const
+	{
+		return m_buffer[id];
+	}
+
+	size_t bufferSize(unsigned int id) const
+	{
+		return m_bufferSize[id];
 	}
 
 	/**
@@ -97,17 +119,6 @@ protected:
 		bool finalized = m_finalized;
 		m_finalized = false;
 		return !finalized;
-	}
-
-public:
-	const void* buffer() const
-	{
-		return m_buffer;
-	}
-
-	size_t bufferSize() const
-	{
-		return m_bufferSize;
 	}
 };
 

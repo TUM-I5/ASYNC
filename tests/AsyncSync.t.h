@@ -55,7 +55,7 @@ public:
 		Executor<TestAsyncSync> executor(this);
 
 		async::AsyncSync<Executor<TestAsyncSync>, Parameter> async;
-		async.init(executor, 0);
+		async.setExecutor(executor);
 
 		async.wait();
 	}
@@ -65,7 +65,9 @@ public:
 		Executor<TestAsyncSync> executor(this);
 
 		async::AsyncSync<Executor<TestAsyncSync>, Parameter> async;
-		async.init(executor, 0);
+		async.setExecutor(executor);
+
+		TS_ASSERT_EQUALS(async.numBuffers(), 0);
 
 		m_value = 0;
 

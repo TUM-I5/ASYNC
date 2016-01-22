@@ -37,6 +37,7 @@
 #ifndef ASYNC_ASYNCTHREAD_H
 #define ASYNC_ASYNCTHREAD_H
 
+#include <cassert>
 #include <cstring>
 
 #include "async/AsyncThreadBase.h"
@@ -52,11 +53,10 @@ class AsyncThread : public AsyncThreadBase<Executor, Parameter>
 {
 private:
 	/** The current buffer position */
-	size_t m_bufferPos;
+	std::vector<size_t> m_bufferPos;
 
 public:
 	AsyncThread()
-		: m_bufferPos(0)
 	{
 	}
 	
@@ -64,27 +64,36 @@ public:
 	{
 	}
 
+	void addBuffer(size_t bufferSize)
+	{
+		AsyncThreadBase<Executor, Parameter>::addBuffer(bufferSize);
+		m_bufferPos.push_back(0);
+	}
+
 	/**
-	 * Will always return <code>true</code> for threads. Only
+	 * Will always return <code>false</code> for threads. Only
 	 * for compatibility with the MPI mode.
 	 */
 	bool isExecutor() const
 	{
-		return true;
+		return false;
 	}
 
-	void fillBuffer(const void* buffer, size_t size)
+	void fillBuffer(unsigned int id, const void* buffer, size_t size)
 	{
-		memcpy(Base<Executor>::_buffer()+m_bufferPos, buffer, size);
-		m_bufferPos += size;
+		assert(id < Base<Executor>::numBuffers());
+
+		memcpy(AsyncThreadBase<Executor, Parameter>::_buffer(id)+m_bufferPos[id], buffer, size);
+		m_bufferPos[id] += size;
 	}
 	
 	void call(const Parameter &parameters)
 	{
 		AsyncThreadBase<Executor, Parameter>::call(parameters);
 
-		// Reset the buffer position
-		m_bufferPos = 0;
+		// Reset the buffer positions
+		for (unsigned int i = 0; i < Base<Executor>::numBuffers(); i++)
+			m_bufferPos[i] = 0;
 	}
 };
 
