@@ -187,7 +187,7 @@ public:
 	/**
 	 * @warning Only the parameter from the last task will be considered
 	 */
-	void initCall(const InitParameter &parameters)
+	void callInit(const InitParameter &parameters)
 	{
 		m_scheduler.sendInitParam(m_id, parameters);
 	}

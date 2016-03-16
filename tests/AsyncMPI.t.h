@@ -118,7 +118,7 @@ public:
 		} else {
 			Parameter parameter;
 			parameter.value = 42;
-			async.initCall(parameter);
+			async.callInit(parameter);
 
 			async.wait();
 		}
