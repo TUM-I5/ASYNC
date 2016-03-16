@@ -60,11 +60,11 @@ protected:
 	{ }
 
 private:
-	virtual void execInit(const void* parameter) = 0;
+	virtual void _execInit(const void* parameter) = 0;
 
 	virtual void* getBufferPos(unsigned int id, int rank, int size) = 0;
 
-	virtual void exec(const void* parameter) = 0;
+	virtual void _exec(const void* parameter) = 0;
 
 	/**
 	 * Wait on the executor for the call to finish
@@ -245,11 +245,11 @@ public:
 			switch (tag) {
 			case INIT_TAG:
 				MPI_Barrier(m_groupComm);
-				m_asyncCalls[id]->execInit(paramBuffer);
+				m_asyncCalls[id]->_execInit(paramBuffer);
 				break;
 			case PARAM_TAG:
 				MPI_Barrier(m_groupComm);
-				m_asyncCalls[id]->exec(paramBuffer);
+				m_asyncCalls[id]->_exec(paramBuffer);
 				break;
 			case WAIT_TAG:
 				m_asyncCalls[id]->waitOnExecutor();

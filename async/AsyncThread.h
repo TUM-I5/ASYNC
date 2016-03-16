@@ -79,6 +79,9 @@ public:
 		return false;
 	}
 
+	/**
+	 * @param size The size of data array in bytes
+	 */
 	void fillBuffer(unsigned int id, const void* buffer, size_t size)
 	{
 		assert(id < Base<Executor>::numBuffers());

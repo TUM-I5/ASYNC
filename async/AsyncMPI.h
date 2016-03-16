@@ -210,7 +210,7 @@ public:
 	}
 
 private:
-	void execInit(const void* paramBuffer)
+	void _execInit(const void* paramBuffer)
 	{
 		const InitParameter* param = reinterpret_cast<const InitParameter*>(paramBuffer);
 		Base<Executor>::executor().execInit(*param);
@@ -226,7 +226,7 @@ private:
 		return buf;
 	}
 
-	void exec(const void* paramBuffer)
+	void _exec(const void* paramBuffer)
 	{
 		const Parameter* param = reinterpret_cast<const Parameter*>(paramBuffer);
 		AsyncThreadBase<Executor, Parameter>::call(*param);
