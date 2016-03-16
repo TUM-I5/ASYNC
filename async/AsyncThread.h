@@ -85,6 +85,7 @@ public:
 	void fillBuffer(unsigned int id, const void* buffer, size_t size)
 	{
 		assert(id < Base<Executor>::numBuffers());
+		assert(m_bufferPos[id]+size <= Base<Executor>::bufferSize(id));
 
 		memcpy(AsyncThreadBase<Executor, Parameter>::_buffer(id)+m_bufferPos[id], buffer, size);
 		m_bufferPos[id] += size;

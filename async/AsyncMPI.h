@@ -219,6 +219,8 @@ private:
 	void* getBufferPos(unsigned int id, int rank, int size)
 	{
 		assert(rank < m_scheduler.groupSize()-1);
+		assert(m_bufferOffsets[id][rank]+m_bufferPos[id][rank]+size
+				<= Base<Executor>::bufferSize(id));
 
 		void* buf = AsyncThreadBase<Executor, Parameter>::_buffer(id)+
 				m_bufferOffsets[id][rank]+m_bufferPos[id][rank];

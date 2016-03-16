@@ -85,7 +85,10 @@ protected:
 public:
 	void addBuffer(size_t bufferSize)
 	{
-		m_buffer.push_back(new char[bufferSize]);
+		if (bufferSize)
+			m_buffer.push_back(new char[bufferSize]);
+		else
+			m_buffer.push_back(0L);
 		m_bufferSize.push_back(bufferSize);
 	}
 
