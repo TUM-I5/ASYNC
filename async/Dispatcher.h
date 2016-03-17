@@ -62,7 +62,7 @@ private:
 public:
 	Dispatcher() :
 #ifdef USE_MPI
-			m_comm(MPI_COMM_NULL),
+			m_comm(MPI_COMM_WORLD),
 #endif // USE_MPI
 			m_groupSize(64)
 	{
