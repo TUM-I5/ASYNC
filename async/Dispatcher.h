@@ -94,15 +94,20 @@ public:
 		m_groupSize = groupSize;
 	}
 
+#ifdef USE_ASYNC_MPI
+	const async::as::MPIScheduler& scheduler()
+	{
+		return m_scheduler;
+	}
+#endif // USE_ASYNC_MPI
+
 	/**
-	 * This function will not return for MPI executors until all executors have been
-	 * finalized. The function has to be called after all async {@link Module}s have
-	 * been created.
+	 * Initialize the dispatcher
 	 *
-	 * @return False if this rank is an MPI executor that does not contribute to the
-	 *  computation.
+	 * This has to be called after {@link setCommunicator} and
+	 * {@link setGroupSize}
 	 */
-	bool init()
+	void init()
 	{
 #ifdef USE_ASYNC_MPI
 		const std::vector<ModuleBase*>& modules = ModuleBase::modules();
@@ -113,8 +118,22 @@ public:
 
 		// Initialize the scheduler
 		m_scheduler.setCommunicator(m_comm, m_groupSize);
+#endif // USE_ASYNC_MPI
+	}
 
+	/**
+	 * This function will not return for MPI executors until all executors have been
+	 * finalized. The function has to be called after all async {@link Module}s have
+	 * been created.
+	 *
+	 * @return False if this rank is an MPI executor that does not contribute to the
+	 *  computation.
+	 */
+	bool dispatch()
+	{
+#ifdef USE_ASYNC_MPI
 		if (m_scheduler.isExecutor()) {
+			const std::vector<ModuleBase*>& modules = ModuleBase::modules();
 			// Initialize the executor modules
 			for (std::vector<ModuleBase*>::const_iterator i = modules.begin();
 					i != modules.end(); i++)

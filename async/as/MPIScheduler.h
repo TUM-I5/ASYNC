@@ -93,7 +93,7 @@ private:
 	/** The rank of in the executor group */
 	int m_groupRank;
 
-	/** The size of the executor group */
+	/** The size of the executor group (incl. the executor) */
 	int m_groupSize;
 
 	/** True of this task is an executor */
@@ -164,7 +164,7 @@ public:
 		return m_isExecutor;
 	}
 
-	MPI_Comm commWorld()
+	MPI_Comm commWorld() const
 	{
 		return m_commWorld;
 	}

@@ -70,8 +70,9 @@ public:
 #ifdef USE_MPI
 		dispatcher.setCommunicator(MPI_COMM_WORLD);
 #endif // USE_MPI
+		dispatcher.init();
 
-		if (dispatcher.init()) {
+		if (dispatcher.dispatch()) {
 			// Empty initialization
 			setUp();
 
@@ -131,8 +132,9 @@ public:
 #ifdef USE_MPI
 		dispatcher.setCommunicator(MPI_COMM_WORLD);
 #endif // USE_MPI
+		dispatcher.init();
 
-		if (dispatcher.init()) {
+		if (dispatcher.dispatch()) {
 			// Empty initialization
 			setUp(42);
 
