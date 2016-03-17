@@ -34,8 +34,8 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef ASYNC_ASYNCMPI_H
-#define ASYNC_ASYNCMPI_H
+#ifndef ASYNC_AS_MPI_H
+#define ASYNC_AS_MPI_H
 
 #include <mpi.h>
 
@@ -43,21 +43,24 @@
 #include <cassert>
 #include <cstring>
 
-#include "async/AsyncThreadBase.h"
-#include "async/AsyncMPIScheduler.h"
+#include "ThreadBase.h"
+#include "MPIScheduler.h"
 
 namespace async
+{
+
+namespace as
 {
 
 /**
  * Asynchronous call via MPI
  */
 template<class Executor, typename InitParameter, typename Parameter>
-class AsyncMPI : public AsyncThreadBase<Executor, Parameter>, private Scheduled
+class MPI : public ThreadBase<Executor, Parameter>, private Scheduled
 {
 private:
 	/** The scheduler */
-	AsyncMPIScheduler &m_scheduler;
+	MPIScheduler* m_scheduler;
 
 	/** The identifier for this async call */
 	int m_id;
@@ -75,14 +78,14 @@ private:
 	unsigned int m_lastBufferId;
 
 public:
-	AsyncMPI(AsyncMPIScheduler &scheduler)
-		: m_scheduler(scheduler),
+	MPI()
+		: m_scheduler(0L),
 		  m_id(0),
 		  m_numBuffers(0),
 		  m_lastBufferId(0)
 	{ }
 
-	~AsyncMPI()
+	~MPI()
 	{
 		finalize();
 
@@ -92,41 +95,52 @@ public:
 		}
 	}
 
+	void scheduler(MPIScheduler &scheduler)
+	{
+		m_scheduler = &scheduler;
+	}
+
+	MPIScheduler& scheduler()
+	{
+		return *m_scheduler;
+	}
+
 	/**
 	 *
 	 * @param bufferSize Should be 0 on the executor
 	 */
 	void addBuffer(size_t bufferSize)
 	{
-		assert(bufferSize == 0 || !m_scheduler.isExecutor());
+		assert(m_scheduler);
+		assert(bufferSize == 0 || !m_scheduler->isExecutor());
 
-		int executorRank = m_scheduler.groupSize()-1;
+		int executorRank = m_scheduler->groupSize()-1;
 
 		// Compute buffer size and offsets
 		unsigned long bs = bufferSize; // Use an MPI compatible datatype
 		unsigned long* bufferOffsets = 0L;
-		if (m_scheduler.isExecutor()) {
-			bufferOffsets = new unsigned long[m_scheduler.groupSize()];
+		if (m_scheduler->isExecutor()) {
+			bufferOffsets = new unsigned long[m_scheduler->groupSize()];
 			m_bufferOffsets.push_back(bufferOffsets);
 		}
 		MPI_Gather(&bs, 1, MPI_UNSIGNED_LONG, bufferOffsets,
-				1, MPI_UNSIGNED_LONG, executorRank, m_scheduler.groupComm());
+				1, MPI_UNSIGNED_LONG, executorRank, m_scheduler->groupComm());
 
-		if (m_scheduler.isExecutor()) {
+		if (m_scheduler->isExecutor()) {
 			// Compute offsets from the size
 			bufferSize = 0;
-			for (int i = 0; i < m_scheduler.groupSize()-1; i++) {
+			for (int i = 0; i < m_scheduler->groupSize()-1; i++) {
 				unsigned long bufSize = bufferOffsets[i];
 				bufferOffsets[i] = bufferSize;
 				bufferSize += bufSize;
 			}
 
 			// Create the buffer
-			AsyncThreadBase<Executor, Parameter>::addBuffer(bufferSize);
+			ThreadBase<Executor, Parameter>::addBuffer(bufferSize);
 
 			// Initialize the current position
-			m_bufferPos.push_back(new size_t[m_scheduler.groupSize()-1]);
-			memset(m_bufferPos.back(), 0, (m_scheduler.groupSize()-1) * sizeof(size_t));
+			m_bufferPos.push_back(new size_t[m_scheduler->groupSize()-1]);
+			memset(m_bufferPos.back(), 0, (m_scheduler->groupSize()-1) * sizeof(size_t));
 		}
 
 		// Increase the counter
@@ -139,21 +153,16 @@ public:
 	void setExecutor(Executor &executor)
 	{
 		// Initialization on the executor
-		if (m_scheduler.isExecutor())
-			AsyncThreadBase<Executor, Parameter>::setExecutor(executor);
+		if (m_scheduler->isExecutor())
+			ThreadBase<Executor, Parameter>::setExecutor(executor);
 
 		// Add this to the scheduler
-		m_id = m_scheduler.addScheduled(this, sizeof(InitParameter), sizeof(Parameter));
+		m_id = m_scheduler->addScheduled(this, sizeof(InitParameter), sizeof(Parameter));
 	}
 
 	unsigned int numBuffers() const
 	{
 		return m_numBuffers;
-	}
-
-	AsyncMPIScheduler& scheduler()
-	{
-		return m_scheduler;
 	}
 
 	/**
@@ -162,7 +171,7 @@ public:
 	void wait()
 	{
 		// Wait for the call to finish
-		m_scheduler.wait(m_id);
+		m_scheduler->wait(m_id);
 	}
 
 	void fillBuffer(unsigned int id, const void* buffer, size_t size)
@@ -172,7 +181,7 @@ public:
 
 		// Select the bufferId
 		if (id != m_lastBufferId) {
-			m_scheduler.selectBuffer(m_id, id);
+			m_scheduler->selectBuffer(m_id, id);
 			m_lastBufferId = id;
 		}
 
@@ -180,7 +189,7 @@ public:
 		for (size_t done = 0; done < size; done += 1UL<<30) {
 			size_t send = std::min(1UL<<30, size-done);
 
-			m_scheduler.sendBuffer(m_id, static_cast<const char*>(buffer)+done, send);
+			m_scheduler->sendBuffer(m_id, static_cast<const char*>(buffer)+done, send);
 		}
 	}
 
@@ -189,7 +198,7 @@ public:
 	 */
 	void callInit(const InitParameter &parameters)
 	{
-		m_scheduler.sendInitParam(m_id, parameters);
+		m_scheduler->sendInitParam(m_id, parameters);
 	}
 
 	/**
@@ -197,7 +206,7 @@ public:
 	 */
 	void call(const Parameter &parameters)
 	{
-		m_scheduler.sendParam(m_id, parameters);
+		m_scheduler->sendParam(m_id, parameters);
 	}
 
 	void finalize()
@@ -205,8 +214,8 @@ public:
 		if (!Base<Executor>::finalize())
 			return;
 
-		if (!m_scheduler.isExecutor())
-			m_scheduler.sendFinalize(m_id);
+		if (!m_scheduler->isExecutor())
+			m_scheduler->sendFinalize(m_id);
 	}
 
 private:
@@ -218,11 +227,11 @@ private:
 
 	void* getBufferPos(unsigned int id, int rank, int size)
 	{
-		assert(rank < m_scheduler.groupSize()-1);
+		assert(rank < m_scheduler->groupSize()-1);
 		assert(m_bufferOffsets[id][rank]+m_bufferPos[id][rank]+size
 				<= Base<Executor>::bufferSize(id));
 
-		void* buf = AsyncThreadBase<Executor, Parameter>::_buffer(id)+
+		void* buf = ThreadBase<Executor, Parameter>::_buffer(id)+
 				m_bufferOffsets[id][rank]+m_bufferPos[id][rank];
 		m_bufferPos[id][rank] += size;
 		return buf;
@@ -231,24 +240,26 @@ private:
 	void _exec(const void* paramBuffer)
 	{
 		const Parameter* param = reinterpret_cast<const Parameter*>(paramBuffer);
-		AsyncThreadBase<Executor, Parameter>::call(*param);
+		ThreadBase<Executor, Parameter>::call(*param);
 
 		// Reset the buffer positions
 		for (unsigned int i = 0; i < Base<Executor>::numBuffers(); i++)
-			memset(m_bufferPos[i], 0, (m_scheduler.groupSize()-1) * sizeof(size_t));
+			memset(m_bufferPos[i], 0, (m_scheduler->groupSize()-1) * sizeof(size_t));
 	}
 
-	void waitOnExecutor()
+	void _wait()
 	{
-		AsyncThreadBase<Executor, Parameter>::wait();
+		ThreadBase<Executor, Parameter>::wait();
 	}
 
-	void finalizeOnExecutor()
+	void _finalize()
 	{
-		AsyncThreadBase<Executor, Parameter>::finalize();
+		ThreadBase<Executor, Parameter>::finalize();
 	}
 };
 
 }
 
-#endif // ASYNC_ASYNCMPI_H
+}
+
+#endif // ASYNC_AS_MPI_H

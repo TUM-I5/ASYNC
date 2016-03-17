@@ -34,17 +34,52 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef ASYNC_ASYNC_H
-#define ASYNC_ASYNC_H
+#include <mpi.h>
 
-#ifdef USE_MPI
-#include "AsyncMPI.h"
-#endif // USE_MPI
+#include <cxxtest/TestSuite.h>
 
-#ifdef USE_PTHREAD
-#include "AsyncThread.h"
-#endif // USE_PTHREAD
+#include "async/as/MPIScheduler.h"
 
-#include "AsyncSync.h"
+class TestMPIScheduler : public CxxTest::TestSuite
+{
+	int m_rank;
 
-#endif // ASYNC_ASYNC_H
+public:
+	void setUp()
+	{
+		MPI_Comm_rank(MPI_COMM_WORLD, &m_rank);
+	}
+
+	void testIsExecutor()
+	{
+		async::as::MPIScheduler scheduler;
+		scheduler.setCommunicator(MPI_COMM_WORLD, 2);
+
+		switch (m_rank) {
+		case 2:
+		case 4:
+			TS_ASSERT(scheduler.isExecutor());
+			break;
+		default:
+			TS_ASSERT(!scheduler.isExecutor());
+		}
+	}
+
+	void testCommWorld()
+	{
+		async::as::MPIScheduler scheduler;
+		scheduler.setCommunicator(MPI_COMM_WORLD, 2);
+
+		int size;
+		MPI_Comm_size(scheduler.commWorld(), &size);
+
+		switch (m_rank) {
+		case 2:
+		case 4:
+			TS_ASSERT_EQUALS(size, 2);
+			break;
+		default:
+			TS_ASSERT_EQUALS(size, 3);
+		}
+	}
+};

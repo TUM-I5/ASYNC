@@ -40,12 +40,17 @@ set( CMAKE_MODULE_PATH
 find_package( CxxTest REQUIRED )
 include_directories( ${CXXTEST_INCLUDES} )
 
+# Timout for tests
+set( test_timeout 1800 )
+
 # Add test functions
 function( add_cxx_test target source )
     cxx_test( ${target} ${source} )
     target_link_libraries( ${target} ${CMAKE_THREAD_LIBS_INIT} )
+    set_tests_properties( ${target} PROPERTIES TIMEOUT ${test_timeout} ) # Detect deadlocks
 endfunction( add_cxx_test )
 
+set( cxx_template ${CMAKE_CURRENT_SOURCE_DIR}/mpirunner.tpl )
 function( add_mpi_cxx_test target source ranks )
     get_filename_component(CPP_FILE_NAME ${source} NAME)
     string(REGEX REPLACE "h$|hpp$" "cpp" CPP_FILE_NAME ${CPP_FILE_NAME})
@@ -53,20 +58,35 @@ function( add_mpi_cxx_test target source ranks )
     add_custom_command(
         OUTPUT "${CPP_FULL_NAME}"
         COMMAND ${CXXTESTGEN} --runner=ErrorPrinter --output "${CPP_FULL_NAME}"
-         --template ${CMAKE_CURRENT_SOURCE_DIR}/mpirunner.tpl "${source}"
+         --template "${cxx_template}" "${source}"
         DEPENDS "${source}"
     )
     add_executable(${target} ${CPP_FULL_NAME})
     set_target_properties(${target} PROPERTIES COMPILE_FLAGS "-Wno-effc++")
     target_link_libraries( ${target} ${CMAKE_THREAD_LIBS_INIT} )
-    add_test( NAME ${target} COMMAND ${MPIEXEC} ${MPIEXEC_PREFLAGS}
+    add_test( NAME ${target} COMMAND ${MPIEXEC} ${MPIEXEC_PREFLAGS} "--mca" "mpi_abort_print_stack" "1"
         ${MPIEXEC_NUMPROC_FLAG} ${ranks} ${CMAKE_CURRENT_BINARY_DIR}/${target} )
+    set_tests_properties( ${target} PROPERTIES TIMEOUT ${test_timeout} ) # Detect deadlocks
 endfunction( add_mpi_cxx_test )
 
+function( add_serial_cxx_test target source )
+    # Makes sure that MPI is initialized even when only one rank is required
+    if( USE_MPI )
+        add_mpi_cxx_test( ${target} ${source} 1 )
+    else( USE_MPI )
+        add_cxx_test( ${target} ${source} )
+    endif( USE_MPI )
+endfunction( add_serial_cxx_test )
+
 # Add tests
-add_cxx_test( TestAsyncSync ${CMAKE_CURRENT_SOURCE_DIR}/AsyncSync.t.h )
-add_cxx_test( TestAsyncThread ${CMAKE_CURRENT_SOURCE_DIR}/AsyncThread.t.h )
+add_serial_cxx_test( TestModuleSync ${CMAKE_CURRENT_SOURCE_DIR}/Module.t.h )
+set_target_properties( TestModuleSync PROPERTIES COMPILE_DEFINITIONS "USE_ASYNC_SYNC" )
+add_serial_cxx_test( TestModuleThread ${CMAKE_CURRENT_SOURCE_DIR}/Module.t.h )
+set_target_properties( TestModuleThread PROPERTIES COMPILE_DEFINITIONS "USE_ASYNC_THREAD" )
 if( USE_MPI )
-    add_mpi_cxx_test( TestAsyncMPIScheduler ${CMAKE_CURRENT_SOURCE_DIR}/AsyncMPIScheduler.t.h 5 )
-    add_mpi_cxx_test( TestAsyncMPI ${CMAKE_CURRENT_SOURCE_DIR}/AsyncMPI.t.h 5 )
+    add_mpi_cxx_test( TestModuleMPI ${CMAKE_CURRENT_SOURCE_DIR}/Module.t.h 3 )
+    set_target_properties( TestModuleMPI PROPERTIES COMPILE_DEFINITIONS "USE_ASYNC_MPI" )
 endif( USE_MPI )
+
+# Add subdirectories
+add_subdirectory( as )

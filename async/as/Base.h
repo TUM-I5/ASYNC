@@ -34,73 +34,102 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef ASYNC_ASYNCTHREAD_H
-#define ASYNC_ASYNCTHREAD_H
+#ifndef ASYNC_AS_BASE_H
+#define ASYNC_AS_BASE_H
 
-#include <cassert>
-#include <cstring>
-
-#include "async/AsyncThreadBase.h"
+#include <vector>
 
 namespace async
 {
 
+namespace as
+{
+
 /**
- * Asynchronous call via pthreads
+ * Base class for (a)synchronous communication
  */
-template<class Executor, typename Parameter>
-class AsyncThread : public AsyncThreadBase<Executor, Parameter>
+template<class Executor>
+class Base
 {
 private:
-	/** The current buffer position */
-	std::vector<size_t> m_bufferPos;
+	/** The executor for the asynchronous call */
+	Executor* m_executor;
+
+	/** The buffers */
+	std::vector<char*> m_buffer;
+
+	/** The size of the buffer */
+	std::vector<size_t> m_bufferSize;
+
+	/** Already cleanup everything? */
+	bool m_finalized;
+
+protected:
+	Base()
+		: m_executor(0L),
+		  m_finalized(false)
+	{ }
+
+	~Base()
+	{
+		for (unsigned int i = 0; i < m_buffer.size(); i++)
+			delete [] m_buffer[i];
+	}
+
+	Executor& executor() {
+		return *m_executor;
+	}
+
+	char* _buffer(unsigned int id)
+	{
+		return m_buffer[id];
+	}
 
 public:
-	AsyncThread()
-	{
-	}
-	
-	~AsyncThread()
-	{
-	}
-
 	void addBuffer(size_t bufferSize)
 	{
-		AsyncThreadBase<Executor, Parameter>::addBuffer(bufferSize);
-		m_bufferPos.push_back(0);
+		if (bufferSize)
+			m_buffer.push_back(new char[bufferSize]);
+		else
+			m_buffer.push_back(0L);
+		m_bufferSize.push_back(bufferSize);
+	}
+
+	void setExecutor(Executor &executor)
+	{
+		m_executor = &executor;
+	}
+
+	unsigned int numBuffers() const
+	{
+		return m_buffer.size();
+	}
+
+	const void* buffer(unsigned int id) const
+	{
+		return m_buffer[id];
+	}
+
+	size_t bufferSize(unsigned int id) const
+	{
+		return m_bufferSize[id];
 	}
 
 	/**
-	 * Will always return <code>false</code> for threads. Only
-	 * for compatibility with the MPI mode.
+	 * Finalize (cleanup) the async call
+	 *
+	 * @return False if the class was already finalized
 	 */
-	bool isExecutor() const
+	bool finalize()
 	{
-		return false;
-	}
-
-	/**
-	 * @param size The size of data array in bytes
-	 */
-	void fillBuffer(unsigned int id, const void* buffer, size_t size)
-	{
-		assert(id < Base<Executor>::numBuffers());
-		assert(m_bufferPos[id]+size <= Base<Executor>::bufferSize(id));
-
-		memcpy(AsyncThreadBase<Executor, Parameter>::_buffer(id)+m_bufferPos[id], buffer, size);
-		m_bufferPos[id] += size;
-	}
-	
-	void call(const Parameter &parameters)
-	{
-		AsyncThreadBase<Executor, Parameter>::call(parameters);
-
-		// Reset the buffer positions
-		for (unsigned int i = 0; i < Base<Executor>::numBuffers(); i++)
-			m_bufferPos[i] = 0;
+		bool finalized = m_finalized;
+		m_finalized = true;
+		return !finalized;
 	}
 };
 
 }
 
-#endif // ASYNC_ASYNCTHREAD_H
+}
+
+#endif // ASYNC_AS_BASE_H

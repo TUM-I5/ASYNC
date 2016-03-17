@@ -34,55 +34,75 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <cxxtest/TestSuite.h>
+#ifndef ASYNC_MODULE_H
+#define ASYNC_MODULE_H
 
-#include "async/AsyncSync.h"
-#include "Executor.h"
+#ifdef USE_ASYNC_MPI
+#include "async/as/MPI.h"
+#else // USE_ASYNC_MPI
+#ifdef USE_ASYNC_THREAD
+#include "async/as/Thread.h"
+#else // USE_ASYNC_THREAD
+#include "async/as/Sync.h"
+#endif // USE_ASYNC_THREAD
+#endif // USE_ASYNC_MPI
 
-class TestAsyncSync : public CxxTest::TestSuite
+#include "ModuleBase.h"
+
+namespace async
 {
-private:
-	int m_value;
 
+template<class Executor, typename InitParam, typename Param>
+class Module :
+	public ModuleBase,
+#ifdef USE_ASYNC_MPI
+	public as::MPI<Executor, InitParam, Param>
+#else // USE_ASYNC_MPI
+#ifdef USE_ASYNC_THREAD
+	public as::Thread<Executor, Param>
+#else // USE_ASYNC_THREAD
+	public as::Sync<Executor, Param>
+#endif // USE_ASYNC_THREAD
+#endif // USE_ASYNC_MPI
+{
 public:
-	void setValue(int value)
+#ifdef USE_ASYNC_MPI
+#endif // USE_ASYNC_MPI
+
+#ifdef USE_ASYNC_MPI
+	void setScheduler(as::MPIScheduler &scheduler)
 	{
-		m_value = value;
+		this->scheduler(scheduler);
+	}
+#else // USE_ASYNC_MPI
+	/**
+	 * Small function that makes sure that we can call <code>callInit</code>
+	 * from all types of async modules.
+	 */
+	void callInit(const InitParam &parameters)
+	{
+		execInit(parameters);
 	}
 
-	void testInit()
+	/**
+	 * Call finalize the executor as well
+	 */
+	void finalize()
 	{
-		Executor<TestAsyncSync> executor(this);
+#ifdef USE_ASYNC_THREAD
+		as::Thread<Executor, Param>::finalize();
+#else // USE_ASYNC_THREAD
+		as::Sync<Executor, Param>::finalize();
+#endif // USE_ASYNC_THREAD
 
-		async::AsyncSync<Executor<TestAsyncSync>, Parameter> async;
-		async.setExecutor(executor);
-
-		async.wait();
+		tearDown();
 	}
+#endif // USE_ASYNC_MPI
 
-	void testCall()
-	{
-		Executor<TestAsyncSync> executor(this);
-
-		async::AsyncSync<Executor<TestAsyncSync>, Parameter> async;
-		async.setExecutor(executor);
-
-		TS_ASSERT_EQUALS(async.numBuffers(), 0);
-
-		m_value = 0;
-
-		async.wait();
-		Parameter parameter;
-		parameter.value = 42;
-		async.call(parameter);
-
-		async.wait(); // Make sure the call is finished
-		TS_ASSERT_EQUALS(m_value, 42);
-
-		parameter.value = 415;
-		async.call(parameter);
-
-		async.wait();
-		TS_ASSERT_EQUALS(m_value, 415);
-	}
+protected:
+	virtual void execInit(const InitParam &parameters) = 0;
 };
+
+}
+
+#endif // ASYNC_MODULE_H

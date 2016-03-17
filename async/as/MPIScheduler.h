@@ -34,8 +34,8 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef ASYNC_ASYNCMPISCHEDULER_H
-#define ASYNC_ASYNCMPISCHEDULER_H
+#ifndef ASYNC_AS_MPISCHEDULER_H
+#define ASYNC_AS_MPISCHEDULER_H
 
 #include <mpi.h>
 
@@ -48,13 +48,16 @@
 namespace async
 {
 
+namespace as
+{
+
 template<class Executor, typename InitParameter, typename Parameter>
-class AsyncMPI;
-class AsyncMPIScheduler;
+class MPI;
+class MPIScheduler;
 
 class Scheduled
 {
-	friend class AsyncMPIScheduler;
+	friend class MPIScheduler;
 protected:
 	virtual ~Scheduled()
 	{ }
@@ -69,9 +72,9 @@ private:
 	/**
 	 * Wait on the executor for the call to finish
 	 */
-	virtual void waitOnExecutor() = 0;
+	virtual void _wait() = 0;
 
-	virtual void finalizeOnExecutor() = 0;
+	virtual void _finalize() = 0;
 };
 
 /**
@@ -79,10 +82,10 @@ private:
  *
  * @warning Only one instance of this class should be created
  */
-class AsyncMPIScheduler
+class MPIScheduler
 {
 	template<class Executor, typename InitParameter, typename Parameter>
-	friend class AsyncMPI;
+	friend class MPI;
 private:
 	/** The group local communicator */
 	MPI_Comm m_groupComm;
@@ -109,7 +112,7 @@ private:
 	bool m_finalized;
 
 public:
-	AsyncMPIScheduler()
+	MPIScheduler()
 		: m_groupComm(MPI_COMM_NULL),
 		  m_groupRank(0), m_groupSize(0),
 		  m_isExecutor(false),
@@ -119,7 +122,7 @@ public:
 	{
 	}
 
-	~AsyncMPIScheduler()
+	~MPIScheduler()
 	{
 		finalize();
 	}
@@ -130,22 +133,22 @@ public:
 	 * Has to be called before {@link init()}
 	 *
 	 * @param comm The MPI communicator that should be used
-	 * @param numExecTask Number of executor tasks
+	 * @param groupSize Number of ranks per group (excluding the executor)
 	 */
-	void setCommunicator(MPI_Comm comm, unsigned int numExecTasks)
+	void setCommunicator(MPI_Comm comm, unsigned int groupSize)
 	{
 		int rank;
 		MPI_Comm_rank(comm, &rank);
 
 		// Create group communicator
-		MPI_Comm_split(comm, rank / numExecTasks, 0, &m_groupComm);
+		MPI_Comm_split(comm, rank / (groupSize+1), 0, &m_groupComm);
 
 		// Get group rank/size
 		MPI_Comm_rank(m_groupComm, &m_groupRank);
 		MPI_Comm_size(m_groupComm, &m_groupSize);
 
 		// Is an executor?
-		m_isExecutor = rank % static_cast<int>(numExecTasks) == m_groupSize-1;
+		m_isExecutor = m_groupRank == m_groupSize-1;
 
 		// Create the new comm world communicator
 		MPI_Comm_split(comm, (m_isExecutor ? 1 : 0), 0, &m_commWorld);
@@ -252,12 +255,12 @@ public:
 				m_asyncCalls[id]->_exec(paramBuffer);
 				break;
 			case WAIT_TAG:
-				m_asyncCalls[id]->waitOnExecutor();
+				m_asyncCalls[id]->_wait();
 				MPI_Barrier(m_groupComm);
 				break;
 			case FINALIZE_TAG:
 				// Forget the async call
-				m_asyncCalls[id]->finalizeOnExecutor();
+				m_asyncCalls[id]->_finalize();
 				m_asyncCalls[id] = 0L;
 				finalized++;
 				break;
@@ -372,4 +375,6 @@ private:
 
 }
 
-#endif // ASYNC_ASYNCMPISCHEDULER_H
+}
+
+#endif // ASYNC_AS_MPISCHEDULER_H

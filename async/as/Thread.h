@@ -34,43 +34,48 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef ASYNC_SYNC_H
-#define ASYNC_SYNC_H
+#ifndef ASYNC_AS_THREAD_H
+#define ASYNC_AS_THREAD_H
 
-#include "async/Base.h"
+#include <cassert>
+#include <cstring>
+
+#include "ThreadBase.h"
 
 namespace async
+{
+
+namespace as
 {
 
 /**
  * Asynchronous call via pthreads
  */
 template<class Executor, typename Parameter>
-class AsyncSync : public Base<Executor>
+class Thread : public ThreadBase<Executor, Parameter>
 {
 private:
 	/** The current buffer position */
 	std::vector<size_t> m_bufferPos;
 
 public:
-	AsyncSync()
+	Thread()
 	{
 	}
-
-	~AsyncSync()
+	
+	~Thread()
 	{
-		Base<Executor>::finalize();
 	}
 
 	void addBuffer(size_t bufferSize)
 	{
-		Base<Executor>::addBuffer(bufferSize);
+		ThreadBase<Executor, Parameter>::addBuffer(bufferSize);
 		m_bufferPos.push_back(0);
 	}
 
 	/**
-	 * Will always return <code>false</code>. Only
-	 * relevant in MPI mode.
+	 * Will always return <code>false</code> for threads. Only
+	 * for compatibility with the MPI mode.
 	 */
 	bool isExecutor() const
 	{
@@ -78,24 +83,20 @@ public:
 	}
 
 	/**
-	 * Does nothing (call has already finished because it is synchronous)
+	 * @param size The size of data array in bytes
 	 */
-	void wait()
-	{
-	}
-
 	void fillBuffer(unsigned int id, const void* buffer, size_t size)
 	{
 		assert(id < Base<Executor>::numBuffers());
 		assert(m_bufferPos[id]+size <= Base<Executor>::bufferSize(id));
 
-		memcpy(Base<Executor>::_buffer(id)+m_bufferPos[id], buffer, size);
+		memcpy(ThreadBase<Executor, Parameter>::_buffer(id)+m_bufferPos[id], buffer, size);
 		m_bufferPos[id] += size;
 	}
-
+	
 	void call(const Parameter &parameters)
 	{
-		Base<Executor>::executor().exec(parameters);
+		ThreadBase<Executor, Parameter>::call(parameters);
 
 		// Reset the buffer positions
 		for (unsigned int i = 0; i < Base<Executor>::numBuffers(); i++)
@@ -105,4 +106,6 @@ public:
 
 }
 
-#endif // ASYNC_SYNC_H
+}
+
+#endif // ASYNC_AS_THREAD_H

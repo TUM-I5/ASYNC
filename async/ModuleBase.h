@@ -34,52 +34,68 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <mpi.h>
+#ifndef ASYNC_MODULEBASE_H
+#define ASYNC_MODULEBASE_H
 
-#include <cxxtest/TestSuite.h>
+#include <vector>
 
-#include "async/AsyncMPIScheduler.h"
+#ifdef USE_ASYNC_MPI
+#include "async/as/MPIScheduler.h"
+#endif // USE_ASYNC_MPI
 
-class TestAsyncMPIScheduler : public CxxTest::TestSuite
+namespace async
 {
-	int m_rank;
+
+class Dispatcher;
+
+/**
+ * Base class for asynchronous modules. Works closely together
+ * with the {@link Dispatcher}.
+ */
+class ModuleBase
+{
+	friend class Dispatcher;
+protected:
+	ModuleBase()
+	{
+		modules().push_back(this);
+	}
 
 public:
-	void setUp()
+	virtual ~ModuleBase()
+	{ }
+
+#ifdef USE_ASYNC_MPI
+	/**
+	 * Set the scheduler for this module.
+	 */
+	virtual void setScheduler(as::MPIScheduler &scheduler) = 0;
+#endif // USE_ASYNC_MPI
+
+	/**
+	 * Called by {@link Dispatcher} to set up the executor
+	 *
+	 * Should at least call {@link setExecutor}(*this).
+	 */
+	virtual void setUp() = 0;
+
+	/**
+	 * Called by {@link Dispatcher} to finalize the executor
+	 */
+	virtual void tearDown() = 0;
+
+private:
+	/**
+	 * List of all I/O modules (required by the dispatcher)
+	 */
+	static std::vector<ModuleBase*>& modules()
 	{
-		MPI_Comm_rank(MPI_COMM_WORLD, &m_rank);
-	}
-
-	void testIsExecutor()
-	{
-		async::AsyncMPIScheduler scheduler;
-		scheduler.setCommunicator(MPI_COMM_WORLD, 3);
-
-		switch (m_rank) {
-		case 2:
-		case 4:
-			TS_ASSERT(scheduler.isExecutor());
-			break;
-		default:
-			TS_ASSERT(!scheduler.isExecutor());
-		}
-	}
-
-	void testCommWorld()
-	{
-		async::AsyncMPIScheduler scheduler;
-		scheduler.setCommunicator(MPI_COMM_WORLD, 3);
-
-		int size;
-		MPI_Comm_size(scheduler.commWorld(), &size);
-
-		switch (m_rank) {
-		case 2:
-		case 4:
-			TS_ASSERT_EQUALS(size, 2);
-			break;
-		default:
-			TS_ASSERT_EQUALS(size, 3);
-		}
+		// Use a function here to avoid an additional .cpp file
+		static std::vector<ModuleBase*> moduleList;
+		return moduleList;
 	}
 };
+
+}
+
+#endif // ASYNC_MODULEBASE_H

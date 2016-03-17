@@ -34,8 +34,8 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef ASYNC_ASYNCTHREADBASE_H
-#define ASYNC_ASYNCTHREADBASE_H
+#ifndef ASYNC_AS_THREADBASE_H
+#define ASYNC_AS_THREADBASE_H
 
 #include <cstring>
 #include <pthread.h>
@@ -43,19 +43,22 @@
 
 #include "utils/logger.h"
 
-#include "async/Base.h"
+#include "Base.h"
 
 namespace async
+{
+
+namespace as
 {
 
 /**
  * Base class for asynchronous calls via pthreads.
  *
- * This class is used by {@link AsyncThread} and
- * {@link AsyncMPI}.
+ * This class is used by {@link Thread} and
+ * {@link MPI}.
  */
 template<class Executor, typename Parameter>
-class AsyncThreadBase : public Base<Executor>
+class ThreadBase : public Base<Executor>
 {
 private:
 	/** Async thread */
@@ -74,7 +77,7 @@ private:
 	bool m_shutdown;
 
 protected:
-	AsyncThreadBase()
+	ThreadBase()
 		: m_asyncThread(pthread_self()),
 		  m_shutdown(false)
 	{
@@ -83,9 +86,12 @@ protected:
 	}
 
 public:
-	~AsyncThreadBase()
+	~ThreadBase()
 	{
 		finalize();
+
+		pthread_mutex_destroy(&m_readerLock);
+		pthread_spin_destroy(&m_writerLock);
 	}
 
 	void setExecutor(Executor &executor)
@@ -136,7 +142,7 @@ public:
 private:
 	static void* asyncThread(void* c)
 	{
-		AsyncThreadBase* async = reinterpret_cast<AsyncThreadBase*>(c);
+		ThreadBase* async = reinterpret_cast<ThreadBase*>(c);
 
 		// Touch the memory on this thread
 		for (unsigned int i = 0; i < async->numBuffers(); i++)
@@ -162,4 +168,6 @@ private:
 
 }
 
-#endif // ASYNC_ASYNCTHREADBASE_H
+}
+
+#endif // ASYNC_AS_THREADBASE_H

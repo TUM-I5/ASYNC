@@ -40,18 +40,18 @@
 
 #include <cxxtest/TestSuite.h>
 
-#include "async/AsyncMPI.h"
+#include "async/as/MPI.h"
 #include "Executor.h"
 
-class TestAsyncMPI : public CxxTest::TestSuite
+class TestMPI : public CxxTest::TestSuite
 {
-	async::AsyncMPIScheduler* m_scheduler;
+	async::as::MPIScheduler* m_scheduler;
 
 	int m_rank;
 
 	std::vector<int> m_values;
 
-	async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter>* m_async;
+	async::as::MPI<Executor<TestMPI>, Parameter, Parameter>* m_async;
 	std::vector<int> m_buffers;
 
 public:
@@ -63,8 +63,8 @@ public:
 		m_async = 0L;
 		m_buffers.clear();
 
-		m_scheduler = new async::AsyncMPIScheduler();
-		m_scheduler->setCommunicator(MPI_COMM_WORLD, 3);
+		m_scheduler = new async::as::MPIScheduler();
+		m_scheduler->setCommunicator(MPI_COMM_WORLD, 2);
 	}
 
 	void tearDown()
@@ -90,9 +90,10 @@ public:
 
 	void testInit()
 	{
-		Executor<TestAsyncMPI> executor(this);
+		Executor<TestMPI> executor(this);
 
-		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async(*m_scheduler);
+		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
+		async.scheduler(*m_scheduler);
 
 		async.setExecutor(executor);
 
@@ -104,9 +105,10 @@ public:
 
 	void testInitCall()
 	{
-		Executor<TestAsyncMPI> executor(this);
+		Executor<TestMPI> executor(this);
 
-		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async(*m_scheduler);
+		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
+		async.scheduler(*m_scheduler);
 
 		async.setExecutor(executor);
 
@@ -126,9 +128,10 @@ public:
 
 	void testCall()
 	{
-		Executor<TestAsyncMPI> executor(this);
+		Executor<TestMPI> executor(this);
 
-		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async(*m_scheduler);
+		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
+		async.scheduler(*m_scheduler);
 
 		async.setExecutor(executor);
 
@@ -162,9 +165,10 @@ public:
 
 	void testBuffer()
 	{
-		Executor<TestAsyncMPI> executor(this);
+		Executor<TestMPI> executor(this);
 
-		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async(*m_scheduler);
+		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
+		async.scheduler(*m_scheduler);
 
 		async.addBuffer(m_scheduler->isExecutor() ? 0 : sizeof(int));
 
@@ -194,9 +198,10 @@ public:
 
 	void testBuffer2()
 	{
-		Executor<TestAsyncMPI> executor(this);
+		Executor<TestMPI> executor(this);
 
-		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async(*m_scheduler);
+		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
+		async.scheduler(*m_scheduler);
 
 		async.addBuffer(m_scheduler->isExecutor() ? 0 : sizeof(int));
 		async.addBuffer(m_scheduler->isExecutor() ? 0 : sizeof(int));
@@ -233,12 +238,14 @@ public:
 
 	void testMultiple()
 	{
-		Executor<TestAsyncMPI> executor(this);
+		Executor<TestMPI> executor(this);
 
-		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async1(*m_scheduler);
+		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async1;
+		async1.scheduler(*m_scheduler);
 		async1.setExecutor(executor);
 
-		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async2(*m_scheduler);
+		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async2;
+		async2.scheduler(*m_scheduler);
 		async2.setExecutor(executor);
 
 		if (m_scheduler->isExecutor()) {
@@ -264,9 +271,10 @@ public:
 
 	void testLargeBuffer()
 	{
-		Executor<TestAsyncMPI> executor(this);
+		Executor<TestMPI> executor(this);
 
-		async::AsyncMPI<Executor<TestAsyncMPI>, Parameter, Parameter> async(*m_scheduler);
+		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
+		async.scheduler(*m_scheduler);
 
 		size_t bufferSize = (1UL<<30) + (1UL<<29); // 1.5 GB
 		char* buffer = 0L;
