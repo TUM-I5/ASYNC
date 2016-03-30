@@ -82,4 +82,28 @@ public:
 			TS_ASSERT_EQUALS(size, 3);
 		}
 	}
+
+	void testGroupComm()
+	{
+		async::as::MPIScheduler scheduler;
+		scheduler.setCommunicator(MPI_COMM_WORLD, 2);
+
+		int size;
+
+		switch (m_rank) {
+		case 2:
+		case 4:
+			TS_ASSERT_EQUALS(scheduler.groupComm(), MPI_COMM_NULL);
+			break;
+		case 0:
+		case 1:
+			MPI_Comm_size(scheduler.groupComm(), &size);
+			TS_ASSERT_EQUALS(size, 2);
+			break;
+		case 3:
+			MPI_Comm_size(scheduler.groupComm(), &size);
+			TS_ASSERT_EQUALS(size, 1);
+		}
+
+	}
 };

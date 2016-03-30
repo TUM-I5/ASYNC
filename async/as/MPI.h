@@ -124,7 +124,7 @@ public:
 			m_bufferOffsets.push_back(bufferOffsets);
 		}
 		MPI_Gather(&bs, 1, MPI_UNSIGNED_LONG, bufferOffsets,
-				1, MPI_UNSIGNED_LONG, executorRank, m_scheduler->groupComm());
+				1, MPI_UNSIGNED_LONG, executorRank, m_scheduler->privateGroupComm());
 
 		if (m_scheduler->isExecutor()) {
 			// Compute offsets from the size

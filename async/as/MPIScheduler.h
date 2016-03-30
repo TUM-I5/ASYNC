@@ -87,7 +87,10 @@ class MPIScheduler
 	template<class Executor, typename InitParameter, typename Parameter>
 	friend class MPI;
 private:
-	/** The group local communicator */
+	/** The group local communicator (incl. the executor) */
+	MPI_Comm m_privateGroupComm;
+
+	/** The public group local communicator (excl. the executor) */
 	MPI_Comm m_groupComm;
 
 	/** The rank of in the executor group */
@@ -113,7 +116,8 @@ private:
 
 public:
 	MPIScheduler()
-		: m_groupComm(MPI_COMM_NULL),
+		: m_privateGroupComm(MPI_COMM_NULL),
+		  m_groupComm(MPI_COMM_NULL),
 		  m_groupRank(0), m_groupSize(0),
 		  m_isExecutor(false),
 		  m_commWorld(MPI_COMM_NULL),
@@ -141,17 +145,20 @@ public:
 		MPI_Comm_rank(comm, &rank);
 
 		// Create group communicator
-		MPI_Comm_split(comm, rank / (groupSize+1), 0, &m_groupComm);
+		MPI_Comm_split(comm, rank / (groupSize+1), 0, &m_privateGroupComm);
 
 		// Get group rank/size
-		MPI_Comm_rank(m_groupComm, &m_groupRank);
-		MPI_Comm_size(m_groupComm, &m_groupSize);
+		MPI_Comm_rank(m_privateGroupComm, &m_groupRank);
+		MPI_Comm_size(m_privateGroupComm, &m_groupSize);
 
 		// Is an executor?
 		m_isExecutor = m_groupRank == m_groupSize-1;
 
 		// Create the new comm world communicator
 		MPI_Comm_split(comm, (m_isExecutor ? 1 : 0), 0, &m_commWorld);
+		
+		// Create the public group communicator (excl. the executor)
+		MPI_Comm_split(m_privateGroupComm, (m_isExecutor ? MPI_UNDEFINED : 0), 0, &m_groupComm);
 	}
 
 	int groupRank() const
@@ -167,6 +174,11 @@ public:
 	MPI_Comm commWorld() const
 	{
 		return m_commWorld;
+	}
+
+	MPI_Comm groupComm() const
+	{
+		return m_groupComm;
 	}
 
 	/**
@@ -196,7 +208,7 @@ public:
 			int id, tag;
 
 			do {
-				MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, m_groupComm, &status);
+				MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, m_privateGroupComm, &status);
 
 				id = status.MPI_TAG / NUM_TAGS;
 				tag = status.MPI_TAG % NUM_TAGS;
@@ -212,13 +224,13 @@ public:
 				case PARAM_TAG:
 					MPI_Get_count(&status, MPI_CHAR, &size);
 					MPI_Recv(paramBuffer, size, MPI_CHAR,
-							status.MPI_SOURCE, status.MPI_TAG, m_groupComm, MPI_STATUS_IGNORE);
+							status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm, MPI_STATUS_IGNORE);
 
 					readyTasks[id]++;
 					break;
 				case SELECT_TAG:
 					MPI_Recv(&bufferIds[status.MPI_SOURCE], 1, MPI_UNSIGNED,
-							status.MPI_SOURCE, status.MPI_TAG, m_groupComm,
+							status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm,
 							MPI_STATUS_IGNORE);
 
 					break;
@@ -228,13 +240,13 @@ public:
 
 					// Receive the buffer
 					MPI_Recv(m_asyncCalls[id]->getBufferPos(bufferIds[status.MPI_SOURCE], status.MPI_SOURCE, size),
-							size, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, m_groupComm,
+							size, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm,
 							MPI_STATUS_IGNORE);
 
 					break;
 				case WAIT_TAG:
 				case FINALIZE_TAG:
-					MPI_Recv(0L, 0, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, m_groupComm,
+					MPI_Recv(0L, 0, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm,
 							MPI_STATUS_IGNORE);
 
 					readyTasks[id]++;
@@ -247,16 +259,16 @@ public:
 
 			switch (tag) {
 			case INIT_TAG:
-				MPI_Barrier(m_groupComm);
+				MPI_Barrier(m_privateGroupComm);
 				m_asyncCalls[id]->_execInit(paramBuffer);
 				break;
 			case PARAM_TAG:
-				MPI_Barrier(m_groupComm);
+				MPI_Barrier(m_privateGroupComm);
 				m_asyncCalls[id]->_exec(paramBuffer);
 				break;
 			case WAIT_TAG:
 				m_asyncCalls[id]->_wait();
-				MPI_Barrier(m_groupComm);
+				MPI_Barrier(m_privateGroupComm);
 				break;
 			case FINALIZE_TAG:
 				// Forget the async call
@@ -281,6 +293,8 @@ public:
 		if (m_finalized)
 			return;
 
+		if (m_privateGroupComm != MPI_COMM_NULL)
+			MPI_Comm_free(&m_privateGroupComm);
 		if (m_groupComm != MPI_COMM_NULL)
 			MPI_Comm_free(&m_groupComm);
 
@@ -288,9 +302,9 @@ public:
 	}
 
 private:
-	MPI_Comm groupComm() const
+	MPI_Comm privateGroupComm() const
 	{
-		return m_groupComm;
+		return m_privateGroupComm;
 	}
 
 	int groupSize() const
@@ -315,23 +329,23 @@ private:
 		// For simplification, we send the Parameter struct as a buffer
 		// TODO find a nice way for hybrid systems
 		MPI_Send(const_cast<Parameter*>(&param), sizeof(Parameter),
-				MPI_CHAR, m_groupSize-1, id*NUM_TAGS+INIT_TAG, m_groupComm);
+				MPI_CHAR, m_groupSize-1, id*NUM_TAGS+INIT_TAG, m_privateGroupComm);
 
-		MPI_Barrier(m_groupComm);
+		MPI_Barrier(m_privateGroupComm);
 	}
 
 	void selectBuffer(int id, unsigned int bufferId)
 	{
 		// Use synchronous send to avoid overtaking of message
 		MPI_Ssend(&bufferId, 1, MPI_UNSIGNED,
-				m_groupSize-1, id*NUM_TAGS+SELECT_TAG, m_groupComm);
+				m_groupSize-1, id*NUM_TAGS+SELECT_TAG, m_privateGroupComm);
 	}
 
 	void sendBuffer(int id, const void* buffer, int size)
 	{
 		// Use synchronous send to avoid overtaking of message
 		MPI_Ssend(const_cast<void*>(buffer), size, MPI_CHAR,
-				m_groupSize-1, id*NUM_TAGS+BUFFER_TAG, m_groupComm);
+				m_groupSize-1, id*NUM_TAGS+BUFFER_TAG, m_privateGroupComm);
 	}
 
 	/**
@@ -343,24 +357,24 @@ private:
 		// For simplification, we send the Parameter struct as a buffer
 		// TODO find a nice way for hybrid systems
 		MPI_Send(const_cast<Parameter*>(&param), sizeof(Parameter),
-				MPI_CHAR, m_groupSize-1, id*NUM_TAGS+PARAM_TAG, m_groupComm);
+				MPI_CHAR, m_groupSize-1, id*NUM_TAGS+PARAM_TAG, m_privateGroupComm);
 
-		MPI_Barrier(m_groupComm);
+		MPI_Barrier(m_privateGroupComm);
 	}
 
 	void wait(int id)
 	{
 		MPI_Send(0L, 0, MPI_CHAR, m_groupSize-1,
-				id*NUM_TAGS+WAIT_TAG, m_groupComm);
+				id*NUM_TAGS+WAIT_TAG, m_privateGroupComm);
 
 		// Wait for the return of the async call
-		MPI_Barrier(m_groupComm);
+		MPI_Barrier(m_privateGroupComm);
 	}
 
 	void sendFinalize(int id)
 	{
 		MPI_Send(0L, 0, MPI_CHAR, m_groupSize-1,
-				id*NUM_TAGS+FINALIZE_TAG, m_groupComm);
+				id*NUM_TAGS+FINALIZE_TAG, m_privateGroupComm);
 	}
 
 private:
