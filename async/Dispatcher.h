@@ -152,6 +152,13 @@ public:
 
 		return true;
 	}
+
+	void finalize()
+	{
+#ifdef USE_ASYNC_MPI
+		m_scheduler.finalize();
+#endif // USE_ASYNC_MPI
+	}
 };
 
 }
