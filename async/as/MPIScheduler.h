@@ -195,7 +195,6 @@ public:
 
 		// Selected buffer id for each rank
 		unsigned int* bufferIds = new unsigned int[m_groupSize-1];
-		memset(bufferIds, 0, (m_groupSize-1) * sizeof(unsigned int));
 
 		// Allocate buffer for parameters
 		char* paramBuffer = new char[m_maxParamSize];
@@ -216,8 +215,8 @@ public:
 				if (id > static_cast<int>(m_asyncCalls.size()) || m_asyncCalls[id] == 0L)
 					logError() << "ASYNC: Invalid id" << id << "received";
 
-				//char* buf;
 				int size;
+				void* buf;
 
 				switch (tag) {
 				case INIT_TAG:
@@ -239,8 +238,8 @@ public:
 					MPI_Get_count(&status, MPI_CHAR, &size);
 
 					// Receive the buffer
-					MPI_Recv(m_asyncCalls[id]->getBufferPos(bufferIds[status.MPI_SOURCE], status.MPI_SOURCE, size),
-							size, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm,
+					buf = m_asyncCalls[id]->getBufferPos(bufferIds[status.MPI_SOURCE], status.MPI_SOURCE, size);
+					MPI_Recv(buf, size, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm,
 							MPI_STATUS_IGNORE);
 
 					break;
@@ -384,7 +383,7 @@ private:
 	static const int PARAM_TAG = 3;
 	static const int WAIT_TAG = 4;
 	static const int FINALIZE_TAG = 5;
-	static const int NUM_TAGS = 6;
+	static const int NUM_TAGS = FINALIZE_TAG + 1;
 };
 
 }

@@ -74,15 +74,11 @@ private:
 	/** Current position of the buffer (only on the exuecutor rank) */
 	std::vector<size_t*> m_bufferPos;
 
-	/** The last used buffer id */
-	unsigned int m_lastBufferId;
-
 public:
 	MPI()
 		: m_scheduler(0L),
 		  m_id(0),
-		  m_numBuffers(0),
-		  m_lastBufferId(0)
+		  m_numBuffers(0)
 	{ }
 
 	~MPI()
@@ -179,11 +175,8 @@ public:
 		if (buffer == 0L || size == 0)
 			return;
 
-		// Select the bufferId
-		if (id != m_lastBufferId) {
-			m_scheduler->selectBuffer(m_id, id);
-			m_lastBufferId = id;
-		}
+		// Select the buffer
+		m_scheduler->selectBuffer(m_id, id);
 
 		// We need to send the buffer in 1 GB chunks
 		for (size_t done = 0; done < size; done += 1UL<<30) {
