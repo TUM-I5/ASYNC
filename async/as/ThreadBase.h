@@ -117,8 +117,8 @@ public:
 		unsigned int id = Base<Executor>::addBuffer(bufferSize);
 
 		// Now, initialize the buffer on the executor thread with zeros
-		m_initBuffer = id; // Mark for buffer fill
 		wait();
+		m_initBuffer = id; // Mark for buffer fill
 		pthread_mutex_unlock(&m_readerLock); // Similar to call() but without setting the parameters
 
 		return id;
