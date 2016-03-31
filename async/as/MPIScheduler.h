@@ -63,6 +63,8 @@ protected:
 	{ }
 
 private:
+	virtual void _addBuffer(unsigned long size) = 0;
+
 	virtual void _execInit(const void* parameter) = 0;
 
 	virtual void* getBufferPos(unsigned int id, int rank, int size) = 0;
@@ -206,6 +208,8 @@ public:
 			MPI_Status status;
 			int id, tag;
 
+			unsigned long bufferSize; // required for the add tag
+
 			do {
 				MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, m_privateGroupComm, &status);
 
@@ -219,6 +223,12 @@ public:
 				void* buf;
 
 				switch (tag) {
+				case ADD_TAG:
+					MPI_Recv(&bufferSize, 1, MPI_UNSIGNED_LONG, status.MPI_SOURCE, status.MPI_TAG,
+							m_privateGroupComm, MPI_STATUS_IGNORE);
+
+					readyTasks[id]++;
+					break;
 				case INIT_TAG:
 				case PARAM_TAG:
 					MPI_Get_count(&status, MPI_CHAR, &size);
@@ -257,6 +267,10 @@ public:
 			} while (static_cast<int>(readyTasks[id]) < m_groupSize-1);
 
 			switch (tag) {
+			case ADD_TAG:
+				MPI_Barrier(m_privateGroupComm);
+				m_asyncCalls[id]->_addBuffer(bufferSize);
+				break;
 			case INIT_TAG:
 				MPI_Barrier(m_privateGroupComm);
 				m_asyncCalls[id]->_execInit(paramBuffer);
@@ -267,6 +281,9 @@ public:
 				break;
 			case WAIT_TAG:
 				m_asyncCalls[id]->_wait();
+				// This barrier can probably be called before _wait()
+				// Just leave it here to be 100% sure that everything is done
+				// when the wait returns
 				MPI_Barrier(m_privateGroupComm);
 				break;
 			case FINALIZE_TAG:
@@ -320,6 +337,14 @@ private:
 		m_maxParamSize = std::max(m_maxParamSize, maxSize);
 
 		return id;
+	}
+
+	void addBuffer(int id, unsigned long size)
+	{
+		MPI_Send(&size, 1, MPI_UNSIGNED_LONG,
+				m_groupSize-1, id*NUM_TAGS+ADD_TAG, m_privateGroupComm);
+
+		MPI_Barrier(m_privateGroupComm);
 	}
 
 	template<typename Parameter>
@@ -377,12 +402,13 @@ private:
 	}
 
 private:
-	static const int INIT_TAG = 0;
-	static const int SELECT_TAG = 1;
-	static const int BUFFER_TAG = 2;
-	static const int PARAM_TAG = 3;
-	static const int WAIT_TAG = 4;
-	static const int FINALIZE_TAG = 5;
+	static const int ADD_TAG = 0;
+	static const int INIT_TAG = 1;
+	static const int SELECT_TAG = 2;
+	static const int BUFFER_TAG = 3;
+	static const int PARAM_TAG = 4;
+	static const int WAIT_TAG = 5;
+	static const int FINALIZE_TAG = 6;
 	static const int NUM_TAGS = FINALIZE_TAG + 1;
 };
 

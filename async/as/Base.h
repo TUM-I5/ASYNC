@@ -86,18 +86,24 @@ protected:
 	}
 
 public:
-	void addBuffer(size_t bufferSize)
+	void setExecutor(Executor &executor)
+	{
+		m_executor = &executor;
+	}
+
+	/**
+	 * @param bufferSize
+	 * @return The id of the buffer
+	 */
+	unsigned int addBuffer(size_t bufferSize)
 	{
 		if (bufferSize)
 			m_buffer.push_back(new char[bufferSize]);
 		else
 			m_buffer.push_back(0L);
 		m_bufferSize.push_back(bufferSize);
-	}
 
-	void setExecutor(Executor &executor)
-	{
-		m_executor = &executor;
+		return m_buffer.size()-1;
 	}
 
 	unsigned int numBuffers() const

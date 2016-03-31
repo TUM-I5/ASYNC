@@ -136,7 +136,8 @@ public:
 
 		if (dispatcher.dispatch()) {
 			// Empty initialization
-			setUp(42);
+			setUp();
+			addBuffer(42);
 
 			wait();
 
@@ -164,12 +165,6 @@ public:
 
 	void setUp()
 	{
-		setUp(0);
-	}
-
-	void setUp(unsigned int bufferSize)
-	{
-		addBuffer(bufferSize);
 		setExecutor(*this);
 	}
 

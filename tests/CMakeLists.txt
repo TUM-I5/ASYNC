@@ -41,7 +41,7 @@ find_package( CxxTest REQUIRED )
 include_directories( ${CXXTEST_INCLUDES} )
 
 # Timout for tests
-set( test_timeout 1800 )
+set( test_timeout 20 )
 
 # Add test functions
 function( add_cxx_test target source )
@@ -64,7 +64,7 @@ function( add_mpi_cxx_test target source ranks )
     add_executable(${target} ${CPP_FULL_NAME})
     set_target_properties(${target} PROPERTIES COMPILE_FLAGS "-Wno-effc++")
     target_link_libraries( ${target} ${CMAKE_THREAD_LIBS_INIT} )
-    add_test( NAME ${target} COMMAND ${MPIEXEC} ${MPIEXEC_PREFLAGS} "--mca" "mpi_abort_print_stack" "1"
+    add_test( NAME ${target} COMMAND ${MPIEXEC} ${MPIEXEC_PREFLAGS}
         ${MPIEXEC_NUMPROC_FLAG} ${ranks} ${CMAKE_CURRENT_BINARY_DIR}/${target} )
     set_tests_properties( ${target} PROPERTIES TIMEOUT ${test_timeout} ) # Detect deadlocks
 endfunction( add_mpi_cxx_test )

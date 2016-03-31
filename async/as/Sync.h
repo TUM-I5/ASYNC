@@ -65,10 +65,12 @@ public:
 		Base<Executor>::finalize();
 	}
 
-	void addBuffer(size_t bufferSize)
+	unsigned int addBuffer(size_t bufferSize)
 	{
-		Base<Executor>::addBuffer(bufferSize);
+		unsigned int id = Base<Executor>::addBuffer(bufferSize);
 		m_bufferPos.push_back(0);
+
+		return id;
 	}
 
 	/**

@@ -102,48 +102,6 @@ public:
 	}
 
 	/**
-	 *
-	 * @param bufferSize Should be 0 on the executor
-	 */
-	void addBuffer(size_t bufferSize)
-	{
-		assert(m_scheduler);
-		assert(bufferSize == 0 || !m_scheduler->isExecutor());
-
-		int executorRank = m_scheduler->groupSize()-1;
-
-		// Compute buffer size and offsets
-		unsigned long bs = bufferSize; // Use an MPI compatible datatype
-		unsigned long* bufferOffsets = 0L;
-		if (m_scheduler->isExecutor()) {
-			bufferOffsets = new unsigned long[m_scheduler->groupSize()];
-			m_bufferOffsets.push_back(bufferOffsets);
-		}
-		MPI_Gather(&bs, 1, MPI_UNSIGNED_LONG, bufferOffsets,
-				1, MPI_UNSIGNED_LONG, executorRank, m_scheduler->privateGroupComm());
-
-		if (m_scheduler->isExecutor()) {
-			// Compute offsets from the size
-			bufferSize = 0;
-			for (int i = 0; i < m_scheduler->groupSize()-1; i++) {
-				unsigned long bufSize = bufferOffsets[i];
-				bufferOffsets[i] = bufferSize;
-				bufferSize += bufSize;
-			}
-
-			// Create the buffer
-			ThreadBase<Executor, Parameter>::addBuffer(bufferSize);
-
-			// Initialize the current position
-			m_bufferPos.push_back(new size_t[m_scheduler->groupSize()-1]);
-			memset(m_bufferPos.back(), 0, (m_scheduler->groupSize()-1) * sizeof(size_t));
-		}
-
-		// Increase the counter
-		m_numBuffers++;
-	}
-
-	/**
 	 * @param executor
 	 */
 	void setExecutor(Executor &executor)
@@ -154,6 +112,21 @@ public:
 
 		// Add this to the scheduler
 		m_id = m_scheduler->addScheduled(this, sizeof(InitParameter), sizeof(Parameter));
+	}
+
+	/**
+	 * @param bufferSize Should be 0 on the executor
+	 */
+	unsigned int addBuffer(size_t bufferSize)
+	{
+		assert(m_scheduler);
+		assert(!m_scheduler->isExecutor());
+
+		m_scheduler->addBuffer(m_id, bufferSize);
+
+		_addBuffer(bufferSize);
+
+		return m_numBuffers-1;
 	}
 
 	unsigned int numBuffers() const
@@ -212,6 +185,41 @@ public:
 	}
 
 private:
+	void _addBuffer(unsigned long bufferSize)
+	{
+		int executorRank = m_scheduler->groupSize()-1;
+
+		// Compute buffer size and offsets
+		unsigned long* bufferOffsets = 0L;
+		if (m_scheduler->isExecutor()) {
+			bufferOffsets = new unsigned long[m_scheduler->groupSize()];
+			m_bufferOffsets.push_back(bufferOffsets);
+		}
+		MPI_Gather(&bufferSize, 1, MPI_UNSIGNED_LONG, bufferOffsets,
+				1, MPI_UNSIGNED_LONG, executorRank, m_scheduler->privateGroupComm());
+
+		if (m_scheduler->isExecutor()) {
+			// Compute offsets from the size
+			bufferSize = 0;
+			for (int i = 0; i < m_scheduler->groupSize()-1; i++) {
+				unsigned long bufSize = bufferOffsets[i];
+				bufferOffsets[i] = bufferSize;
+				bufferSize += bufSize;
+			}
+
+			// Create the buffer
+			unsigned int id = ThreadBase<Executor, Parameter>::addBuffer(bufferSize);
+			assert(id == m_numBuffers); NDBG_UNUSED(id);
+
+			// Initialize the current position
+			m_bufferPos.push_back(new size_t[m_scheduler->groupSize()-1]);
+			memset(m_bufferPos.back(), 0, (m_scheduler->groupSize()-1) * sizeof(size_t));
+		}
+
+		// Increase the counter and return the id
+		m_numBuffers++;
+	}
+
 	void _execInit(const void* paramBuffer)
 	{
 		const InitParameter* param = reinterpret_cast<const InitParameter*>(paramBuffer);

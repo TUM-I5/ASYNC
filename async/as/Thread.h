@@ -67,10 +67,12 @@ public:
 	{
 	}
 
-	void addBuffer(size_t bufferSize)
+	unsigned int addBuffer(size_t bufferSize)
 	{
-		ThreadBase<Executor, Parameter>::addBuffer(bufferSize);
+		unsigned int id = ThreadBase<Executor, Parameter>::addBuffer(bufferSize);
 		m_bufferPos.push_back(0);
+
+		return id;
 	}
 
 	/**

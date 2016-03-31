@@ -85,4 +85,16 @@ public:
 		async.wait();
 		TS_ASSERT_EQUALS(m_value, 415);
 	}
+
+	void testBuffer()
+	{
+		Executor<TestSync> executor(this);
+
+		async::as::Sync<Executor<TestSync>, Parameter> async;
+		async.setExecutor(executor);
+
+		TS_ASSERT_EQUALS(async.addBuffer(sizeof(int)), 0);
+
+		async.wait();
+	}
 };

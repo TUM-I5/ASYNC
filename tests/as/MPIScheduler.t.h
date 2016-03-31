@@ -88,6 +88,8 @@ public:
 		async::as::MPIScheduler scheduler;
 		scheduler.setCommunicator(MPI_COMM_WORLD, 2);
 
+		TS_ASSERT_EQUALS(scheduler.groupRank(), m_rank % 3);
+
 		int size;
 
 		switch (m_rank) {

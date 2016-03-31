@@ -73,12 +73,16 @@ private:
 	/** Parameters for the next call */
 	Parameter m_nextParams;
 
+	/** The buffer we need to initialize */
+	int m_initBuffer;
+
 	/** Shutdown the thread */
 	bool m_shutdown;
 
 protected:
 	ThreadBase()
 		: m_asyncThread(pthread_self()),
+		  m_initBuffer(-1),
 		  m_shutdown(false)
 	{
 		pthread_spin_init(&m_writerLock, PTHREAD_PROCESS_PRIVATE);
@@ -106,6 +110,18 @@ public:
 
 		if (pthread_create(&m_asyncThread, 0L, asyncThread, this) != 0)
 			logError() << "ASYNC: Failed to start asynchronous thread";
+	}
+
+	unsigned int addBuffer(size_t bufferSize)
+	{
+		unsigned int id = Base<Executor>::addBuffer(bufferSize);
+
+		// Now, initialize the buffer on the executor thread with zeros
+		m_initBuffer = id; // Mark for buffer fill
+		wait();
+		pthread_mutex_unlock(&m_readerLock); // Similar to call() but without setting the parameters
+
+		return id;
 	}
 
 	void setAffinity(const cpu_set_t &cpuSet)
@@ -144,12 +160,8 @@ private:
 	{
 		ThreadBase* async = reinterpret_cast<ThreadBase*>(c);
 
-		// Touch the memory on this thread
-		for (unsigned int i = 0; i < async->numBuffers(); i++)
-			memset(async->_buffer(i), 0, async->bufferSize(i));
-		pthread_spin_unlock(&async->m_writerLock);
-
 		// Tell everyone that we are read to go
+		pthread_spin_unlock(&async->m_writerLock);
 
 		while (true) {
 			// We assume that this lock happens before any unlock from the main thread
@@ -157,7 +169,13 @@ private:
 			if (async->m_shutdown)
 				break;
 
-			async->executor().exec(async->m_nextParams);
+			if (async->m_initBuffer >= 0) {
+				// Touch the memory on this thread
+				unsigned int id = async->m_initBuffer;
+				memset(async->_buffer(id), 0, async->bufferSize(id));
+				async->m_initBuffer = -1;
+			} else
+				async->executor().exec(async->m_nextParams);
 
 			pthread_spin_unlock(&async->m_writerLock);
 		}

@@ -170,12 +170,8 @@ public:
 		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
 		async.scheduler(*m_scheduler);
 
-		async.addBuffer(m_scheduler->isExecutor() ? 0 : sizeof(int));
-
 		async.setExecutor(executor);
 		m_async = &async;
-
-		TS_ASSERT_EQUALS(async.numBuffers(), 1);
 
 		if (m_scheduler->isExecutor()) {
 			m_scheduler->loop();
@@ -184,6 +180,10 @@ public:
 					i != m_buffers.end(); i++)
 				TS_ASSERT_EQUALS(*i, 43);
 		} else {
+			TS_ASSERT_EQUALS(async.addBuffer(sizeof(int)), 0);
+
+			TS_ASSERT_EQUALS(async.numBuffers(), 1);
+
 			async.wait();
 
 			int buffer = 43;
@@ -203,13 +203,8 @@ public:
 		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
 		async.scheduler(*m_scheduler);
 
-		async.addBuffer(m_scheduler->isExecutor() ? 0 : sizeof(int));
-		async.addBuffer(m_scheduler->isExecutor() ? 0 : sizeof(int));
-
 		async.setExecutor(executor);
 		m_async = &async;
-
-		TS_ASSERT_EQUALS(async.numBuffers(), 2);
 
 		if (m_scheduler->isExecutor()) {
 			m_scheduler->loop();
@@ -221,6 +216,11 @@ public:
 			for (unsigned int i = m_buffers.size()/2; i < m_buffers.size(); i++)
 				TS_ASSERT_EQUALS(m_buffers[i], 42);
 		} else {
+			async.addBuffer(m_scheduler->isExecutor() ? 0 : sizeof(int));
+			async.addBuffer(m_scheduler->isExecutor() ? 0 : sizeof(int));
+
+			TS_ASSERT_EQUALS(async.numBuffers(), 2);
+
 			async.wait();
 
 			int buffer = 43;
@@ -276,14 +276,7 @@ public:
 		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
 		async.scheduler(*m_scheduler);
 
-		size_t bufferSize = (1UL<<30) + (1UL<<29); // 1.5 GB
-		char* buffer = 0L;
-		if (m_scheduler->isExecutor()) {
-			async.addBuffer(0);
-		} else {
-			buffer = new char[bufferSize];
-			async.addBuffer(bufferSize);
-		}
+		const size_t bufferSize = (1UL<<30) + (1UL<<29); // 1.5 GB
 
 		async.setExecutor(executor);
 
@@ -305,6 +298,9 @@ public:
 				buf += bufferSize;
 			}
 		} else {
+			char* buffer = new char[bufferSize];
+			async.addBuffer(bufferSize);
+
 			async.wait();
 
 			buffer[0] = 'A';
@@ -315,8 +311,8 @@ public:
 			async.call(parameter);
 
 			async.wait();
-		}
 
-		delete [] buffer;
+			delete [] buffer;
+		}
 	}
 };
