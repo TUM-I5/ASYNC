@@ -76,6 +76,9 @@ private:
 	/** The buffer we need to initialize */
 	int m_initBuffer;
 
+	/** Mutex to wait for the buffer initialization to finish */
+	pthread_spinlock_t m_initBufferLock;
+
 	/** Shutdown the thread */
 	bool m_shutdown;
 
@@ -87,6 +90,7 @@ protected:
 	{
 		pthread_spin_init(&m_writerLock, PTHREAD_PROCESS_PRIVATE);
 		pthread_mutex_init(&m_readerLock, 0L);
+		pthread_spin_init(&m_initBufferLock, PTHREAD_PROCESS_PRIVATE);
 	}
 
 public:
@@ -94,6 +98,7 @@ public:
 	{
 		finalize();
 
+		pthread_spin_destroy(&m_initBufferLock);
 		pthread_mutex_destroy(&m_readerLock);
 		pthread_spin_destroy(&m_writerLock);
 	}
@@ -108,6 +113,9 @@ public:
 		// Lock writer until the memory is initialized
 		pthread_spin_lock(&m_writerLock);
 
+		// initBuffer is only unlocked when the buffer initialization is done
+		pthread_spin_lock(&m_initBufferLock);
+
 		if (pthread_create(&m_asyncThread, 0L, asyncThread, this) != 0)
 			logError() << "ASYNC: Failed to start asynchronous thread";
 	}
@@ -120,6 +128,9 @@ public:
 		wait();
 		m_initBuffer = id; // Mark for buffer fill
 		pthread_mutex_unlock(&m_readerLock); // Similar to call() but without setting the parameters
+
+		// Wait for the initialization to finish
+		pthread_spin_lock(&m_initBufferLock);
 
 		return id;
 	}
@@ -174,6 +185,9 @@ private:
 				unsigned int id = async->m_initBuffer;
 				memset(async->_buffer(id), 0, async->bufferSize(id));
 				async->m_initBuffer = -1;
+
+				// Done
+				pthread_spin_unlock(&async->m_initBufferLock);
 			} else
 				async->executor().exec(async->m_nextParams);
 
