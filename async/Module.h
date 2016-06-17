@@ -37,6 +37,15 @@
 #ifndef ASYNC_MODULE_H
 #define ASYNC_MODULE_H
 
+#ifdef USE_MPI
+#include <mpi.h>
+#endif // USE_MPI
+
+#include <sched.h>
+#include <sys/sysinfo.h>
+
+#include "utils/env.h"
+
 #ifdef USE_ASYNC_MPI
 #include "async/as/MPI.h"
 #else // USE_ASYNC_MPI
@@ -66,8 +75,26 @@ class Module :
 #endif // USE_ASYNC_MPI
 {
 public:
-#ifdef USE_ASYNC_MPI
-#endif // USE_ASYNC_MPI
+#ifdef USE_ASYNC_THREAD
+	Module()
+	{
+		int core = utils::Env::get<int>("ASYNC_PIN_CORE", -1);
+		if (core < 0) {
+			int numCores = get_nprocs();
+			core = numCores - core;
+		}
+
+		if (core < 0) {
+			logWarning() << "Skipping async thread pining, invalid core id" << core << "specified";
+			return;
+		}
+
+		cpu_set_t cpuMask;
+		CPU_ZERO(&cpuMask);
+		CPU_SET(core, &cpuMask);
+		this->setAffinity(cpuMask);
+	}
+#endif // USE_ASYNC_THREAD
 
 #ifdef USE_ASYNC_MPI
 	void setScheduler(as::MPIScheduler &scheduler)

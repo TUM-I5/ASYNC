@@ -36,6 +36,11 @@
 
 #include <cxxtest/TestSuite.h>
 
+#include <pthread.h>
+#include <cstdlib>
+#include <ctime>
+#include <sys/sysinfo.h>
+
 #include "async/as/Thread.h"
 #include "Executor.h"
 
@@ -93,6 +98,30 @@ public:
 
 		async.wait();
 		TS_ASSERT_EQUALS(m_value, 42+415);
+	}
+
+	void testAffinity()
+	{
+		Executor<TestThread> executor(this);
+
+		async::as::Thread<Executor<TestThread>, Parameter> async;
+		async.setExecutor(executor);
+
+		// Set affinity (choose a random CPU)
+		srand(time(0L));
+		int cpu = rand() % get_nprocs();
+		cpu_set_t cpuSet;
+		CPU_ZERO(&cpuSet);
+		CPU_SET(cpu, &cpuSet);
+		async.setAffinity(cpuSet);
+
+		async.wait();
+		Parameter parameter;
+		async.call(parameter);
+
+		async.wait();
+
+		TS_ASSERT_EQUALS(executor.cpu(), cpu);
 	}
 
 	void testBuffer()

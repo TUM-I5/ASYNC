@@ -37,6 +37,8 @@
 #ifndef EXECUTOR_H
 #define EXECUTOR_H
 
+#include <sched.h>
+
 struct Parameter
 {
 	int value;
@@ -47,6 +49,8 @@ class Executor
 {
 private:
 	Test &m_test;
+
+	int m_schedCpu;
 
 public:
 	Executor(Test* test)
@@ -61,6 +65,17 @@ public:
 	void exec(const Parameter &parameters)
 	{
 		m_test.setValue(parameters.value);
+
+		//  Get the current core
+		m_schedCpu = sched_getcpu();
+	}
+
+	/**
+	 * @return CPU id of the last execution
+	 */
+	int cpu() const
+	{
+		return m_schedCpu;
 	}
 };
 
