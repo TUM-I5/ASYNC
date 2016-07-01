@@ -5,3 +5,7 @@ build/
 .cproject
 .project
 .settings/
+
+# KDevelop
+.kdev4/
+*.kdev4

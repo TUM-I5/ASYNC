@@ -37,6 +37,10 @@
 #ifndef ASYNC_DISPATCHER_H
 #define ASYNC_DISPATCHER_H
 
+#ifdef USE_MPI
+#include <mpi.h>
+#endif // USE_MPI
+
 #ifdef USE_ASYNC_MPI
 #include "async/as/MPIScheduler.h"
 #endif // USE_ASYNC_MPI
@@ -85,6 +89,18 @@ public:
 #endif
 
 	/**
+	 * @return The groups size (or 1 for synchronous and asynchnchronous thread mode)
+	 */
+	unsigned int groupSize() const
+	{
+#ifdef USE_ASYNC_MPI
+		return m_groupSize;
+#else // USE_ASYNC_MPI
+		return 1;
+#endif // USE_ASYNC_MPI
+	}
+
+	/**
 	 * The group size for the MPI async mode
 	 *
 	 * @param groupSize The group size (excl. the MPI executor)
@@ -93,6 +109,16 @@ public:
 	{
 		m_groupSize = groupSize;
 	}
+
+#ifdef USE_ASYNC_MPI
+	/**
+	 * @return True if the process is an executor
+	 */
+	bool isExecutor() const
+	{
+		return m_scheduler.isExecutor();
+	}
+#endif // USE_ASYNC_MPI
 
 #ifdef USE_ASYNC_MPI
 	const async::as::MPIScheduler& scheduler()

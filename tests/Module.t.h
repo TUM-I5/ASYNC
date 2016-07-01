@@ -55,12 +55,15 @@ public:
 	bool m_exec;
 	bool m_tearDown;
 
+	unsigned m_groupSize;
+
 public:
 	Executor()
 		: m_setUp(false),
 		  m_execInit(false),
 		  m_exec(false),
-		  m_tearDown(false)
+		  m_tearDown(false),
+		  m_groupSize(0)
 	{
 	}
 
@@ -71,6 +74,8 @@ public:
 		dispatcher.setCommunicator(MPI_COMM_WORLD);
 #endif // USE_MPI
 		dispatcher.init();
+
+		m_groupSize = dispatcher.groupSize();
 
 		if (dispatcher.dispatch()) {
 			// Empty initialization
@@ -212,6 +217,12 @@ public:
 			TS_ASSERT(executor.m_tearDown);
 #ifdef USE_ASYNC_MPI
 		}
+#endif // USE_ASYNC_MPI
+
+#ifdef USE_ASYNC_MPI
+		TS_ASSERT_EQUALS(executor.m_groupSize, 64); // the default
+#else // USE_ASYNC_MPI
+		TS_ASSERT_EQUALS(executor.m_groupSize, 1);
 #endif // USE_ASYNC_MPI
 	}
 
