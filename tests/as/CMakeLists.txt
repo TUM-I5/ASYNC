@@ -6,11 +6,11 @@
 #
 # 1. Redistributions of source code must retain the above copyright notice,
 #    this list of conditions and the following disclaimer.
-# 
+#
 # 2. Redistributions in binary form must reproduce the above copyright notice
 #    this list of conditions and the following disclaimer in the documentation
 #    and/or other materials provided with the distribution.
-# 
+#
 # 3. Neither the name of the copyright holder nor the names of its
 #    contributors may be used to endorse or promote products derived from this
 #    software without specific prior written permission.
@@ -30,6 +30,8 @@
 # Add tests
 add_cxx_test( TestSync ${CMAKE_CURRENT_SOURCE_DIR}/Sync.t.h )
 add_cxx_test( TestThread ${CMAKE_CURRENT_SOURCE_DIR}/Thread.t.h )
+add_cxx_test( TestThreadBuffer ${CMAKE_CURRENT_SOURCE_DIR}/Thread_buffer.t.h )
+set_tests_properties( TestThreadBuffer PROPERTIES ENVIRONMENT "ASYNC_BUFFER_ALIGNMENT=65536" )
 if( USE_MPI )
     add_mpi_cxx_test( TestMPIScheduler ${CMAKE_CURRENT_SOURCE_DIR}/MPIScheduler.t.h 5 )
     add_mpi_cxx_test( TestMPI ${CMAKE_CURRENT_SOURCE_DIR}/MPI.t.h 5 )

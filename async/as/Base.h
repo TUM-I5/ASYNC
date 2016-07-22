@@ -37,7 +37,12 @@
 #ifndef ASYNC_AS_BASE_H
 #define ASYNC_AS_BASE_H
 
+#include <cstdlib>
+#include <stdint.h>
 #include <vector>
+
+#include "utils/env.h"
+#include "utils/logger.h"
 
 namespace async
 {
@@ -56,7 +61,7 @@ private:
 	Executor* m_executor;
 
 	/** The buffers */
-	std::vector<char*> m_buffer;
+	std::vector<void*> m_buffer;
 
 	/** The size of the buffer */
 	std::vector<size_t> m_bufferSize;
@@ -64,25 +69,33 @@ private:
 	/** Already cleanup everything? */
 	bool m_finalized;
 
+	/** Aligment of buffers (might be requested for I/O back-ends) */
+	size_t m_alignment;
+
 protected:
 	Base()
 		: m_executor(0L),
 		  m_finalized(false)
-	{ }
+	{
+		m_alignment = utils::Env::get<size_t>("ASYNC_BUFFER_ALIGNMENT", 0);
+	}
 
 	~Base()
 	{
 		for (unsigned int i = 0; i < m_buffer.size(); i++)
-			delete [] m_buffer[i];
+			free(m_buffer[i]);
 	}
 
 	Executor& executor() {
 		return *m_executor;
 	}
 
-	char* _buffer(unsigned int id)
+	/**
+	 * Return u_int8_t to allow arithmetic on the pointer
+	 */
+	u_int8_t* _buffer(unsigned int id)
 	{
-		return m_buffer[id];
+		return static_cast<uint8_t*>(m_buffer[id]);
 	}
 
 public:
@@ -97,9 +110,17 @@ public:
 	 */
 	unsigned int addBuffer(size_t bufferSize)
 	{
-		if (bufferSize)
-			m_buffer.push_back(new char[bufferSize]);
-		else
+		if (bufferSize) {
+			void* buffer;
+			if (m_alignment > 0) {
+				int ret = posix_memalign(&buffer, m_alignment, bufferSize);
+				if (ret)
+					logError() << "Could not allocate buffer" << ret;
+			} else {
+				buffer = malloc(bufferSize);
+			}
+			m_buffer.push_back(buffer);
+		} else
 			m_buffer.push_back(0L);
 		m_bufferSize.push_back(bufferSize);
 
