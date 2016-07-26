@@ -113,7 +113,11 @@ public:
 		if (bufferSize) {
 			void* buffer;
 			if (m_alignment > 0) {
-				int ret = posix_memalign(&buffer, m_alignment, bufferSize);
+				// Make the allocated buffer size a multiple of m_alignment
+				size_t allocBufferSize = (bufferSize + m_alignment - 1) / m_alignment;
+				allocBufferSize *= m_alignment;
+
+				int ret = posix_memalign(&buffer, m_alignment, allocBufferSize);
 				if (ret)
 					logError() << "Could not allocate buffer" << ret;
 			} else {
