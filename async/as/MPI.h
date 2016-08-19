@@ -143,19 +143,19 @@ public:
 		m_scheduler->wait(m_id);
 	}
 
+	/**
+	 * @param id The id of the buffer
+	 */
 	void fillBuffer(unsigned int id, const void* buffer, size_t size)
 	{
 		if (buffer == 0L || size == 0)
 			return;
 
-		// Select the buffer
-		m_scheduler->selectBuffer(m_id, id);
-
 		// We need to send the buffer in 1 GB chunks
 		for (size_t done = 0; done < size; done += 1UL<<30) {
 			size_t send = std::min(1UL<<30, size-done);
 
-			m_scheduler->sendBuffer(m_id, static_cast<const char*>(buffer)+done, send);
+			m_scheduler->sendBuffer(m_id, id, static_cast<const char*>(buffer)+done, send);
 		}
 	}
 

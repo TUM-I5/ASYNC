@@ -158,7 +158,7 @@ public:
 
 		// Create the new comm world communicator
 		MPI_Comm_split(comm, (m_isExecutor ? 1 : 0), 0, &m_commWorld);
-		
+
 		// Create the public group communicator (excl. the executor)
 		MPI_Comm_split(m_privateGroupComm, (m_isExecutor ? MPI_UNDEFINED : 0), 0, &m_groupComm);
 	}
@@ -196,7 +196,8 @@ public:
 		memset(readyTasks, 0, m_asyncCalls.size() * sizeof(unsigned int));
 
 		// Selected buffer id for each rank
-		unsigned int* bufferIds = new unsigned int[m_groupSize-1];
+		int* bufferIds = new int[m_groupSize-1];
+		std::fill(bufferIds, bufferIds+m_groupSize-1, -1);
 
 		// Allocate buffer for parameters
 		char* paramBuffer = new char[m_maxParamSize];
@@ -237,20 +238,25 @@ public:
 
 					readyTasks[id]++;
 					break;
-				case SELECT_TAG:
-					MPI_Recv(&bufferIds[status.MPI_SOURCE], 1, MPI_UNSIGNED,
-							status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm,
-							MPI_STATUS_IGNORE);
-
-					break;
 				case BUFFER_TAG:
-					// Get the size that is received
-					MPI_Get_count(&status, MPI_CHAR, &size);
+					if (bufferIds[status.MPI_SOURCE] < 0) {
+						// Select a buffer
+						unsigned int bufferId;
+						MPI_Recv(&bufferId, 1, MPI_UNSIGNED,
+								status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm,
+								MPI_STATUS_IGNORE);
+						bufferIds[status.MPI_SOURCE] = bufferId;
+					} else {
+						// Get the size that is received
+						MPI_Get_count(&status, MPI_CHAR, &size);
 
-					// Receive the buffer
-					buf = m_asyncCalls[id]->getBufferPos(bufferIds[status.MPI_SOURCE], status.MPI_SOURCE, size);
-					MPI_Recv(buf, size, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm,
-							MPI_STATUS_IGNORE);
+						// Receive the buffer
+						buf = m_asyncCalls[id]->getBufferPos(bufferIds[status.MPI_SOURCE], status.MPI_SOURCE, size);
+						MPI_Recv(buf, size, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm,
+								MPI_STATUS_IGNORE);
+
+						bufferIds[status.MPI_SOURCE] = -1;
+					}
 
 					break;
 				case WAIT_TAG:
@@ -358,17 +364,14 @@ private:
 		MPI_Barrier(m_privateGroupComm);
 	}
 
-	void selectBuffer(int id, unsigned int bufferId)
+	void sendBuffer(int id, unsigned int bufferId, const void* buffer, int size)
 	{
-		// Use synchronous send to avoid overtaking of message
-		MPI_Ssend(&bufferId, 1, MPI_UNSIGNED,
-				m_groupSize-1, id*NUM_TAGS+SELECT_TAG, m_privateGroupComm);
-	}
+		// Select the buffer
+		MPI_Send(&bufferId, 1, MPI_UNSIGNED,
+				m_groupSize-1, id*NUM_TAGS+BUFFER_TAG, m_privateGroupComm);
 
-	void sendBuffer(int id, const void* buffer, int size)
-	{
-		// Use synchronous send to avoid overtaking of message
-		MPI_Ssend(const_cast<void*>(buffer), size, MPI_CHAR,
+		// Send the buffer
+		MPI_Send(const_cast<void*>(buffer), size, MPI_CHAR,
 				m_groupSize-1, id*NUM_TAGS+BUFFER_TAG, m_privateGroupComm);
 	}
 
@@ -404,11 +407,10 @@ private:
 private:
 	static const int ADD_TAG = 0;
 	static const int INIT_TAG = 1;
-	static const int SELECT_TAG = 2;
-	static const int BUFFER_TAG = 3;
-	static const int PARAM_TAG = 4;
-	static const int WAIT_TAG = 5;
-	static const int FINALIZE_TAG = 6;
+	static const int BUFFER_TAG = 2;
+	static const int PARAM_TAG = 3;
+	static const int WAIT_TAG = 4;
+	static const int FINALIZE_TAG = 5;
 	static const int NUM_TAGS = FINALIZE_TAG + 1;
 };
 
