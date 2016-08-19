@@ -10,8 +10,7 @@ before_install:
  - sudo apt-get update -qq
 
 install:
- - sudo apt-get install -qq openmpi-bin openmpi-common libopenmpi-dev cmake
- - sudo update-alternatives --set mpirun /usr/bin/mpirun.openmpi
+ - sudo apt-get install -qq mpich cmake
 
 script:
  - mkdir build && cd build && cmake ../
