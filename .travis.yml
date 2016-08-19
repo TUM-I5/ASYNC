@@ -11,6 +11,7 @@ before_install:
 
 install:
  - sudo apt-get install -qq openmpi-bin openmpi-common libopenmpi-dev cmake
+ - sudo update-alternatives --set mpirun /usr/bin/mpirun.openmpi
 
 script:
  - mkdir build && cd build && cmake ../
