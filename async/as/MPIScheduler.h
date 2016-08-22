@@ -58,11 +58,41 @@ class MPIScheduler;
 class Scheduled
 {
 	friend class MPIScheduler;
+private:
+	char* m_paramBuffer;
+
 protected:
-	virtual ~Scheduled()
+	Scheduled()
+		: m_paramBuffer(0L)
 	{ }
 
+	virtual ~Scheduled()
+	{
+		delete [] m_paramBuffer;
+	}
+
 private:
+	void allocParamBuffer()
+	{
+		m_paramBuffer = new char[paramSize()];
+	}
+
+	void* paramBuffer()
+	{
+		return m_paramBuffer;
+	}
+
+	const void* paramBuffer() const
+	{
+		return m_paramBuffer;
+	}
+
+	/**
+	 * @return The maximum buffer size required to store init parameter
+	 *  or parameter
+	 */
+	virtual unsigned int paramSize() const = 0;
+
 	virtual void _addBuffer(unsigned long size) = 0;
 
 	virtual void _execInit(const void* parameter) = 0;
@@ -110,9 +140,6 @@ private:
 	/** All async objects */
 	std::vector<Scheduled*> m_asyncCalls;
 
-	/** The maximum size (in bytes) of the parameter structure */
-	unsigned int m_maxParamSize;
-
 	/** Class is finalized? */
 	bool m_finalized;
 
@@ -123,7 +150,6 @@ public:
 		  m_groupRank(0), m_groupSize(0),
 		  m_isExecutor(false),
 		  m_commWorld(MPI_COMM_NULL),
-		  m_maxParamSize(0),
 		  m_finalized(false)
 	{
 	}
@@ -199,9 +225,6 @@ public:
 		int* bufferIds = new int[m_groupSize-1];
 		std::fill(bufferIds, bufferIds+m_groupSize-1, -1);
 
-		// Allocate buffer for parameters
-		char* paramBuffer = new char[m_maxParamSize];
-
 		// Number of finalized aync calls
 		unsigned int finalized = 0;
 
@@ -233,7 +256,7 @@ public:
 				case INIT_TAG:
 				case PARAM_TAG:
 					MPI_Get_count(&status, MPI_CHAR, &size);
-					MPI_Recv(paramBuffer, size, MPI_CHAR,
+					MPI_Recv(m_asyncCalls[id]->paramBuffer(), size, MPI_CHAR,
 							status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm, MPI_STATUS_IGNORE);
 
 					readyTasks[id]++;
@@ -257,7 +280,6 @@ public:
 
 						bufferIds[status.MPI_SOURCE] = -1;
 					}
-
 					break;
 				case WAIT_TAG:
 				case FINALIZE_TAG:
@@ -279,11 +301,11 @@ public:
 				break;
 			case INIT_TAG:
 				MPI_Barrier(m_privateGroupComm);
-				m_asyncCalls[id]->_execInit(paramBuffer);
+				m_asyncCalls[id]->_execInit(m_asyncCalls[id]->paramBuffer());
 				break;
 			case PARAM_TAG:
 				MPI_Barrier(m_privateGroupComm);
-				m_asyncCalls[id]->_exec(paramBuffer);
+				m_asyncCalls[id]->_exec(m_asyncCalls[id]->paramBuffer());
 				break;
 			case WAIT_TAG:
 				m_asyncCalls[id]->_wait();
@@ -307,7 +329,6 @@ public:
 
 		delete [] readyTasks;
 		delete [] bufferIds;
-		delete [] paramBuffer;
 	}
 
 	void finalize()
@@ -334,13 +355,12 @@ private:
 		return m_groupSize;
 	}
 
-	int addScheduled(Scheduled* scheduled, unsigned int initParamSize, unsigned int paramSize)
+	int addScheduled(Scheduled* scheduled)
 	{
 		int id = m_asyncCalls.size();
 		m_asyncCalls.push_back(scheduled);
 
-		unsigned int maxSize = std::max(initParamSize, paramSize);
-		m_maxParamSize = std::max(m_maxParamSize, maxSize);
+		scheduled->allocParamBuffer();
 
 		return id;
 	}

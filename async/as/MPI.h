@@ -111,7 +111,7 @@ public:
 			ThreadBase<Executor, Parameter>::setExecutor(executor);
 
 		// Add this to the scheduler
-		m_id = m_scheduler->addScheduled(this, sizeof(InitParameter), sizeof(Parameter));
+		m_id = m_scheduler->addScheduled(this);
 	}
 
 	/**
@@ -151,6 +151,8 @@ public:
 		if (buffer == 0L || size == 0)
 			return;
 
+		assert(id < numBuffers());
+
 		// We need to send the buffer in 1 GB chunks
 		for (size_t done = 0; done < size; done += 1UL<<30) {
 			size_t send = std::min(1UL<<30, size-done);
@@ -185,6 +187,11 @@ public:
 	}
 
 private:
+	unsigned int paramSize() const
+	{
+		return std::max(sizeof(InitParameter), sizeof(Parameter));
+	}
+
 	void _addBuffer(unsigned long bufferSize)
 	{
 		int executorRank = m_scheduler->groupSize()-1;
