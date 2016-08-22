@@ -40,9 +40,11 @@
 #include <mpi.h>
 
 #include <algorithm>
+#include <cassert>
 #include <cstring>
 #include <vector>
 
+#include "utils/env.h"
 #include "utils/logger.h"
 
 namespace async
@@ -50,6 +52,14 @@ namespace async
 
 namespace as
 {
+
+/**
+ * A pair of MPI requests
+ */
+struct MPIRequest2
+{
+	MPI_Request r[2];
+};
 
 template<class Executor, typename InitParameter, typename Parameter>
 class MPI;
@@ -97,6 +107,8 @@ private:
 
 	virtual void _execInit(const void* parameter) = 0;
 
+	virtual unsigned int numBuffers() const = 0;
+
 	virtual void* getBufferPos(unsigned int id, int rank, int size) = 0;
 
 	virtual void _exec(const void* parameter) = 0;
@@ -140,6 +152,9 @@ private:
 	/** All async objects */
 	std::vector<Scheduled*> m_asyncCalls;
 
+	/** Use asynchronous MPI for copying data to the executor */
+	bool m_asyncCopy;
+
 	/** Class is finalized? */
 	bool m_finalized;
 
@@ -152,6 +167,7 @@ public:
 		  m_commWorld(MPI_COMM_NULL),
 		  m_finalized(false)
 	{
+		m_asyncCopy = utils::Env::get<>("ASYNC_ASYNC_MPI_COPY", 0);
 	}
 
 	~MPIScheduler()
@@ -209,6 +225,11 @@ public:
 		return m_groupComm;
 	}
 
+	bool useAyncCopy() const
+	{
+		return m_asyncCopy;
+	}
+
 	/**
 	 * Should be called on the executor to start the execution loop
 	 */
@@ -220,6 +241,9 @@ public:
 		// Save ready tasks for each call
 		unsigned int* readyTasks = new unsigned int[m_asyncCalls.size()];
 		memset(readyTasks, 0, m_asyncCalls.size() * sizeof(unsigned int));
+
+		unsigned int* asyncReadyTasks = new unsigned int[m_asyncCalls.size()];
+		memset(asyncReadyTasks, 0, m_asyncCalls.size() * sizeof(unsigned int));
 
 		// Selected buffer id for each rank
 		int* bufferIds = new int[m_groupSize-1];
@@ -259,7 +283,10 @@ public:
 					MPI_Recv(m_asyncCalls[id]->paramBuffer(), size, MPI_CHAR,
 							status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm, MPI_STATUS_IGNORE);
 
-					readyTasks[id]++;
+					if (tag == PARAM_TAG && m_asyncCopy)
+						asyncReadyTasks[id]++;
+					else
+						readyTasks[id]++;
 					break;
 				case BUFFER_TAG:
 					if (bufferIds[status.MPI_SOURCE] < 0) {
@@ -279,6 +306,9 @@ public:
 								MPI_STATUS_IGNORE);
 
 						bufferIds[status.MPI_SOURCE] = -1;
+
+						if (m_asyncCopy)
+							asyncReadyTasks[id]++;
 					}
 					break;
 				case WAIT_TAG:
@@ -292,7 +322,8 @@ public:
 					logError() << "ASYNC: Unknown tag" << tag << "received";
 				}
 
-			} while (static_cast<int>(readyTasks[id]) < m_groupSize-1);
+			} while ((static_cast<int>(readyTasks[id]) < m_groupSize-1)
+				&& (asyncReadyTasks[id] < (m_groupSize-1) * (m_asyncCalls[id]->numBuffers()+1)));
 
 			switch (tag) {
 			case ADD_TAG:
@@ -304,7 +335,8 @@ public:
 				m_asyncCalls[id]->_execInit(m_asyncCalls[id]->paramBuffer());
 				break;
 			case PARAM_TAG:
-				MPI_Barrier(m_privateGroupComm);
+				if (!m_asyncCopy)
+					MPI_Barrier(m_privateGroupComm);
 				m_asyncCalls[id]->_exec(m_asyncCalls[id]->paramBuffer());
 				break;
 			case WAIT_TAG:
@@ -324,7 +356,10 @@ public:
 				logError() << "ASYNC: Unknown tag" << tag;
 			}
 
-			readyTasks[id] = 0;
+			if (static_cast<int>(readyTasks[id]) >= m_groupSize-1)
+				readyTasks[id] = 0;
+			else
+				asyncReadyTasks[id] = 0;
 		}
 
 		delete [] readyTasks;
@@ -395,6 +430,23 @@ private:
 				m_groupSize-1, id*NUM_TAGS+BUFFER_TAG, m_privateGroupComm);
 	}
 
+	MPIRequest2 iSendBuffer(int id, unsigned int bufferId, const void* buffer, int size)
+	{
+		MPIRequest2 requests;
+
+		// Select the buffer
+		MPI_Isend(&bufferId, 1, MPI_UNSIGNED,
+				m_groupSize-1, id*NUM_TAGS+BUFFER_TAG, m_privateGroupComm,
+				&requests.r[0]);
+
+		// Send the buffer
+		MPI_Isend(const_cast<void*>(buffer), size, MPI_CHAR,
+				m_groupSize-1, id*NUM_TAGS+BUFFER_TAG, m_privateGroupComm,
+				&requests.r[1]);
+
+		return requests;
+	}
+
 	/**
 	 * Send message to the executor task
 	 */
@@ -407,6 +459,21 @@ private:
 				MPI_CHAR, m_groupSize-1, id*NUM_TAGS+PARAM_TAG, m_privateGroupComm);
 
 		MPI_Barrier(m_privateGroupComm);
+	}
+
+	/**
+	 * Send message asynchronous to the executor task
+	 */
+	template<typename Parameter>
+	MPI_Request iSendParam(int id, const Parameter &param)
+	{
+		MPI_Request request;
+
+		MPI_Isend(const_cast<Parameter*>(&param), sizeof(Parameter), MPI_CHAR,
+				m_groupSize-1, id*NUM_TAGS+PARAM_TAG, m_privateGroupComm,
+				&request);
+
+		return request;
 	}
 
 	void wait(int id)

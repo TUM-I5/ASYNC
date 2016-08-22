@@ -35,4 +35,8 @@ set_tests_properties( TestThreadBuffer PROPERTIES ENVIRONMENT "ASYNC_BUFFER_ALIG
 if( USE_MPI )
     add_mpi_cxx_test( TestMPIScheduler ${CMAKE_CURRENT_SOURCE_DIR}/MPIScheduler.t.h 5 )
     add_mpi_cxx_test( TestMPI ${CMAKE_CURRENT_SOURCE_DIR}/MPI.t.h 5 )
+    set_tests_properties( TestMPI PROPERTIES ENVIRONMENT "ASYNC_MPI_MAX_SEND=1048576" )
+    add_mpi_cxx_test( TestMPIAsync ${CMAKE_CURRENT_SOURCE_DIR}/MPI.t.h 5 )
+    set_tests_properties( TestMPIAsync PROPERTIES ENVIRONMENT "ASYNC_ASYNC_MPI_COPY=1" )
+    set_tests_properties( TestMPIAsync PROPERTIES ENVIRONMENT "ASYNC_MPI_MAX_SEND=1048576" )
 endif( USE_MPI )

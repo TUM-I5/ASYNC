@@ -40,6 +40,8 @@
 
 #include <cxxtest/TestSuite.h>
 
+#include "utils/env.h"
+
 #include "async/as/MPI.h"
 #include "Executor.h"
 
@@ -276,7 +278,8 @@ public:
 		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
 		async.scheduler(*m_scheduler);
 
-		const size_t bufferSize = (1UL<<30) + (1UL<<29); // 1.5 GB
+		size_t maxSend = utils::Env::get<size_t>("ASYNC_MPI_MAX_SEND", 1UL<<30);
+		const size_t bufferSize = 1.5 * maxSend;
 
 		async.setExecutor(executor);
 
