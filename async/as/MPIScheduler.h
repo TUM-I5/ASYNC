@@ -103,11 +103,17 @@ private:
 	 */
 	virtual unsigned int paramSize() const = 0;
 
+	/**
+	 * Returns the number of buffer chunks send to the executor
+	 *
+	 * This might differ from the number of buffers since large buffers
+	 * have the be send in multiple iterations.
+	 */
+	virtual unsigned int numBufferChunks() const = 0;
+
 	virtual void _addBuffer(unsigned long size) = 0;
 
 	virtual void _execInit(const void* parameter) = 0;
-
-	virtual unsigned int numBuffers() const = 0;
 
 	virtual void* getBufferPos(unsigned int id, int rank, int size) = 0;
 
@@ -245,6 +251,10 @@ public:
 		unsigned int* asyncReadyTasks = new unsigned int[m_asyncCalls.size()];
 		memset(asyncReadyTasks, 0, m_asyncCalls.size() * sizeof(unsigned int));
 
+		// Distinguish between init and param tag (required for asynchronous copies)
+		int* lastTag = new int[m_asyncCalls.size()];
+		memset(lastTag, 0, m_asyncCalls.size() * sizeof(int));
+
 		// Selected buffer id for each rank
 		int* bufferIds = new int[m_groupSize-1];
 		std::fill(bufferIds, bufferIds+m_groupSize-1, -1);
@@ -283,7 +293,8 @@ public:
 					MPI_Recv(m_asyncCalls[id]->paramBuffer(), size, MPI_CHAR,
 							status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm, MPI_STATUS_IGNORE);
 
-					if (tag == PARAM_TAG && m_asyncCopy)
+					lastTag[id] = tag;
+					if (m_asyncCopy)
 						asyncReadyTasks[id]++;
 					else
 						readyTasks[id]++;
@@ -323,7 +334,13 @@ public:
 				}
 
 			} while ((static_cast<int>(readyTasks[id]) < m_groupSize-1)
-				&& (asyncReadyTasks[id] < (m_groupSize-1) * (m_asyncCalls[id]->numBuffers()+1)));
+				&& (asyncReadyTasks[id] < m_groupSize-1+m_asyncCalls[id]->numBufferChunks()));
+
+			if (tag == BUFFER_TAG) {
+				assert(lastTag[id] == INIT_TAG || lastTag[id] == PARAM_TAG);
+
+				tag = lastTag[id];
+			}
 
 			switch (tag) {
 			case ADD_TAG:
@@ -425,8 +442,8 @@ private:
 		MPI_Send(&bufferId, 1, MPI_UNSIGNED,
 				m_groupSize-1, id*NUM_TAGS+BUFFER_TAG, m_privateGroupComm);
 
-		// Send the buffer
-		MPI_Send(const_cast<void*>(buffer), size, MPI_CHAR,
+		// Send the buffer (synchronous to avoid overtaking of other messages)
+		MPI_Ssend(const_cast<void*>(buffer), size, MPI_CHAR,
 				m_groupSize-1, id*NUM_TAGS+BUFFER_TAG, m_privateGroupComm);
 	}
 

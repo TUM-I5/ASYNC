@@ -198,6 +198,38 @@ public:
 		}
 	}
 
+	/**
+	 * Test transmitting buffer before initialization
+	 */
+	void testInitBuffer()
+	{
+		Executor<TestMPI> executor(this);
+
+		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
+		async.scheduler(*m_scheduler);
+
+		async.setExecutor(executor);
+		m_async = &async;
+
+		if (m_scheduler->isExecutor()) {
+			m_scheduler->loop();
+
+			for (std::vector<int>::const_iterator i = m_buffers.begin();
+					i != m_buffers.end(); i++)
+				TS_ASSERT_EQUALS(*i, 43);
+		} else {
+			async.addBuffer(sizeof(int));
+
+			int buffer = 43;
+			async.fillBuffer(0, &buffer, sizeof(int));
+
+			Parameter parameter;
+			async.callInit(parameter);
+
+			async.wait();
+		}
+	}
+
 	void testBuffer2()
 	{
 		Executor<TestMPI> executor(this);
@@ -218,8 +250,8 @@ public:
 			for (unsigned int i = m_buffers.size()/2; i < m_buffers.size(); i++)
 				TS_ASSERT_EQUALS(m_buffers[i], 42);
 		} else {
-			async.addBuffer(m_scheduler->isExecutor() ? 0 : sizeof(int));
-			async.addBuffer(m_scheduler->isExecutor() ? 0 : sizeof(int));
+			async.addBuffer(sizeof(int));
+			async.addBuffer(sizeof(int));
 
 			TS_ASSERT_EQUALS(async.numBuffers(), 2);
 

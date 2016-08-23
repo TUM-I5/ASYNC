@@ -73,6 +73,9 @@ private:
 	/** Counter for buffer (w/o async call, we only create the buffers on the executor) */
 	unsigned int m_numBuffers;
 
+	/** Number of buffer chunks (only on the executor rank) */
+	unsigned int m_numBufferChunks;
+
 	/** Buffer offsets (only on the executor rank) */
 	std::vector<const unsigned long*> m_bufferOffsets;
 
@@ -90,7 +93,8 @@ public:
 		: m_maxSend(utils::Env::get<size_t>("ASYNC_MPI_MAX_SEND", 1UL<<30)),
 		  m_scheduler(0L),
 		  m_id(0),
-		  m_numBuffers(0)
+		  m_numBuffers(0),
+		  m_numBufferChunks(0)
 	{
 		// One request always required for the parameters
 		m_asyncRequests.push_back(MPI_REQUEST_NULL);
@@ -197,8 +201,11 @@ public:
 	 */
 	void callInit(const InitParameter &parameters)
 	{
-		if (m_scheduler->useAyncCopy())
+		if (m_scheduler->useAyncCopy()) {
 			assert(m_numBuffers == Base<Executor>::numBuffers());
+
+			iSendAllBuffers();
+		}
 
 		m_scheduler->sendInitParam(m_id, parameters);
 	}
@@ -209,21 +216,7 @@ public:
 	void call(const Parameter &parameters)
 	{
 		if (m_scheduler->useAyncCopy()) {
-			unsigned int nextRequest = 0;
-
-			// Send all buffers
-			for (unsigned int i = 0; i < m_numBuffers; i++) {
-				for (size_t done = 0; done < m_bufferPos[i][0]; done += m_maxSend) {
-					size_t send = std::min(m_maxSend, m_bufferPos[i][0]-done);
-					MPIRequest2 requests = m_scheduler->iSendBuffer(m_id, i, Base<Executor>::_buffer(i)+done, send);
-
-					m_asyncRequests[nextRequest] = requests.r[0];
-					m_asyncRequests[nextRequest+1] = requests.r[1];
-					nextRequest += 2;
-				}
-			}
-
-			assert(nextRequest == m_asyncRequests.size()-1);
+			iSendAllBuffers();
 
 			// Send parameters
 			m_paramBuffer = parameters;
@@ -248,6 +241,40 @@ private:
 		return std::max(sizeof(InitParameter), sizeof(Parameter));
 	}
 
+	unsigned int numBufferChunks() const
+	{
+		return m_numBufferChunks;
+	}
+
+	/**
+	 * Sends all buffers asynchronously
+	 *
+	 * Should only be used in asynchronous copy mode
+	 */
+	void iSendAllBuffers()
+	{
+		assert(m_scheduler->useAyncCopy());
+
+		unsigned int nextRequest = 0;
+
+		// Send all buffers
+		for (unsigned int i = 0; i < m_numBuffers; i++) {
+			for (size_t done = 0; done < m_bufferPos[i][0]; done += m_maxSend) {
+				size_t send = std::min(m_maxSend, m_bufferPos[i][0]-done);
+				MPIRequest2 requests = m_scheduler->iSendBuffer(m_id, i, Base<Executor>::_buffer(i)+done, send);
+
+				m_asyncRequests[nextRequest] = requests.r[0];
+				m_asyncRequests[nextRequest+1] = requests.r[1];
+				nextRequest += 2;
+			}
+
+			// Reset buffer position
+			m_bufferPos[i][0] = 0;
+		}
+
+		assert(nextRequest == m_asyncRequests.size()-1);
+	}
+
 	void _addBuffer(unsigned long bufferSize)
 	{
 		int executorRank = m_scheduler->groupSize()-1;
@@ -262,12 +289,17 @@ private:
 				1, MPI_UNSIGNED_LONG, executorRank, m_scheduler->privateGroupComm());
 
 		if (m_scheduler->isExecutor()) {
-			// Compute offsets from the size
 			bufferSize = 0;
 			for (int i = 0; i < m_scheduler->groupSize()-1; i++) {
+				// Compute offsets from the size
 				unsigned long bufSize = bufferOffsets[i];
 				bufferOffsets[i] = bufferSize;
+
+				// Increment the total buffer size
 				bufferSize += bufSize;
+
+				// Increment the number of buffer chunks
+				m_numBufferChunks += (bufSize + m_maxSend - 1) / m_maxSend;
 			}
 
 			// Create the buffer
@@ -299,6 +331,8 @@ private:
 	{
 		const InitParameter* param = reinterpret_cast<const InitParameter*>(paramBuffer);
 		Base<Executor>::executor().execInit(*param);
+
+		resetBufferPosition();
 	}
 
 	void* getBufferPos(unsigned int id, int rank, int size)
@@ -318,9 +352,7 @@ private:
 		const Parameter* param = reinterpret_cast<const Parameter*>(paramBuffer);
 		ThreadBase<Executor, Parameter>::call(*param);
 
-		// Reset the buffer positions
-		for (unsigned int i = 0; i < Base<Executor>::numBuffers(); i++)
-			memset(m_bufferPos[i], 0, (m_scheduler->groupSize()-1) * sizeof(size_t));
+		resetBufferPosition();
 	}
 
 	void _wait()
@@ -331,6 +363,17 @@ private:
 	void _finalize()
 	{
 		ThreadBase<Executor, Parameter>::finalize();
+	}
+
+	/**
+	 * Reset buffer positions
+	 *
+	 * Should only be called on the executor.
+	 */
+	void resetBufferPosition()
+	{
+		for (unsigned int i = 0; i < Base<Executor>::numBuffers(); i++)
+			memset(m_bufferPos[i], 0, (m_scheduler->groupSize()-1) * sizeof(size_t));
 	}
 };
 

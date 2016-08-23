@@ -234,7 +234,7 @@ public:
 #ifdef USE_ASYNC_MPI
 			TS_ASSERT_EQUALS(m_rank+1, m_size);
 #else // USE_ASYNC_MPI
-			TS_FAIL("No executors in SYNC and THEAD mode!");
+			TS_FAIL("No executors in SYNC and THREAD mode!");
 #endif // USE_ASYNC_MPI
 		}
 
