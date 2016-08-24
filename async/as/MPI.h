@@ -79,7 +79,7 @@ private:
 	/** Buffer offsets (only on the executor rank) */
 	std::vector<const unsigned long*> m_bufferOffsets;
 
-	/** Current position of the buffer (only on the exuecutor rank) */
+	/** Current position of the buffer */
 	std::vector<size_t*> m_bufferPos;
 
 	/** Buffer for the parameter (required for async calls) */
@@ -87,6 +87,9 @@ private:
 
 	/** List of MPI requests (required for async call) */
 	std::vector<MPI_Request> m_asyncRequests;
+
+	/** Number of asynchronous requests for each buffer (not counting selecting) */
+	std::vector<unsigned int> m_numAsyncRequests;
 
 public:
 	MPI()
@@ -259,9 +262,11 @@ private:
 
 		// Send all buffers
 		for (unsigned int i = 0; i < m_numBuffers; i++) {
-			for (size_t done = 0; done < m_bufferPos[i][0]; done += m_maxSend) {
+			size_t done = 0;
+			for (unsigned int j = 0; j < m_numAsyncRequests[i]; j++) {
 				size_t send = std::min(m_maxSend, m_bufferPos[i][0]-done);
 				MPIRequest2 requests = m_scheduler->iSendBuffer(m_id, i, Base<Executor>::_buffer(i)+done, send);
+				done += send;
 
 				m_asyncRequests[nextRequest] = requests.r[0];
 				m_asyncRequests[nextRequest+1] = requests.r[1];
@@ -321,6 +326,7 @@ private:
 			// Initialize the requests
 			unsigned int requests = (bufferSize + m_maxSend - 1) / m_maxSend;
 			m_asyncRequests.insert(m_asyncRequests.end(), requests*2, MPI_REQUEST_NULL);
+			m_numAsyncRequests.push_back(requests);
 		}
 
 		// Increase the counter and return the id

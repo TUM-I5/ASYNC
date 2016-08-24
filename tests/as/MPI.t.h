@@ -198,6 +198,30 @@ public:
 		}
 	}
 
+	void testEmptyBuffer()
+	{
+		Executor<TestMPI> executor(this);
+
+		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
+		async.scheduler(*m_scheduler);
+
+		async.setExecutor(executor);
+		m_async = &async;
+
+		if (m_scheduler->isExecutor()) {
+			m_scheduler->loop();
+		} else {
+			async.addBuffer(sizeof(int));
+
+			async.wait();
+
+			Parameter parameter;
+			async.call(parameter); // Should not timeout ...
+
+			async.wait();
+		}
+	}
+
 	/**
 	 * Test transmitting buffer before initialization
 	 */
