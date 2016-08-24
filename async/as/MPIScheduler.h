@@ -255,10 +255,6 @@ public:
 		int* lastTag = new int[m_asyncCalls.size()];
 		memset(lastTag, 0, m_asyncCalls.size() * sizeof(int));
 
-		// Selected buffer id for each rank
-		int* bufferIds = new int[m_groupSize-1];
-		std::fill(bufferIds, bufferIds+m_groupSize-1, -1);
-
 		// Number of finalized aync calls
 		unsigned int finalized = 0;
 
@@ -278,6 +274,7 @@ public:
 					logError() << "ASYNC: Invalid id" << id << "received";
 
 				int size;
+				unsigned int bufferId;
 				void* buf;
 
 				switch (tag) {
@@ -300,27 +297,24 @@ public:
 						readyTasks[id]++;
 					break;
 				case BUFFER_TAG:
-					if (bufferIds[status.MPI_SOURCE] < 0) {
-						// Select a buffer
-						unsigned int bufferId;
-						MPI_Recv(&bufferId, 1, MPI_UNSIGNED,
-								status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm,
-								MPI_STATUS_IGNORE);
-						bufferIds[status.MPI_SOURCE] = bufferId;
-					} else {
-						// Get the size that is received
-						MPI_Get_count(&status, MPI_CHAR, &size);
+					// Select a buffer
+					MPI_Recv(&bufferId, 1, MPI_UNSIGNED,
+							status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm,
+							MPI_STATUS_IGNORE);
 
-						// Receive the buffer
-						buf = m_asyncCalls[id]->getBufferPos(bufferIds[status.MPI_SOURCE], status.MPI_SOURCE, size);
-						MPI_Recv(buf, size, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm,
-								MPI_STATUS_IGNORE);
+					// Probe buffer receive from some source/tag
+					MPI_Probe(status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm, &status);
 
-						bufferIds[status.MPI_SOURCE] = -1;
+					// Get the size that is received
+					MPI_Get_count(&status, MPI_CHAR, &size);
 
-						if (m_asyncCopy)
+					// Receive the buffer
+					buf = m_asyncCalls[id]->getBufferPos(bufferId, status.MPI_SOURCE, size);
+					MPI_Recv(buf, size, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm,
+							MPI_STATUS_IGNORE);
+
+					if (m_asyncCopy)
 							asyncReadyTasks[id]++;
-					}
 					break;
 				case WAIT_TAG:
 				case FINALIZE_TAG:
@@ -380,7 +374,8 @@ public:
 		}
 
 		delete [] readyTasks;
-		delete [] bufferIds;
+		delete [] asyncReadyTasks;
+		delete [] lastTag;
 	}
 
 	void finalize()
