@@ -146,7 +146,7 @@ public:
 		assert(m_scheduler);
 		assert(!m_scheduler->isExecutor());
 
-		m_scheduler->addBuffer(m_id, bufferSize);
+		m_scheduler->addBuffer(m_id, m_numBuffers, bufferSize);
 
 		_addBuffer(bufferSize);
 

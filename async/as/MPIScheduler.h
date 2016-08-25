@@ -161,6 +161,15 @@ private:
 	/** Use asynchronous MPI for copying data to the executor */
 	bool m_asyncCopy;
 
+	/**
+	 * A list of possible buffer ids
+	 *
+	 * With MPI_Isend we need to provide a memory location for buffer ids
+	 * that is not on the stack. We can use this vector which contains:
+	 * id[0] = 0, id[1] = 1, ...
+	 */
+	std::vector<unsigned int> m_heapBufferIds;
+
 	/** Class is finalized? */
 	bool m_finalized;
 
@@ -412,8 +421,14 @@ private:
 		return id;
 	}
 
-	void addBuffer(int id, unsigned long size)
+	void addBuffer(int id, unsigned int bufferId, unsigned long size)
 	{
+		if (bufferId >= m_heapBufferIds.size()) {
+			assert(bufferId == m_heapBufferIds.size()); // IDs always increment by 1
+
+			m_heapBufferIds.push_back(bufferId);
+		}
+
 		MPI_Send(&size, 1, MPI_UNSIGNED_LONG,
 				m_groupSize-1, id*NUM_TAGS+ADD_TAG, m_privateGroupComm);
 
@@ -447,7 +462,7 @@ private:
 		MPIRequest2 requests;
 
 		// Select the buffer
-		MPI_Isend(&bufferId, 1, MPI_UNSIGNED,
+		MPI_Isend(&m_heapBufferIds[bufferId], 1, MPI_UNSIGNED,
 				m_groupSize-1, id*NUM_TAGS+BUFFER_TAG, m_privateGroupComm,
 				&requests.r[0]);
 
