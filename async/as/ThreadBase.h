@@ -57,8 +57,8 @@ namespace as
  * This class is used by {@link Thread} and
  * {@link MPI}.
  */
-template<class Executor, typename Parameter>
-class ThreadBase : public Base<Executor>
+template<class Executor, typename InitParameter, typename Parameter>
+class ThreadBase : public Base<Executor, InitParameter, Parameter>
 {
 private:
 	/** Async thread */
@@ -105,7 +105,7 @@ public:
 
 	void setExecutor(Executor &executor)
 	{
-		Base<Executor>::setExecutor(executor);
+		Base<Executor, InitParameter, Parameter>::setExecutor(executor);
 
 		// Lock the reader until data is available
 		pthread_mutex_lock(&m_readerLock);
@@ -120,12 +120,17 @@ public:
 			logError() << "ASYNC: Failed to start asynchronous thread";
 	}
 
-	unsigned int addBuffer(size_t bufferSize)
+	void setAffinity(const cpu_set_t &cpuSet)
 	{
-		unsigned int id = Base<Executor>::addBuffer(bufferSize);
+		pthread_setaffinity_np(m_asyncThread, sizeof(cpu_set_t), &cpuSet);
+	}
+
+	unsigned int addBuffer(const void* buffer, size_t size)
+	{
+		unsigned int id = Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size);
 
 		// Now, initialize the buffer on the executor thread with zeros
-		wait();
+		pthread_spin_lock(&m_writerLock);
 		m_initBuffer = id; // Mark for buffer fill
 		pthread_mutex_unlock(&m_readerLock); // Similar to call() but without setting the parameters
 
@@ -135,9 +140,9 @@ public:
 		return id;
 	}
 
-	void setAffinity(const cpu_set_t &cpuSet)
+	const void* buffer(unsigned int id) const
 	{
-		pthread_setaffinity_np(m_asyncThread, sizeof(cpu_set_t), &cpuSet);
+		return Base<Executor, InitParameter, Parameter>::_buffer(id);
 	}
 
 	/**
@@ -157,7 +162,7 @@ public:
 
 	void finalize()
 	{
-		if (!Base<Executor>::finalize())
+		if (!Base<Executor, InitParameter, Parameter>::_finalize())
 			return;
 
 		// Shutdown the thread

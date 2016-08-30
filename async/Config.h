@@ -34,25 +34,86 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifdef USE_MPI
-#include <mpi.h>
-#endif
-#include <cxxtest/ErrorPrinter.h>
+#ifndef ASYNC_CONFIG_H
+#define ASYNC_CONFIG_H
 
-int main(int argc, char** argv)
+#include <string>
+
+#include "utils/env.h"
+#include "utils/logger.h"
+#include "utils/stringutils.h"
+
+namespace async
 {
+
+/**
+ * The asynchnchronous mode that should be used
+ */
+enum Mode
+{
+	SYNC,
+	THREAD,
+	MPI
+};
+
+class Config
+{
+public:
+	static Mode mode()
+	{
+		static const Mode mode = str2mode(utils::Env::get<const char*>("ASYNC_MODE", "SYNC"));
+		return mode;
+	}
+
+	static int getPinCore()
+	{
+		return utils::Env::get<int>("ASYNC_PIN_CORE", -1);
+	}
+
+	static unsigned int groupSize()
+	{
+		if (mode() != MPI)
+			return 1;
+
+		return utils::Env::get("ASYNC_GROUP_SIZE", 64);
+	}
+
+	static bool useAsyncCopy()
+	{
+		return utils::Env::get<int>("ASYNC_ASYNC_MPI_COPY", 0);
+	}
+
+	static size_t alignment()
+	{
+		return utils::Env::get<size_t>("ASYNC_BUFFER_ALIGNMENT", 0);
+	}
+
+	static size_t maxSend()
+	{
+		return utils::Env::get<size_t>("ASYNC_MPI_MAX_SEND", 1UL<<30);
+	}
+
+private:
+	static Mode str2mode(const char* mode)
+	{
+		std::string strMode(mode);
+		utils::StringUtils::toUpper(strMode);
+
+		if (strMode == "THREAD")
+			return THREAD;
+		if (strMode == "MPI") {
 #ifdef USE_MPI
-    MPI_Init(&argc, &argv);
-#endif
+			return MPI;
+#else // USE_MPI
+			logError() << "Asynchronous MPI is not supported without MPI";
+#endif // USE_MPI
+		}
+		if (strMode != "SYNC")
+			logWarning() << "Unknown mode" << utils::nospace << strMode << ". Using synchronous mode.";
+		return SYNC;
+	}
+};
 
-    CxxTest::ErrorPrinter tester;
-    int status = CxxTest::Main<CxxTest::ErrorPrinter>(tester, argc, argv);
-
-#ifdef USE_MPI
-    MPI_Finalize();
-#endif
-
-    return status;
 }
 
-<CxxTest world>
+#endif // ASYNC_CONFIG_H

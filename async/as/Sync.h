@@ -48,13 +48,9 @@ namespace as
 /**
  * Asynchronous call via pthreads
  */
-template<class Executor, typename Parameter>
-class Sync : public Base<Executor>
+template<class Executor, typename InitParameter, typename Parameter>
+class Sync : public Base<Executor, InitParameter, Parameter>
 {
-private:
-	/** The current buffer position */
-	std::vector<size_t> m_bufferPos;
-
 public:
 	Sync()
 	{
@@ -62,24 +58,20 @@ public:
 
 	~Sync()
 	{
-		Base<Executor>::finalize();
 	}
 
-	unsigned int addBuffer(size_t bufferSize)
+	unsigned int addBuffer(const void* buffer, size_t size)
 	{
-		unsigned int id = Base<Executor>::addBuffer(bufferSize);
-		m_bufferPos.push_back(0);
-
-		return id;
+		return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
 	}
 
-	/**
-	 * Will always return <code>false</code>. Only
-	 * relevant in MPI mode.
-	 */
-	bool isExecutor() const
+	const void* buffer(unsigned int id) const
 	{
-		return false;
+		return Base<Executor, InitParameter, Parameter>::origin(id);
+	}
+
+	void sendBuffer(unsigned int id, size_t size)
+	{
 	}
 
 	/**
@@ -89,22 +81,9 @@ public:
 	{
 	}
 
-	void fillBuffer(unsigned int id, const void* buffer, size_t size)
-	{
-		assert(id < Base<Executor>::numBuffers());
-		assert(m_bufferPos[id]+size <= Base<Executor>::bufferSize(id));
-
-		memcpy(Base<Executor>::_buffer(id)+m_bufferPos[id], buffer, size);
-		m_bufferPos[id] += size;
-	}
-
 	void call(const Parameter &parameters)
 	{
-		Base<Executor>::executor().exec(parameters);
-
-		// Reset the buffer positions
-		for (unsigned int i = 0; i < Base<Executor>::numBuffers(); i++)
-			m_bufferPos[i] = 0;
+		Base<Executor, InitParameter, Parameter>::executor().exec(parameters);
 	}
 };
 

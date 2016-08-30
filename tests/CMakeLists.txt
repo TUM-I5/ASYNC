@@ -6,11 +6,11 @@
 #
 # 1. Redistributions of source code must retain the above copyright notice,
 #    this list of conditions and the following disclaimer.
-# 
+#
 # 2. Redistributions in binary form must reproduce the above copyright notice
 #    this list of conditions and the following disclaimer in the documentation
 #    and/or other materials provided with the distribution.
-# 
+#
 # 3. Neither the name of the copyright holder nor the names of its
 #    contributors may be used to endorse or promote products derived from this
 #    software without specific prior written permission.
@@ -59,7 +59,7 @@ function( add_mpi_cxx_test target source ranks )
         OUTPUT "${CPP_FULL_NAME}"
         COMMAND ${CXXTESTGEN} --runner=ErrorPrinter --output "${CPP_FULL_NAME}"
          --template "${cxx_template}" "${source}"
-        DEPENDS "${source}"
+        DEPENDS "${source}" "${cxx_template}"
     )
     add_executable(${target} ${CPP_FULL_NAME})
     set_target_properties(${target} PROPERTIES COMPILE_FLAGS "-Wno-effc++")
@@ -80,12 +80,14 @@ endfunction( add_serial_cxx_test )
 
 # Add tests
 add_serial_cxx_test( TestModuleSync ${CMAKE_CURRENT_SOURCE_DIR}/Module.t.h )
-set_target_properties( TestModuleSync PROPERTIES COMPILE_DEFINITIONS "USE_ASYNC_SYNC" )
+set_tests_properties( TestModuleSync PROPERTIES ENVIRONMENT "ASYNC_MODE=SYNC" )
 add_serial_cxx_test( TestModuleThread ${CMAKE_CURRENT_SOURCE_DIR}/Module.t.h )
-set_target_properties( TestModuleThread PROPERTIES COMPILE_DEFINITIONS "USE_ASYNC_THREAD" )
+set_tests_properties( TestModuleThread PROPERTIES ENVIRONMENT "ASYNC_MODE=THREAD" )
+# set_target_properties( TestModuleThread PROPERTIES COMPILE_DEFINITIONS "USE_ASYNC_THREAD" )
 if( USE_MPI )
     add_mpi_cxx_test( TestModuleMPI ${CMAKE_CURRENT_SOURCE_DIR}/Module.t.h 3 )
-    set_target_properties( TestModuleMPI PROPERTIES COMPILE_DEFINITIONS "USE_ASYNC_MPI" )
+    set_tests_properties( TestModuleMPI PROPERTIES ENVIRONMENT "ASYNC_MODE=MPI" )
+#     set_target_properties( TestModuleMPI PROPERTIES COMPILE_DEFINITIONS "USE_ASYNC_MPI" )
 endif( USE_MPI )
 
 # Add subdirectories

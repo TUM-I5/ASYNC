@@ -41,93 +41,115 @@
 #include <mpi.h>
 #endif // USE_MPI
 
-#include <sched.h>
-#include <sys/sysinfo.h>
-
 #include "utils/env.h"
 
-#ifdef USE_ASYNC_MPI
+#ifdef USE_MPI
 #include "async/as/MPI.h"
-#else // USE_ASYNC_MPI
-#ifdef USE_ASYNC_THREAD
+#endif // USE_MPI
 #include "async/as/Thread.h"
-#else // USE_ASYNC_THREAD
 #include "async/as/Sync.h"
-#endif // USE_ASYNC_THREAD
-#endif // USE_ASYNC_MPI
 
+#include "Config.h"
 #include "ModuleBase.h"
 
 namespace async
 {
 
-template<class Executor, typename InitParam, typename Param>
-class Module :
-	public ModuleBase,
-#ifdef USE_ASYNC_MPI
-	public as::MPI<Executor, InitParam, Param>
-#else // USE_ASYNC_MPI
-#ifdef USE_ASYNC_THREAD
-	public as::Thread<Executor, Param>
-#else // USE_ASYNC_THREAD
-	public as::Sync<Executor, Param>
-#endif // USE_ASYNC_THREAD
-#endif // USE_ASYNC_MPI
+template<class Executor, typename InitParameter, typename Parameter>
+class Module : public ModuleBase
 {
+private:
+	async::as::Base<Executor, InitParameter, Parameter>* m_async;
+
 public:
-#ifdef USE_ASYNC_THREAD
 	Module()
 	{
-		int core = utils::Env::get<int>("ASYNC_PIN_CORE", -1);
-		if (core < 0) {
-			int numCores = get_nprocs();
-			core = numCores - core;
+		switch (Config::mode()) {
+		case SYNC:
+			m_async = new async::as::Sync<Executor, InitParameter, Parameter>();
+			break;
+		case THREAD:
+			m_async = new async::as::Thread<Executor, InitParameter, Parameter>();
+			break;
+		case MPI:
+#ifdef USE_MPI
+			m_async = new async::as::MPI<Executor, InitParameter, Parameter>();
+#else // USE_MPI
+			logError() << "Asynchronous MPI is not supported.";
+#endif // USE_MPI
+			break;
 		}
-
-		if (core < 0) {
-			logWarning() << "Skipping async thread pining, invalid core id" << core << "specified";
-			return;
-		}
-
-		cpu_set_t cpuMask;
-		CPU_ZERO(&cpuMask);
-		CPU_SET(core, &cpuMask);
-		this->setAffinity(cpuMask);
 	}
-#endif // USE_ASYNC_THREAD
 
-#ifdef USE_ASYNC_MPI
-	void setScheduler(as::MPIScheduler &scheduler)
+	virtual ~Module()
 	{
-		this->scheduler(scheduler);
-	}
-#else // USE_ASYNC_MPI
-	/**
-	 * Small function that makes sure that we can call <code>callInit</code>
-	 * from all types of async modules.
-	 */
-	void callInit(const InitParam &parameters)
-	{
-		execInit(parameters);
+		delete m_async;
 	}
 
-	/**
-	 * Call finalize the executor as well
-	 */
+	void setExecutor(Executor &executor)
+	{
+		m_async->setExecutor(executor);
+	}
+
+	void init()
+	{
+		setUp();
+	}
+
+	void addBuffer(const void* buffer, size_t size)
+	{
+		m_async->addBuffer(buffer, size);
+	}
+
+	unsigned int numBuffers() const
+	{
+		return m_async->numBuffers();
+	}
+
+	size_t bufferSize(unsigned int id) const
+	{
+		return m_async->bufferSize(id);
+	}
+
+	const void* buffer(unsigned int id) const
+	{
+		return m_async->buffer(id);
+	}
+
+	void sendBuffer(unsigned int id, size_t size)
+	{
+		m_async->sendBuffer(id, size);
+	}
+
+	void callInit(const InitParameter &param)
+	{
+		m_async->callInit(param);
+	}
+
+	void call(const Parameter &param)
+	{
+		m_async->call(param);
+	}
+
+	void wait()
+	{
+		m_async->wait();
+	}
+
 	void finalize()
 	{
-#ifdef USE_ASYNC_THREAD
-		as::Thread<Executor, Param>::finalize();
-#else // USE_ASYNC_THREAD
-		as::Sync<Executor, Param>::finalize();
-#endif // USE_ASYNC_THREAD
+		m_async->finalize();
 
 		tearDown();
 	}
-#endif // USE_ASYNC_MPI
 
-protected:
-	virtual void execInit(const InitParam &parameters) = 0;
+private:
+#ifdef USE_MPI
+	void setScheduler(as::MPIScheduler &scheduler)
+	{
+		m_async->setScheduler(scheduler);
+	}
+#endif // USE_MPI
 };
 
 }

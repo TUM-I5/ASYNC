@@ -39,7 +39,10 @@
 
 #include <cassert>
 #include <cstring>
+#include <sched.h>
+#include <sys/sysinfo.h>
 
+#include "async/Config.h"
 #include "ThreadBase.h"
 
 namespace async
@@ -51,8 +54,8 @@ namespace as
 /**
  * Asynchronous call via pthreads
  */
-template<class Executor, typename Parameter>
-class Thread : public ThreadBase<Executor, Parameter>
+template<class Executor, typename InitParameter, typename Parameter>
+class Thread : public ThreadBase<Executor, InitParameter, Parameter>
 {
 private:
 	/** The current buffer position */
@@ -62,46 +65,57 @@ public:
 	Thread()
 	{
 	}
-	
+
 	~Thread()
 	{
 	}
 
-	unsigned int addBuffer(size_t bufferSize)
+	void setExecutor(Executor &executor)
 	{
-		unsigned int id = ThreadBase<Executor, Parameter>::addBuffer(bufferSize);
+		ThreadBase<Executor, InitParameter, Parameter>::setExecutor(executor);
+
+		const int numCores = get_nprocs();
+
+		int core = async::Config::getPinCore();
+		if (core < 0)
+			core = numCores + core;
+
+		if (core < 0 || core >= numCores) {
+			logWarning() << "Skipping async thread pining, invalid core id" << core << "specified";
+			return;
+		}
+
+		cpu_set_t cpuMask;
+		CPU_ZERO(&cpuMask);
+		CPU_SET(core, &cpuMask);
+		ThreadBase<Executor, InitParameter, Parameter>::setAffinity(cpuMask);
+	}
+
+	unsigned int addBuffer(const void* buffer, size_t size)
+	{
+		unsigned int id = ThreadBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size);
 		m_bufferPos.push_back(0);
 
 		return id;
 	}
 
-	/**
-	 * Will always return <code>false</code> for threads. Only
-	 * for compatibility with the MPI mode.
-	 */
-	bool isExecutor() const
+	void sendBuffer(unsigned int id, size_t size)
 	{
-		return false;
-	}
+		assert(id < (Base<Executor, InitParameter, Parameter>::numBuffers()));
+		assert(m_bufferPos[id]+size <= (Base<Executor, InitParameter, Parameter>::bufferSize(id)));
 
-	/**
-	 * @param size The size of data array in bytes
-	 */
-	void fillBuffer(unsigned int id, const void* buffer, size_t size)
-	{
-		assert(id < Base<Executor>::numBuffers());
-		assert(m_bufferPos[id]+size <= Base<Executor>::bufferSize(id));
-
-		memcpy(ThreadBase<Executor, Parameter>::_buffer(id)+m_bufferPos[id], buffer, size);
+		memcpy(Base<Executor, InitParameter, Parameter>::_buffer(id)+m_bufferPos[id],
+		       Base<Executor, InitParameter, Parameter>::origin(id)+m_bufferPos[id],
+		       size);
 		m_bufferPos[id] += size;
 	}
-	
+
 	void call(const Parameter &parameters)
 	{
-		ThreadBase<Executor, Parameter>::call(parameters);
+		ThreadBase<Executor, InitParameter, Parameter>::call(parameters);
 
 		// Reset the buffer positions
-		for (unsigned int i = 0; i < Base<Executor>::numBuffers(); i++)
+		for (unsigned int i = 0; i < Base<Executor, InitParameter, Parameter>::numBuffers(); i++)
 			m_bufferPos[i] = 0;
 	}
 };

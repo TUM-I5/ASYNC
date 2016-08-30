@@ -40,6 +40,9 @@
 
 #include <cxxtest/TestSuite.h>
 
+#include <sched.h>
+
+#include "async/Config.h"
 #include "async/Dispatcher.h"
 #include "async/Module.h"
 
@@ -47,7 +50,7 @@ struct Param
 {
 };
 
-class Executor : private async::Module<Executor, Param, Param>
+class Module : private async::Module<Module, Param, Param>
 {
 public:
 	bool m_setUp;
@@ -55,47 +58,31 @@ public:
 	bool m_exec;
 	bool m_tearDown;
 
-	unsigned m_groupSize;
+	int m_cpu;
 
 public:
-	Executor()
+	Module()
 		: m_setUp(false),
 		  m_execInit(false),
 		  m_exec(false),
-		  m_tearDown(false),
-		  m_groupSize(0)
+		  m_tearDown(false)
 	{
 	}
 
-	bool run()
+	void run()
 	{
-		async::Dispatcher dispatcher;
-#ifdef USE_MPI
-		dispatcher.setCommunicator(MPI_COMM_WORLD);
-#endif // USE_MPI
-		dispatcher.init();
+		init();
 
-		m_groupSize = dispatcher.groupSize();
+		Param param;
+		callInit(param);
 
-		if (dispatcher.dispatch()) {
-			// Empty initialization
-			setUp();
+		wait();
 
-			Param param;
-			callInit(param);
+		call(param);
 
-			wait();
+		wait();
 
-			call(param);
-
-			wait();
-
-			finalize();
-
-			return false;
-		}
-
-		return true;
+		finalize();
 	}
 
 	void execInit(const Param &param)
@@ -106,6 +93,8 @@ public:
 	void exec(const Param &param)
 	{
 		m_exec = true;
+
+		m_cpu = sched_getcpu();
 	}
 
 	void setUp()
@@ -120,52 +109,61 @@ public:
 	}
 };
 
-class BufferExecutor : private async::Module<BufferExecutor, Param, Param>
+class BufferModule : private async::Module<BufferModule, Param, Param>
 {
 public:
+	unsigned int m_initBufferSize;
 	unsigned int m_bufferSize;
+	int m_buffer;
 
 public:
-	BufferExecutor()
-		: m_bufferSize(0)
+	BufferModule()
+		: m_initBufferSize(0),
+		  m_bufferSize(0)
 	{
 	}
 
-	bool run()
+	void run()
 	{
-		async::Dispatcher dispatcher;
-#ifdef USE_MPI
-		dispatcher.setCommunicator(MPI_COMM_WORLD);
-#endif // USE_MPI
-		dispatcher.init();
+		init();
 
-		if (dispatcher.dispatch()) {
-			// Empty initialization
-			setUp();
-			addBuffer(42);
+		int initBuffer[2];
+		addBuffer(initBuffer, 2*sizeof(int));
 
-			wait();
+		int buffer = 42;
+		addBuffer(&buffer, sizeof(int));
 
-			Param param;
-			call(param);
+		Param param;
+		callInit(param);
 
-			wait();
+		sendBuffer(1, sizeof(int));
 
-			finalize();
+		wait();
 
-			return false;
+		call(param);
+
+		if (async::Config::mode() == async::MPI) {
+			// Set the params on non-executors
+			execInit(param);
+			exec(param);
 		}
 
-		return true;
+		wait();
+
+		finalize();
 	}
 
 	void execInit(const Param &param)
 	{
+		m_initBufferSize = bufferSize(0);
 	}
 
 	void exec(const Param &param)
 	{
-		m_bufferSize = bufferSize(0);
+		m_bufferSize = bufferSize(1);
+		for (unsigned int i = 0; i < m_bufferSize/sizeof(int); i++) {
+			TS_ASSERT_EQUALS(42, *(static_cast<const int*>(buffer(1))+i));
+		}
 	}
 
 	void setUp()
@@ -198,54 +196,70 @@ public:
 
 	void testModuleDispatcher()
 	{
-		Executor executor;
-		bool isExecutor = executor.run();
-		if (isExecutor) {
-#ifdef USE_ASYNC_MPI
-			TS_ASSERT_EQUALS(m_rank+1, m_size);
-#else // USE_ASYNC_MPI
-			TS_FAIL("No executors in SYNC and THEAD mode!");
-#endif // USE_ASYNC_MPI
+		async::Dispatcher dispatcher;
+#ifdef USE_MPI
+		dispatcher.setCommunicator(MPI_COMM_WORLD);
+#endif // USE_MPI
+
+		unsigned int groupSize = dispatcher.groupSize();
+		if (async::Config::mode() == async::MPI) {
+			TS_ASSERT_EQUALS(groupSize, 64); // the default
+		} else {
+			TS_ASSERT_EQUALS(groupSize, 1);
 		}
 
-		TS_ASSERT(executor.m_setUp);
-#ifdef USE_ASYNC_MPI
-		if (isExecutor) {
-#endif // USE_ASYNC_MPI
-			TS_ASSERT(executor.m_execInit);
-			TS_ASSERT(executor.m_exec);
-			TS_ASSERT(executor.m_tearDown);
-#ifdef USE_ASYNC_MPI
-		}
-#endif // USE_ASYNC_MPI
+		Module module;
 
-#ifdef USE_ASYNC_MPI
-		TS_ASSERT_EQUALS(executor.m_groupSize, 64); // the default
-#else // USE_ASYNC_MPI
-		TS_ASSERT_EQUALS(executor.m_groupSize, 1);
-#endif // USE_ASYNC_MPI
+		dispatcher.init();
+
+		if (dispatcher.dispatch()) {
+			TS_ASSERT(!dispatcher.isExecutor());
+
+			module.run();
+		} else {
+			TS_ASSERT(dispatcher.isExecutor());
+
+			if (async::Config::mode() == async::MPI) {
+				TS_ASSERT_EQUALS(m_rank+1, m_size);
+			} else {
+				TS_FAIL("No executors in SYNC and THREAD mode!");
+			}
+		}
+
+		dispatcher.finalize();
+
+		TS_ASSERT(module.m_setUp);
+		if (dispatcher.isExecutor()) {
+			TS_ASSERT(module.m_execInit);
+			TS_ASSERT(module.m_exec);
+		}
+		TS_ASSERT(module.m_tearDown);
+
+		if (async::Config::mode() == async::THREAD) {
+			TS_ASSERT_EQUALS(module.m_cpu, get_nprocs()-1);
+		}
 	}
 
 	void testBuffer()
 	{
-		BufferExecutor executor;
-		bool isExecutor = executor.run();
-		if (isExecutor) {
-#ifdef USE_ASYNC_MPI
-			TS_ASSERT_EQUALS(m_rank+1, m_size);
-#else // USE_ASYNC_MPI
-			TS_FAIL("No executors in SYNC and THREAD mode!");
-#endif // USE_ASYNC_MPI
+		async::Dispatcher dispatcher;
+
+		BufferModule module;
+
+		dispatcher.init();
+
+		if (dispatcher.dispatch())
+			module.run();
+
+		unsigned int initBufferSize = 2*sizeof(int);
+		unsigned int bufferSize = sizeof(int);
+
+		if (dispatcher.isExecutor() && async::Config::mode() == async::MPI) {
+			initBufferSize *= m_size-1;
+			bufferSize *= m_size-1;
 		}
 
-		unsigned int bufferSize = 42;
-#ifdef USE_ASYNC_MPI
-		if (isExecutor) {
-			bufferSize *= m_size-1;
-#endif // USE_ASYNC_MPI
-			TS_ASSERT_EQUALS(executor.m_bufferSize, bufferSize);
-#ifdef USE_ASYNC_MPI
-		}
-#endif // USE_ASYNC_MPI
+		TS_ASSERT_EQUALS(module.m_initBufferSize, initBufferSize);
+		TS_ASSERT_EQUALS(module.m_bufferSize, bufferSize);
 	}
 };

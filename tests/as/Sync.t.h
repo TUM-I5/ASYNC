@@ -39,6 +39,7 @@
 #include "async/as/Sync.h"
 #include "Executor.h"
 
+class Param;
 class TestSync : public CxxTest::TestSuite
 {
 private:
@@ -54,7 +55,7 @@ public:
 	{
 		Executor<TestSync> executor(this);
 
-		async::as::Sync<Executor<TestSync>, Parameter> async;
+		async::as::Sync<Executor<TestSync>, Parameter, Parameter> async;
 		async.setExecutor(executor);
 
 		async.wait();
@@ -64,7 +65,7 @@ public:
 	{
 		Executor<TestSync> executor(this);
 
-		async::as::Sync<Executor<TestSync>, Parameter> async;
+		async::as::Sync<Executor<TestSync>, Parameter, Parameter> async;
 		async.setExecutor(executor);
 
 		TS_ASSERT_EQUALS(async.numBuffers(), 0);
@@ -90,10 +91,14 @@ public:
 	{
 		Executor<TestSync> executor(this);
 
-		async::as::Sync<Executor<TestSync>, Parameter> async;
+		async::as::Sync<Executor<TestSync>, Parameter, Parameter> async;
 		async.setExecutor(executor);
 
-		TS_ASSERT_EQUALS(async.addBuffer(sizeof(int)), 0);
+		int buffer = 2;
+		TS_ASSERT_EQUALS(async.addBuffer(&buffer, sizeof(int)), 0);
+		TS_ASSERT_EQUALS(async.numBuffers(), 1);
+
+		TS_ASSERT_EQUALS(&buffer, async.buffer(0));
 
 		async.wait();
 	}

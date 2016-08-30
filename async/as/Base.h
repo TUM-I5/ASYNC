@@ -37,12 +37,14 @@
 #ifndef ASYNC_AS_BASE_H
 #define ASYNC_AS_BASE_H
 
+#include <cassert>
 #include <cstdlib>
 #include <stdint.h>
 #include <vector>
 
-#include "utils/env.h"
 #include "utils/logger.h"
+
+#include "async/Config.h"
 
 namespace async
 {
@@ -50,100 +52,166 @@ namespace async
 namespace as
 {
 
+class MPIScheduler;
+
 /**
  * Base class for (a)synchronous communication
  */
-template<class Executor>
+template<class Executor, typename InitParameter, typename Parameter>
 class Base
 {
+private:
+	/**
+	 * Description of a buffer
+	 */
+	struct Buffer
+	{
+		/** The original memory */
+		const void* origin;
+		/** The buffer on the executor (might be NULL) */
+		void* buffer;
+		/** Size of the original memory */
+		size_t size;
+	};
+
 private:
 	/** The executor for the asynchronous call */
 	Executor* m_executor;
 
 	/** The buffers */
-	std::vector<void*> m_buffer;
-
-	/** The size of the buffer */
-	std::vector<size_t> m_bufferSize;
+	std::vector<Buffer> m_buffer;
 
 	/** Already cleanup everything? */
 	bool m_finalized;
 
 	/** Aligment of buffers (might be requested for I/O back-ends) */
-	size_t m_alignment;
+	const size_t m_alignment;
 
 protected:
 	Base()
 		: m_executor(0L),
-		  m_finalized(false)
+		  m_finalized(false),
+		  m_alignment(async::Config::alignment())
 	{
-		m_alignment = utils::Env::get<size_t>("ASYNC_BUFFER_ALIGNMENT", 0);
-	}
-
-	~Base()
-	{
-		for (unsigned int i = 0; i < m_buffer.size(); i++)
-			free(m_buffer[i]);
-	}
-
-	Executor& executor() {
-		return *m_executor;
-	}
-
-	/**
-	 * Return u_int8_t to allow arithmetic on the pointer
-	 */
-	u_int8_t* _buffer(unsigned int id)
-	{
-		return static_cast<uint8_t*>(m_buffer[id]);
 	}
 
 public:
-	void setExecutor(Executor &executor)
+	virtual ~Base()
+	{
+		_finalize();
+	}
+
+	/**
+	 * Only required in asynchronous MPI mode
+	 */
+	virtual void setScheduler(MPIScheduler &scheduler)
+	{ }
+
+	virtual void setExecutor(Executor &executor)
 	{
 		m_executor = &executor;
 	}
 
 	/**
-	 * @param bufferSize
+	 * @return True, if this is an MPI executor
+	 */
+	virtual bool isExecutor() const
+	{
+		return false; // Default for sync and thread
+	}
+
+	/**
+	 * @param buffer The original memory location in the application
+	 * @param bufferSize The size of the memory location
 	 * @return The id of the buffer
 	 */
-	unsigned int addBuffer(size_t bufferSize)
-	{
-		if (bufferSize) {
-			void* buffer;
-			if (m_alignment > 0) {
-				// Make the allocated buffer size a multiple of m_alignment
-				size_t allocBufferSize = (bufferSize + m_alignment - 1) / m_alignment;
-				allocBufferSize *= m_alignment;
-
-				int ret = posix_memalign(&buffer, m_alignment, allocBufferSize);
-				if (ret)
-					logError() << "Could not allocate buffer" << ret;
-			} else {
-				buffer = malloc(bufferSize);
-			}
-			m_buffer.push_back(buffer);
-		} else
-			m_buffer.push_back(0L);
-		m_bufferSize.push_back(bufferSize);
-
-		return m_buffer.size()-1;
-	}
+	virtual unsigned int addBuffer(const void* buffer, size_t size) = 0;
 
 	unsigned int numBuffers() const
 	{
 		return m_buffer.size();
 	}
 
-	const void* buffer(unsigned int id) const
-	{
-		return m_buffer[id];
-	}
-
 	size_t bufferSize(unsigned int id) const
 	{
-		return m_bufferSize[id];
+		assert(id < numBuffers());
+		return m_buffer[id].size;
+	}
+
+	virtual const void* buffer(unsigned int id) const = 0;
+
+	/**
+	 * @param size The size that should be transfered
+	 */
+	virtual void sendBuffer(unsigned int id, size_t size) = 0;
+
+	virtual void callInit(const InitParameter &parameters)
+	{
+		m_executor->execInit(parameters);
+	}
+
+	virtual void call(const Parameter &parameters) = 0;
+
+	virtual void wait() = 0;
+
+	virtual void finalize()
+	{
+		_finalize();
+	}
+
+protected:
+	Executor& executor() {
+		return *m_executor;
+	}
+
+	unsigned int _addBuffer(const void* origin, size_t size, bool allocate = true)
+	{
+		Buffer buffer;
+		buffer.origin = origin;
+		buffer.size = size;
+
+		if (size && allocate) {
+			if (m_alignment > 0) {
+				// Make the allocated buffer size a multiple of m_alignment
+				size_t allocBufferSize = (size + m_alignment - 1) / m_alignment;
+				allocBufferSize *= m_alignment;
+
+				int ret = posix_memalign(&buffer.buffer, m_alignment, allocBufferSize);
+				if (ret)
+					logError() << "Could not allocate buffer" << ret;
+			} else {
+				buffer.buffer = malloc(size);
+			}
+		} else
+			buffer.buffer = 0L;
+
+		m_buffer.push_back(buffer);
+
+		return m_buffer.size()-1;
+	}
+
+	/**
+	 * Return u_int8_t to allow arithmetic on the pointer
+	 */
+	const uint8_t* origin(unsigned int id) const
+	{
+		assert(id < numBuffers());
+		return static_cast<const uint8_t*>(m_buffer[id].origin);
+	}
+
+	const void* _buffer(unsigned int id) const
+	{
+		assert(id < numBuffers());
+		return m_buffer[id].buffer;
+	}
+
+	/**
+	 * Return u_int8_t to allow arithmetic on the pointer
+	 */
+	uint8_t* _buffer(unsigned int id)
+	{
+		assert(id < numBuffers());
+		return static_cast<uint8_t*>(m_buffer[id].buffer);
 	}
 
 	/**
@@ -151,11 +219,20 @@ public:
 	 *
 	 * @return False if the class was already finalized
 	 */
-	bool finalize()
+	bool _finalize()
 	{
-		bool finalized = m_finalized;
+		if (m_finalized)
+			return false;
+
+		for (unsigned int i = 0; i < m_buffer.size(); i++) {
+			m_buffer[i].origin = 0L;
+			free(m_buffer[i].buffer);
+			m_buffer[i].buffer = 0L;
+			m_buffer[i].size = 0;
+		}
+
 		m_finalized = true;
-		return !finalized;
+		return true;
 	}
 };
 

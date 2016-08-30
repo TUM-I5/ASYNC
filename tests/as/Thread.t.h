@@ -70,7 +70,7 @@ public:
 	{
 		Executor<TestThread> executor(this);
 
-		async::as::Thread<Executor<TestThread>, Parameter> async;
+		async::as::Thread<Executor<TestThread>, Parameter, Parameter> async;
 		async.setExecutor(executor);
 
 		async.wait();
@@ -80,7 +80,7 @@ public:
 	{
 		Executor<TestThread> executor(this);
 
-		async::as::Thread<Executor<TestThread>, Parameter> async;
+		async::as::Thread<Executor<TestThread>, Parameter, Parameter> async;
 		async.setExecutor(executor);
 
 		TS_ASSERT_EQUALS(async.numBuffers(), 0);
@@ -104,7 +104,7 @@ public:
 	{
 		Executor<TestThread> executor(this);
 
-		async::as::Thread<Executor<TestThread>, Parameter> async;
+		async::as::Thread<Executor<TestThread>, Parameter, Parameter> async;
 		async.setExecutor(executor);
 
 		// Set affinity (choose a random CPU)
@@ -128,15 +128,14 @@ public:
 	{
 		Executor<TestThread> executor(this);
 
-		async::as::Thread<Executor<TestThread>, Parameter> async;
+		async::as::Thread<Executor<TestThread>, Parameter, Parameter> async;
 		async.setExecutor(executor);
 
-		async.addBuffer(sizeof(int));
-
 		int buffer = 42;
+		async.addBuffer(&buffer, sizeof(int));
 
 		async.wait();
-		async.fillBuffer(0, &buffer, sizeof(int));
+		async.sendBuffer(0, sizeof(int));
 		TS_ASSERT_EQUALS(*reinterpret_cast<const int*>(async.buffer(0)), 42);
 	}
 
@@ -144,21 +143,19 @@ public:
 	{
 		Executor<TestThread> executor(this);
 
-		async::as::Thread<Executor<TestThread>, Parameter> async;
+		async::as::Thread<Executor<TestThread>, Parameter, Parameter> async;
 		async.setExecutor(executor);
 
-		TS_ASSERT_EQUALS(async.addBuffer(sizeof(int)), 0);
-		TS_ASSERT_EQUALS(async.addBuffer(sizeof(int)), 1);
-
-		int buffer = 42;
+		int buffer0 = 42;
+		TS_ASSERT_EQUALS(async.addBuffer(&buffer0, sizeof(int)), 0);
+		int buffer1 = 12;
+		TS_ASSERT_EQUALS(async.addBuffer(&buffer1, sizeof(int)), 1);
 
 		async.wait();
-		async.fillBuffer(0, &buffer, sizeof(int));
+		async.sendBuffer(0, sizeof(int));
 		TS_ASSERT_EQUALS(*reinterpret_cast<const int*>(async.buffer(0)), 42);
 
-		buffer = 12;
-
-		async.fillBuffer(1, &buffer, sizeof(int));
+		async.sendBuffer(1, sizeof(int));
 		TS_ASSERT_EQUALS(*reinterpret_cast<const int*>(async.buffer(1)), 12);
 	}
 
@@ -166,10 +163,10 @@ public:
 	{
 		Executor<TestThread> executor(this);
 
-		async::as::Thread<Executor<TestThread>, Parameter> async1;
+		async::as::Thread<Executor<TestThread>, Parameter, Parameter> async1;
 		async1.setExecutor(executor);
 
-		async::as::Thread<Executor<TestThread>, Parameter> async2;
+		async::as::Thread<Executor<TestThread>, Parameter, Parameter> async2;
 		async2.setExecutor(executor);
 
 		async1.wait();
@@ -192,21 +189,21 @@ public:
 	{
 		Executor<TestThread> executor(this);
 
-		async::as::Thread<Executor<TestThread>, Parameter> async1;
+		async::as::Thread<Executor<TestThread>, Parameter, Parameter> async1;
 		async1.setExecutor(executor);
 
-		TS_ASSERT_EQUALS(async1.addBuffer(sizeof(int)), 0);
+		int buffer = 41;
+		TS_ASSERT_EQUALS(async1.addBuffer(&buffer, sizeof(int)), 0);
 
-		async::as::Thread<Executor<TestThread>, Parameter> async2;
+		async::as::Thread<Executor<TestThread>, Parameter, Parameter> async2;
 		async2.setExecutor(executor);
 
-		TS_ASSERT_EQUALS(async2.addBuffer(sizeof(int)), 0);
+		TS_ASSERT_EQUALS(async2.addBuffer(&buffer, sizeof(int)), 0);
 
 		async1.wait();
 		async2.wait();
 
-		int buffer = 41;
-		async1.fillBuffer(0, &buffer, sizeof(int));
+		async1.sendBuffer(0, sizeof(int));
 		TS_ASSERT_EQUALS(*reinterpret_cast<const int*>(async1.buffer(0)), 41);
 
 		Parameter parameter;

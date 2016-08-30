@@ -45,6 +45,7 @@
 #include "async/as/MPIScheduler.h"
 #endif // USE_ASYNC_MPI
 
+#include "Config.h"
 #include "ModuleBase.h"
 
 namespace async
@@ -53,11 +54,9 @@ namespace async
 class Dispatcher
 {
 private:
-#ifdef USE_ASYNC_MPI
-	async::as::MPIScheduler m_scheduler;
-#endif // USE_ASYNC_MPI
-
 #ifdef USE_MPI
+	async::as::MPIScheduler m_scheduler;
+
 	MPI_Comm m_comm;
 #endif // USE_MPI
 
@@ -68,17 +67,15 @@ public:
 #ifdef USE_MPI
 			m_comm(MPI_COMM_WORLD),
 #endif // USE_MPI
-			m_groupSize(64)
+			m_groupSize(Config::groupSize())
 	{
 	}
 
 	~Dispatcher()
 	{
-#ifdef USE_ASYNC_MPI
 		// Delete all modules so we can create a new dispatcher
 		// probably only important for testing
 		ModuleBase::modules().clear();
-#endif // USE_ASYNC_MPI
 	}
 
 #ifdef USE_MPI
@@ -93,11 +90,7 @@ public:
 	 */
 	unsigned int groupSize() const
 	{
-#ifdef USE_ASYNC_MPI
 		return m_groupSize;
-#else // USE_ASYNC_MPI
-		return 1;
-#endif // USE_ASYNC_MPI
 	}
 
 	/**
@@ -110,23 +103,6 @@ public:
 		m_groupSize = groupSize;
 	}
 
-#ifdef USE_ASYNC_MPI
-	/**
-	 * @return True if the process is an executor
-	 */
-	bool isExecutor() const
-	{
-		return m_scheduler.isExecutor();
-	}
-#endif // USE_ASYNC_MPI
-
-#ifdef USE_ASYNC_MPI
-	const async::as::MPIScheduler& scheduler()
-	{
-		return m_scheduler;
-	}
-#endif // USE_ASYNC_MPI
-
 	/**
 	 * Initialize the dispatcher
 	 *
@@ -135,16 +111,29 @@ public:
 	 */
 	void init()
 	{
-#ifdef USE_ASYNC_MPI
+#ifdef USE_MPI
 		const std::vector<ModuleBase*>& modules = ModuleBase::modules();
 		// Set the scheduler for all modules
 		for (std::vector<ModuleBase*>::const_iterator i = modules.begin();
 				i != modules.end(); i++)
 			(*i)->setScheduler(m_scheduler);
 
-		// Initialize the scheduler
-		m_scheduler.setCommunicator(m_comm, m_groupSize);
-#endif // USE_ASYNC_MPI
+		if (Config::mode() == MPI)
+			// Initialize the scheduler
+			m_scheduler.setCommunicator(m_comm, m_groupSize);
+#endif // USE_MPI
+	}
+
+	/**
+	 * @return True if the process is an MPI executor
+	 */
+	bool isExecutor() const
+	{
+#ifdef USE_MPI
+		return m_scheduler.isExecutor();
+#else // USE_MPI
+		return false;
+#endif // USE_MPI
 	}
 
 	/**
@@ -157,7 +146,7 @@ public:
 	 */
 	bool dispatch()
 	{
-#ifdef USE_ASYNC_MPI
+#ifdef USE_MPI
 		if (m_scheduler.isExecutor()) {
 			const std::vector<ModuleBase*>& modules = ModuleBase::modules();
 			// Initialize the executor modules
@@ -174,16 +163,16 @@ public:
 				(*i)->tearDown();
 			return false;
 		}
-#endif // USE_ASYNC_MPI
+#endif // USE_MPI
 
 		return true;
 	}
 
 	void finalize()
 	{
-#ifdef USE_ASYNC_MPI
+#ifdef USE_MPI
 		m_scheduler.finalize();
-#endif // USE_ASYNC_MPI
+#endif // USE_MPI
 	}
 };
 

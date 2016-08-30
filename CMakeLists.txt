@@ -6,11 +6,11 @@
 #
 # 1. Redistributions of source code must retain the above copyright notice,
 #    this list of conditions and the following disclaimer.
-# 
+#
 # 2. Redistributions in binary form must reproduce the above copyright notice
 #    this list of conditions and the following disclaimer in the documentation
 #    and/or other materials provided with the distribution.
-# 
+#
 # 3. Neither the name of the copyright holder nor the names of its
 #    contributors may be used to endorse or promote products derived from this
 #    software without specific prior written permission.
@@ -52,10 +52,10 @@ if( USE_MPI )
 	set( CMAKE_C_COMPILER ${MPI_C_COMPILER} )
 	set( CMAKE_CXX_COMPILER ${MPI_CXX_COMPILER} )
 	set( CMAKE_Fortran_COMPILER ${MPI_Fortran_COMPILER} )
-	
+
 	# Do not include OpenMPI C++ Bindings
 	add_definitions( -DOMPI_SKIP_MPICXX )
-	
+
 	# Use MPI
 	add_definitions( -DUSE_MPI )
 endif( USE_MPI )

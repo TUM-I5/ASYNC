@@ -44,8 +44,9 @@
 #include <cstring>
 #include <vector>
 
-#include "utils/env.h"
 #include "utils/logger.h"
+
+#include "async/Config.h"
 
 namespace async
 {
@@ -159,7 +160,7 @@ private:
 	std::vector<Scheduled*> m_asyncCalls;
 
 	/** Use asynchronous MPI for copying data to the executor */
-	bool m_asyncCopy;
+	const bool m_asyncCopy;
 
 	/**
 	 * A list of possible buffer ids
@@ -180,9 +181,9 @@ public:
 		  m_groupRank(0), m_groupSize(0),
 		  m_isExecutor(false),
 		  m_commWorld(MPI_COMM_NULL),
+		  m_asyncCopy(async::Config::useAsyncCopy()),
 		  m_finalized(false)
 	{
-		m_asyncCopy = utils::Env::get<>("ASYNC_ASYNC_MPI_COPY", 0);
 	}
 
 	~MPIScheduler()

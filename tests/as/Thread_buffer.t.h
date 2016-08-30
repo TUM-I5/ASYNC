@@ -63,15 +63,14 @@ public:
 	{
 		Executor<TestThread> executor(this);
 
-		async::as::Thread<Executor<TestThread>, Parameter> async;
+		async::as::Thread<Executor<TestThread>, Parameter, Parameter> async;
 		async.setExecutor(executor);
 
-		async.addBuffer(sizeof(int));
-
 		int buffer = 42;
+		async.addBuffer(&buffer, sizeof(int));
 
 		async.wait();
-		async.fillBuffer(0, &buffer, sizeof(int));
+		async.sendBuffer(0, sizeof(int));
 		TS_ASSERT_EQUALS(*reinterpret_cast<const int*>(async.buffer(0)), 42);
 		uintptr_t p = reinterpret_cast<uintptr_t>(async.buffer(0));
 		TS_ASSERT_EQUALS(p % 65536, 0);

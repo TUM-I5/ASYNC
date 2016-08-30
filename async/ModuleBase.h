@@ -39,9 +39,9 @@
 
 #include <vector>
 
-#ifdef USE_ASYNC_MPI
+#ifdef USE_MPI
 #include "async/as/MPIScheduler.h"
-#endif // USE_ASYNC_MPI
+#endif // USE_MPI
 
 namespace async
 {
@@ -65,24 +65,20 @@ public:
 	virtual ~ModuleBase()
 	{ }
 
-#ifdef USE_ASYNC_MPI
 	/**
-	 * Set the scheduler for this module.
-	 */
-	virtual void setScheduler(as::MPIScheduler &scheduler) = 0;
-#endif // USE_ASYNC_MPI
-
-	/**
-	 * Called by {@link Dispatcher} to set up the executor
+	 * Called at initialization. Is also called by the {@link Dispatcher}
+	 * on MPI executors.
 	 *
 	 * Should at least call {@link setExecutor}(*this).
 	 */
 	virtual void setUp() = 0;
 
 	/**
-	 * Called by {@link Dispatcher} to finalize the executor
+	 * Called after finalization. Is also called on MPI
+	 * executors.
 	 */
-	virtual void tearDown() = 0;
+	virtual void tearDown()
+	{ }
 
 private:
 	/**
@@ -94,6 +90,13 @@ private:
 		static std::vector<ModuleBase*> moduleList;
 		return moduleList;
 	}
+
+#ifdef USE_MPI
+	/**
+	 * Set the scheduler for this module.
+	 */
+	virtual void setScheduler(as::MPIScheduler &scheduler) = 0;
+#endif // USE_MPI
 };
 
 }

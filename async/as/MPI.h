@@ -43,11 +43,11 @@
 #include <cassert>
 #include <cstring>
 
-#include "utils/env.h"
-
+#include "async/Config.h"
 #include "ThreadBase.h"
 #include "MPIScheduler.h"
 
+struct Param;
 namespace async
 {
 
@@ -58,7 +58,7 @@ namespace as
  * Asynchronous call via MPI
  */
 template<class Executor, typename InitParameter, typename Parameter>
-class MPI : public ThreadBase<Executor, Parameter>, private Scheduled
+class MPI : public ThreadBase<Executor, InitParameter, Parameter>, private Scheduled
 {
 private:
 	/** The max amount that should be transfered in a single MPI send operation */
@@ -69,9 +69,6 @@ private:
 
 	/** The identifier for this async call */
 	int m_id;
-
-	/** Counter for buffer (w/o async call, we only create the buffers on the executor) */
-	unsigned int m_numBuffers;
 
 	/** Number of buffer chunks (only on the executor rank) */
 	unsigned int m_numBufferChunks;
@@ -93,10 +90,9 @@ private:
 
 public:
 	MPI()
-		: m_maxSend(utils::Env::get<size_t>("ASYNC_MPI_MAX_SEND", 1UL<<30)),
+		: m_maxSend(async::Config::maxSend()),
 		  m_scheduler(0L),
 		  m_id(0),
-		  m_numBuffers(0),
 		  m_numBufferChunks(0)
 	{
 		// One request always required for the parameters
@@ -115,14 +111,9 @@ public:
 			delete [] *it;
 	}
 
-	void scheduler(MPIScheduler &scheduler)
+	void setScheduler(MPIScheduler &scheduler)
 	{
 		m_scheduler = &scheduler;
-	}
-
-	MPIScheduler& scheduler()
-	{
-		return *m_scheduler;
 	}
 
 	/**
@@ -132,7 +123,7 @@ public:
 	{
 		// Initialization on the executor
 		if (m_scheduler->isExecutor())
-			ThreadBase<Executor, Parameter>::setExecutor(executor);
+			ThreadBase<Executor, InitParameter, Parameter>::setExecutor(executor);
 
 		// Add this to the scheduler
 		m_id = m_scheduler->addScheduled(this);
@@ -141,21 +132,26 @@ public:
 	/**
 	 * @param bufferSize Should be 0 on the executor
 	 */
-	unsigned int addBuffer(size_t bufferSize)
+	unsigned int addBuffer(const void* buffer, size_t size)
 	{
 		assert(m_scheduler);
 		assert(!m_scheduler->isExecutor());
 
-		m_scheduler->addBuffer(m_id, m_numBuffers, bufferSize);
+		m_scheduler->addBuffer(m_id,
+			Base<Executor, InitParameter, Parameter>::numBuffers(), size);
 
-		_addBuffer(bufferSize);
-
-		return m_numBuffers-1;
+		return _addBuffer(buffer, size);
 	}
 
-	unsigned int numBuffers() const
+	const void* buffer(unsigned int id) const
 	{
-		return m_numBuffers;
+		if (m_scheduler->isExecutor())
+			return ThreadBase<Executor, InitParameter, Parameter>::buffer(id);
+
+		if (m_scheduler->useAyncCopy())
+			return Base<Executor, InitParameter, Parameter>::_buffer(id);
+
+		return Base<Executor, InitParameter, Parameter>::origin(id);
 	}
 
 	/**
@@ -175,18 +171,20 @@ public:
 	/**
 	 * @param id The id of the buffer
 	 */
-	void fillBuffer(unsigned int id, const void* buffer, size_t size)
+	void sendBuffer(unsigned int id, size_t size)
 	{
-		if (buffer == 0L || size == 0)
+		if (size == 0)
 			return;
 
-		assert(id < numBuffers());
+		assert(id < (Base<Executor, InitParameter, Parameter>::numBuffers()));
 
 		if (m_scheduler->useAyncCopy()) {
 			// Only copy it to the local buffer
-			assert(m_bufferPos[id][0]+size <= Base<Executor>::bufferSize(id));
+			assert(m_bufferPos[id][0]+size <= (Base<Executor, InitParameter, Parameter>::bufferSize(id)));
 
-			memcpy(Base<Executor>::_buffer(id)+m_bufferPos[id][0], buffer, size);
+			memcpy(Base<Executor, InitParameter, Parameter>::_buffer(id)+m_bufferPos[id][0],
+				Base<Executor, InitParameter, Parameter>::origin(id)+m_bufferPos[id][0],
+				size);
 			m_bufferPos[id][0] += size;
 			return;
 		}
@@ -195,7 +193,10 @@ public:
 		for (size_t done = 0; done < size; done += m_maxSend) {
 			size_t send = std::min(m_maxSend, size-done);
 
-			m_scheduler->sendBuffer(m_id, id, static_cast<const char*>(buffer)+done, send);
+			m_scheduler->sendBuffer(m_id, id,
+				Base<Executor, InitParameter, Parameter>::origin(id)+m_bufferPos[id][0],
+				send);
+			m_bufferPos[id][0] += send;
 		}
 	}
 
@@ -204,10 +205,12 @@ public:
 	 */
 	void callInit(const InitParameter &parameters)
 	{
-		if (m_scheduler->useAyncCopy()) {
-			assert(m_numBuffers == Base<Executor>::numBuffers());
-
+		if (m_scheduler->useAyncCopy())
 			iSendAllBuffers();
+		else {
+			// Reset buffer positions
+			for (unsigned int i = 0; i < Base<Executor, InitParameter, Parameter>::numBuffers(); i++)
+				m_bufferPos[i][0] = 0;
 		}
 
 		m_scheduler->sendInitParam(m_id, parameters);
@@ -226,12 +229,16 @@ public:
 			m_asyncRequests.back() = m_scheduler->iSendParam(m_id, m_paramBuffer);
 		} else {
 			m_scheduler->sendParam(m_id, parameters);
+
+			// Reset buffer positions
+			for (unsigned int i = 0; i < Base<Executor, InitParameter, Parameter>::numBuffers(); i++)
+				m_bufferPos[i][0] = 0;
 		}
 	}
 
 	void finalize()
 	{
-		if (!Base<Executor>::finalize())
+		if (!Base<Executor, InitParameter, Parameter>::_finalize())
 			return;
 
 		if (!m_scheduler->isExecutor())
@@ -261,11 +268,12 @@ private:
 		unsigned int nextRequest = 0;
 
 		// Send all buffers
-		for (unsigned int i = 0; i < m_numBuffers; i++) {
+		for (unsigned int i = 0; i < Base<Executor, InitParameter, Parameter>::numBuffers(); i++) {
 			size_t done = 0;
 			for (unsigned int j = 0; j < m_numAsyncRequests[i]; j++) {
 				size_t send = std::min(m_maxSend, m_bufferPos[i][0]-done);
-				MPIRequest2 requests = m_scheduler->iSendBuffer(m_id, i, Base<Executor>::_buffer(i)+done, send);
+				MPIRequest2 requests = m_scheduler->iSendBuffer(m_id, i,
+					Base<Executor, InitParameter, Parameter>::_buffer(i)+done, send);
 				done += send;
 
 				m_asyncRequests[nextRequest] = requests.r[0];
@@ -280,7 +288,12 @@ private:
 		assert(nextRequest == m_asyncRequests.size()-1);
 	}
 
-	void _addBuffer(unsigned long bufferSize)
+	void _addBuffer(unsigned long size)
+	{
+		_addBuffer(0L, size);
+	}
+
+	unsigned int _addBuffer(const void* origin, unsigned long size)
 	{
 		int executorRank = m_scheduler->groupSize()-1;
 
@@ -290,53 +303,56 @@ private:
 			bufferOffsets = new unsigned long[m_scheduler->groupSize()];
 			m_bufferOffsets.push_back(bufferOffsets);
 		}
-		MPI_Gather(&bufferSize, 1, MPI_UNSIGNED_LONG, bufferOffsets,
+		MPI_Gather(&size, 1, MPI_UNSIGNED_LONG, bufferOffsets,
 				1, MPI_UNSIGNED_LONG, executorRank, m_scheduler->privateGroupComm());
 
+		unsigned int id;
+
 		if (m_scheduler->isExecutor()) {
-			bufferSize = 0;
+			assert(origin == 0L);
+
+			size = 0;
 			for (int i = 0; i < m_scheduler->groupSize()-1; i++) {
 				// Compute offsets from the size
 				unsigned long bufSize = bufferOffsets[i];
-				bufferOffsets[i] = bufferSize;
+				bufferOffsets[i] = size;
 
 				// Increment the total buffer size
-				bufferSize += bufSize;
+				size += bufSize;
 
 				// Increment the number of buffer chunks
 				m_numBufferChunks += (bufSize + m_maxSend - 1) / m_maxSend;
 			}
 
 			// Create the buffer
-			unsigned int id = ThreadBase<Executor, Parameter>::addBuffer(bufferSize);
-			assert(id == m_numBuffers); NDBG_UNUSED(id);
+			id = ThreadBase<Executor, InitParameter, Parameter>::addBuffer(0L, size);
 
 			// Initialize the current position
 			m_bufferPos.push_back(new size_t[m_scheduler->groupSize()-1]);
 			memset(m_bufferPos.back(), 0, (m_scheduler->groupSize()-1) * sizeof(size_t));
-		} else if (m_scheduler->useAyncCopy()) {
+		} else {
 			// Async copying requires a local buffer as well
-			unsigned int id = Base<Executor>::addBuffer(bufferSize);
-			assert(id == m_numBuffers); NDBG_UNUSED(id);
+			id = Base<Executor, InitParameter, Parameter>::_addBuffer(origin, size);
 
 			// Initialize the current position
 			m_bufferPos.push_back(new size_t[1]);
 			m_bufferPos.back()[0] = 0;
 
-			// Initialize the requests
-			unsigned int requests = (bufferSize + m_maxSend - 1) / m_maxSend;
-			m_asyncRequests.insert(m_asyncRequests.end(), requests*2, MPI_REQUEST_NULL);
-			m_numAsyncRequests.push_back(requests);
+			if (m_scheduler->useAyncCopy()) {
+				// Initialize the requests
+				unsigned int requests = (size + m_maxSend - 1) / m_maxSend;
+				m_asyncRequests.insert(m_asyncRequests.end(), requests*2, MPI_REQUEST_NULL);
+				m_numAsyncRequests.push_back(requests);
+			}
 		}
 
-		// Increase the counter and return the id
-		m_numBuffers++;
+		return id;
 	}
 
 	void _execInit(const void* paramBuffer)
 	{
 		const InitParameter* param = reinterpret_cast<const InitParameter*>(paramBuffer);
-		Base<Executor>::executor().execInit(*param);
+		Base<Executor, InitParameter, Parameter>::executor().execInit(*param);
 
 		resetBufferPosition();
 	}
@@ -345,9 +361,9 @@ private:
 	{
 		assert(rank < m_scheduler->groupSize()-1);
 		assert(m_bufferOffsets[id][rank]+m_bufferPos[id][rank]+size
-				<= Base<Executor>::bufferSize(id));
+				<= (Base<Executor, InitParameter, Parameter>::bufferSize(id)));
 
-		void* buf = ThreadBase<Executor, Parameter>::_buffer(id)+
+		void* buf = Base<Executor, InitParameter, Parameter>::_buffer(id)+
 				m_bufferOffsets[id][rank]+m_bufferPos[id][rank];
 		m_bufferPos[id][rank] += size;
 		return buf;
@@ -356,19 +372,19 @@ private:
 	void _exec(const void* paramBuffer)
 	{
 		const Parameter* param = reinterpret_cast<const Parameter*>(paramBuffer);
-		ThreadBase<Executor, Parameter>::call(*param);
+		ThreadBase<Executor, InitParameter, Parameter>::call(*param);
 
 		resetBufferPosition();
 	}
 
 	void _wait()
 	{
-		ThreadBase<Executor, Parameter>::wait();
+		ThreadBase<Executor, InitParameter, Parameter>::wait();
 	}
 
 	void _finalize()
 	{
-		ThreadBase<Executor, Parameter>::finalize();
+		ThreadBase<Executor, InitParameter, Parameter>::finalize();
 	}
 
 	/**
@@ -378,7 +394,7 @@ private:
 	 */
 	void resetBufferPosition()
 	{
-		for (unsigned int i = 0; i < Base<Executor>::numBuffers(); i++)
+		for (unsigned int i = 0; i < Base<Executor, InitParameter, Parameter>::numBuffers(); i++)
 			memset(m_bufferPos[i], 0, (m_scheduler->groupSize()-1) * sizeof(size_t));
 	}
 };

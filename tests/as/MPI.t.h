@@ -39,11 +39,34 @@
 #include <vector>
 
 #include <cxxtest/TestSuite.h>
+#include <cxxtest/GlobalFixture.h>
 
 #include "utils/env.h"
 
 #include "async/as/MPI.h"
 #include "Executor.h"
+
+/**
+ * Setup for large buffer testing
+ */
+class LargeBuffer : public CxxTest::GlobalFixture
+{
+	size_t m_size;
+
+public:
+	bool setUpWorld()
+	{
+		m_size = 1.5 * async::Config::maxSend();
+		return true;
+	}
+
+	size_t size() const
+	{
+		return m_size;
+	}
+};
+
+static LargeBuffer largeBuffer;
 
 class TestMPI : public CxxTest::TestSuite
 {
@@ -52,18 +75,24 @@ class TestMPI : public CxxTest::TestSuite
 	int m_rank;
 
 	std::vector<int> m_values;
+	pthread_spinlock_t m_valueLock;
 
 	async::as::MPI<Executor<TestMPI>, Parameter, Parameter>* m_async;
 	std::vector<int> m_buffers;
+
+	bool m_largeBufferTest;
 
 public:
 	void setUp()
 	{
 		MPI_Comm_rank(MPI_COMM_WORLD, &m_rank);
+
 		m_values.clear();
+		pthread_spin_init(&m_valueLock, PTHREAD_PROCESS_PRIVATE);
 
 		m_async = 0L;
 		m_buffers.clear();
+		m_largeBufferTest = false;
 
 		m_scheduler = new async::as::MPIScheduler();
 		m_scheduler->setCommunicator(MPI_COMM_WORLD, 2);
@@ -73,13 +102,32 @@ public:
 	{
 		//MPI_Barrier(MPI_COMM_WORLD);
 		delete m_scheduler;
+
+		pthread_spin_destroy(&m_valueLock);
 	}
 
 	void setValue(int value)
 	{
+		pthread_spin_lock(&m_valueLock);
 		m_values.push_back(value);
+		pthread_spin_unlock(&m_valueLock);
 
-		if (m_async) {
+		if (m_largeBufferTest) {
+			// Group size without the communicator
+			int groupSize = m_async->bufferSize(0) / largeBuffer.size();
+			TS_ASSERT_LESS_THAN_EQUALS(1, groupSize);
+			TS_ASSERT_LESS_THAN_EQUALS(groupSize, 2);
+
+			TS_ASSERT_EQUALS(m_async->bufferSize(0), largeBuffer.size()*groupSize);
+
+			const char* buf = reinterpret_cast<const char*>(m_async->buffer(0));
+			for (int i = 0; i < groupSize; i++) {
+				TS_ASSERT_EQUALS(buf[0], 'A');
+				TS_ASSERT_EQUALS(buf[largeBuffer.size()-1], 'Z');
+
+				buf += largeBuffer.size();
+			}
+		} else if (m_async) {
 			for (unsigned int i = 0; i < m_async->numBuffers(); i++) {
 				size_t size = m_async->bufferSize(i) / sizeof(int);
 				const int* buf = reinterpret_cast<const int*>(m_async->buffer(i));
@@ -95,7 +143,7 @@ public:
 		Executor<TestMPI> executor(this);
 
 		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
-		async.scheduler(*m_scheduler);
+		async.setScheduler(*m_scheduler);
 
 		async.setExecutor(executor);
 
@@ -110,7 +158,7 @@ public:
 		Executor<TestMPI> executor(this);
 
 		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
-		async.scheduler(*m_scheduler);
+		async.setScheduler(*m_scheduler);
 
 		async.setExecutor(executor);
 
@@ -133,7 +181,7 @@ public:
 		Executor<TestMPI> executor(this);
 
 		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
-		async.scheduler(*m_scheduler);
+		async.setScheduler(*m_scheduler);
 
 		async.setExecutor(executor);
 
@@ -170,7 +218,7 @@ public:
 		Executor<TestMPI> executor(this);
 
 		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
-		async.scheduler(*m_scheduler);
+		async.setScheduler(*m_scheduler);
 
 		async.setExecutor(executor);
 		m_async = &async;
@@ -182,14 +230,14 @@ public:
 					i != m_buffers.end(); i++)
 				TS_ASSERT_EQUALS(*i, 43);
 		} else {
-			TS_ASSERT_EQUALS(async.addBuffer(sizeof(int)), 0);
+			int buffer = 43;
+			TS_ASSERT_EQUALS(async.addBuffer(&buffer, sizeof(int)), 0);
 
 			TS_ASSERT_EQUALS(async.numBuffers(), 1);
 
 			async.wait();
 
-			int buffer = 43;
-			async.fillBuffer(0, &buffer, sizeof(int));
+			async.sendBuffer(0, sizeof(int));
 
 			Parameter parameter;
 			async.call(parameter);
@@ -203,7 +251,7 @@ public:
 		Executor<TestMPI> executor(this);
 
 		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
-		async.scheduler(*m_scheduler);
+		async.setScheduler(*m_scheduler);
 
 		async.setExecutor(executor);
 		m_async = &async;
@@ -211,7 +259,8 @@ public:
 		if (m_scheduler->isExecutor()) {
 			m_scheduler->loop();
 		} else {
-			async.addBuffer(sizeof(int));
+			int buffer;
+			async.addBuffer(&buffer, sizeof(int));
 
 			async.wait();
 
@@ -230,7 +279,7 @@ public:
 		Executor<TestMPI> executor(this);
 
 		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
-		async.scheduler(*m_scheduler);
+		async.setScheduler(*m_scheduler);
 
 		async.setExecutor(executor);
 		m_async = &async;
@@ -242,10 +291,10 @@ public:
 					i != m_buffers.end(); i++)
 				TS_ASSERT_EQUALS(*i, 43);
 		} else {
-			async.addBuffer(sizeof(int));
-
 			int buffer = 43;
-			async.fillBuffer(0, &buffer, sizeof(int));
+			async.addBuffer(&buffer, sizeof(int));
+
+			async.sendBuffer(0, sizeof(int));
 
 			Parameter parameter;
 			async.callInit(parameter);
@@ -259,7 +308,7 @@ public:
 		Executor<TestMPI> executor(this);
 
 		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
-		async.scheduler(*m_scheduler);
+		async.setScheduler(*m_scheduler);
 
 		async.setExecutor(executor);
 		m_async = &async;
@@ -274,18 +323,18 @@ public:
 			for (unsigned int i = m_buffers.size()/2; i < m_buffers.size(); i++)
 				TS_ASSERT_EQUALS(m_buffers[i], 42);
 		} else {
-			async.addBuffer(sizeof(int));
-			async.addBuffer(sizeof(int));
+			int buffer0 = 43;
+			async.addBuffer(&buffer0, sizeof(int));
+			int buffer1 = 42;
+			async.addBuffer(&buffer1, sizeof(int));
 
 			TS_ASSERT_EQUALS(async.numBuffers(), 2);
 
 			async.wait();
 
-			int buffer = 43;
-			async.fillBuffer(0, &buffer, sizeof(int));
+			async.sendBuffer(0, sizeof(int));
 
-			buffer = 42;
-			async.fillBuffer(1, &buffer, sizeof(int));
+			async.sendBuffer(1, sizeof(int));
 
 			Parameter parameter;
 			async.call(parameter);
@@ -299,18 +348,18 @@ public:
 		Executor<TestMPI> executor(this);
 
 		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async1;
-		async1.scheduler(*m_scheduler);
+		async1.setScheduler(*m_scheduler);
 		async1.setExecutor(executor);
 
 		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async2;
-		async2.scheduler(*m_scheduler);
+		async2.setScheduler(*m_scheduler);
 		async2.setExecutor(executor);
 
 		if (m_scheduler->isExecutor()) {
 			m_scheduler->loop();
 
 			TS_ASSERT_EQUALS(m_values.size(), 2);
-			TS_ASSERT_EQUALS(m_values[0]+m_values[1], 43); // We cannot be sure with call arrives first
+			TS_ASSERT_EQUALS(m_values[0]+m_values[1], 43); // We cannot be sure which call arrives first
 		} else {
 			async1.wait();
 			async2.wait();
@@ -332,39 +381,23 @@ public:
 		Executor<TestMPI> executor(this);
 
 		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
-		async.scheduler(*m_scheduler);
-
-		size_t maxSend = utils::Env::get<size_t>("ASYNC_MPI_MAX_SEND", 1UL<<30);
-		const size_t bufferSize = 1.5 * maxSend;
+		async.setScheduler(*m_scheduler);
 
 		async.setExecutor(executor);
+		m_async = &async;
+		m_largeBufferTest = true;
 
 		if (m_scheduler->isExecutor()) {
 			m_scheduler->loop();
-
-			// Group size without the communicator
-			int groupSize = async.bufferSize(0) / bufferSize;
-			TS_ASSERT_LESS_THAN_EQUALS(1, groupSize);
-			TS_ASSERT_LESS_THAN_EQUALS(groupSize, 2);
-
-			TS_ASSERT_EQUALS(async.bufferSize(0), bufferSize*groupSize);
-
-			const char* buf = reinterpret_cast<const char*>(async.buffer(0));
-			for (int i = 0; i < groupSize; i++) {
-				TS_ASSERT_EQUALS(buf[0], 'A');
-				TS_ASSERT_EQUALS(buf[bufferSize-1], 'Z');
-
-				buf += bufferSize;
-			}
 		} else {
-			char* buffer = new char[bufferSize];
-			async.addBuffer(bufferSize);
+			char* buffer = new char[largeBuffer.size()];
+			async.addBuffer(buffer, largeBuffer.size());
 
 			async.wait();
 
 			buffer[0] = 'A';
-			buffer[bufferSize-1] = 'Z';
-			async.fillBuffer(0, buffer, bufferSize);
+			buffer[largeBuffer.size()-1] = 'Z';
+			async.sendBuffer(0, largeBuffer.size());
 
 			Parameter parameter;
 			async.call(parameter);

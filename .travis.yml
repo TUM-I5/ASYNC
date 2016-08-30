@@ -13,6 +13,5 @@ install:
  - sudo apt-get install -qq mpich cmake
 
 script:
- - mkdir build && cd build && cmake ../
- - make
- - make test
+ - mkdir build && cd build && cmake ../ && make && make test && cd ..
+ - mkdir build_nompi && cd build_nompi && cmake ../ -DUSE_MPI=OFF && make && make test && cd ..

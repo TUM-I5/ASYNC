@@ -34,25 +34,19 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifdef USE_MPI
-#include <mpi.h>
-#endif
-#include <cxxtest/ErrorPrinter.h>
+#ifndef ASYNC_NOPARAM_H
+#define ASYNC_NOPARAM_H
 
-int main(int argc, char** argv)
+namespace async
 {
-#ifdef USE_MPI
-    MPI_Init(&argc, &argv);
-#endif
 
-    CxxTest::ErrorPrinter tester;
-    int status = CxxTest::Main<CxxTest::ErrorPrinter>(tester, argc, argv);
+/**
+ * Empty struct that can be used if init parameters or parameters
+ * are not required.
+ */
+struct NoParam
+{ };
 
-#ifdef USE_MPI
-    MPI_Finalize();
-#endif
-
-    return status;
 }
 
-<CxxTest world>
+#endif // ASYNC_NOPARAM_H
