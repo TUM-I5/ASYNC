@@ -102,4 +102,20 @@ public:
 
 		async.wait();
 	}
+
+	void testRemoveBuffer()
+	{
+		Executor<TestSync> executor(this);
+
+		async::as::Sync<Executor<TestSync>, Parameter, Parameter> async;
+		async.setExecutor(executor);
+
+		int buffer = 2;
+		async.addBuffer(&buffer, sizeof(int));
+
+		async.wait();
+
+		async.removeBuffer(0);
+		TS_ASSERT_EQUALS(static_cast<const void*>(0L), async.buffer(0));
+	}
 };

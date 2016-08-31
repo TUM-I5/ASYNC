@@ -58,8 +58,21 @@ template<class Executor, typename InitParameter, typename Parameter>
 class Thread : public ThreadBase<Executor, InitParameter, Parameter>
 {
 private:
-	/** The current buffer position */
-	std::vector<size_t> m_bufferPos;
+	/**
+	 * Buffer description
+	 */
+	struct BufInfo
+	{
+		/** True if this is an init buffer */
+		bool init;
+
+		/** Current position of the buffer */
+		size_t position;
+	};
+
+private:
+	/** Buffer information */
+	std::vector<BufInfo> m_buffer;
 
 public:
 	Thread()
@@ -91,25 +104,56 @@ public:
 		ThreadBase<Executor, InitParameter, Parameter>::setAffinity(cpuMask);
 	}
 
+	unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false)
+	{
+		unsigned int id = Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
+		BufInfo bufInfo;
+		bufInfo.init = true;
+		bufInfo.position = 0;
+		m_buffer.push_back(bufInfo);
+
+		assert(m_buffer.size() == (Base<Executor, InitParameter, Parameter>::numBuffers()));
+
+		return id;
+	}
+
 	unsigned int addBuffer(const void* buffer, size_t size)
 	{
 		unsigned int id = ThreadBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size);
-		m_bufferPos.push_back(0);
+		BufInfo bufInfo;
+		bufInfo.init = false;
+		bufInfo.position = 0;
+		m_buffer.push_back(bufInfo);
 
-		assert(m_bufferPos.size() == (Base<Executor, InitParameter, Parameter>::numBuffers()));
+		assert(m_buffer.size() == (Base<Executor, InitParameter, Parameter>::numBuffers()));
 
 		return id;
+	}
+
+	const void* buffer(unsigned int id) const
+	{
+		assert(id < m_buffer.size());
+
+		if (m_buffer[id].init)
+			return Base<Executor, InitParameter, Parameter>::origin(id);
+
+		return ThreadBase<Executor, InitParameter, Parameter>::buffer(id);
 	}
 
 	void sendBuffer(unsigned int id, size_t size)
 	{
 		assert(id < (Base<Executor, InitParameter, Parameter>::numBuffers()));
-		assert(m_bufferPos[id]+size <= (Base<Executor, InitParameter, Parameter>::bufferSize(id)));
 
-		memcpy(Base<Executor, InitParameter, Parameter>::_buffer(id)+m_bufferPos[id],
-		       Base<Executor, InitParameter, Parameter>::origin(id)+m_bufferPos[id],
+		if (m_buffer[id].init)
+			return;
+
+		assert((Base<Executor, InitParameter, Parameter>::_buffer(id)));
+		assert(m_buffer[id].position+size <= (Base<Executor, InitParameter, Parameter>::bufferSize(id)));
+
+		memcpy(Base<Executor, InitParameter, Parameter>::_buffer(id)+m_buffer[id].position,
+		       Base<Executor, InitParameter, Parameter>::origin(id)+m_buffer[id].position,
 		       size);
-		m_bufferPos[id] += size;
+		m_buffer[id].position += size;
 	}
 
 	void wait()
@@ -134,9 +178,9 @@ public:
 private:
 	void resetBufferPosition()
 	{
-		for (std::vector<size_t>::iterator it = m_bufferPos.begin();
-			it != m_bufferPos.end(); it++)
-			*it = 0;
+		for (typename std::vector<BufInfo>::iterator it = m_buffer.begin();
+			it != m_buffer.end(); it++)
+			it->position = 0;
 	}
 };
 

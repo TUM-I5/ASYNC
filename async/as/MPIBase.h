@@ -64,16 +64,32 @@ template<class Executor, typename InitParameter, typename Parameter>
 class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private Scheduled
 {
 private:
+	struct BufInfo
+	{
+
+		/** True if this a clone buffer */
+		bool clone;
+
+		/** Current position of the buffer */
+		size_t position;
+	};
+
 	/**
 	 * Buffer description on the executor
 	 */
-	struct ExecutorBuffer
+	struct ExecutorBufInfo
 	{
+		/** True if the buffer uses synchronized sends */
+		bool sync;
+
 		/** Offsets for all tasks */
 		const unsigned long* offsets;
 
 		/** Next writing position for all tasks */
 		size_t* positions;
+
+		/** Number of asychronous buffer chunks we receive for this buffer */
+		unsigned int bufferChunks;
 	};
 
 private:
@@ -83,17 +99,17 @@ private:
 	/** The scheduler */
 	MPIScheduler* m_scheduler;
 
-	/** The identifier for this async call */
+	/** The identifier for this module call */
 	int m_id;
 
-	/** Number of buffer chunks (only on the executor rank) */
+	/** Total number of asynchronous buffer chunks (only on the executor rank) */
 	unsigned int m_numBufferChunks;
 
-	/** Buffer description on executors */
-	std::vector<ExecutorBuffer> m_executorBuffers;
+	/** Buffer description on non-executors */
+	std::vector<BufInfo> m_buffer;
 
-	/** Current position of the buffer on non-executors */
-	std::vector<size_t> m_bufferPos;
+	/** Buffer description on executors */
+	std::vector<ExecutorBufInfo> m_executorBuffer;
 
 public:
 	MPIBase()
@@ -127,17 +143,11 @@ public:
 		m_id = m_scheduler->addScheduled(this);
 	}
 
-	/**
-	 */
-	unsigned int addBuffer(const void* buffer, size_t size)
+	void removeBuffer(unsigned int id)
 	{
-		assert(m_scheduler);
-		assert(!m_scheduler->isExecutor());
+		m_scheduler->removeBuffer(m_id, id);
 
-		m_scheduler->addBuffer(m_id,
-			Base<Executor, InitParameter, Parameter>::numBuffers());
-
-		return _addBuffer(buffer, size);
+		Base<Executor, InitParameter, Parameter>::removeBuffer(id);
 	}
 
 	const void* buffer(unsigned int id) const
@@ -146,6 +156,30 @@ public:
 			return ThreadBase<Executor, InitParameter, Parameter>::buffer(id);
 
 		return 0L;
+	}
+
+	/**
+	 * @param id The id of the buffer
+	 */
+	void sendBuffer(unsigned int id, size_t size)
+	{
+		if (size == 0)
+			return;
+
+		assert(id < (Base<Executor, InitParameter, Parameter>::numBuffers()));
+
+		if (isClone(id) && m_scheduler->groupRank() != 0)
+			return;
+
+		// We need to send the buffer in 1 GB chunks
+		for (size_t done = 0; done < size; done += maxSend()) {
+			size_t send = std::min(maxSend(), size-done);
+
+			m_scheduler->sendBuffer(m_id, id,
+				Base<Executor, InitParameter, Parameter>::origin(id) + bufferPos(id),
+				send);
+			incBufferPos(id, send);
+		}
 	}
 
 	/**
@@ -199,12 +233,29 @@ protected:
 		return *m_scheduler;
 	}
 
+	unsigned int addBuffer(const void* buffer, size_t size, bool sync = true, bool clone = false)
+	{
+		assert(m_scheduler);
+		assert(!m_scheduler->isExecutor());
+		assert(!clone || sync); // cloned buffers only implemented for synchronized sends
+
+		m_scheduler->addBuffer(m_id,
+			Base<Executor, InitParameter, Parameter>::numBuffers());
+
+		return _addBuffer(buffer, size, sync, clone);
+	}
+
+	bool isClone(unsigned int id) const
+	{
+		return m_buffer[id].clone;
+	}
+
 	/**
 	 * The current position of a buffer on non-executors
 	 */
 	size_t bufferPos(unsigned int id) const
 	{
-		return m_bufferPos[id];
+		return m_buffer[id].position;
 	}
 
 	/**
@@ -212,7 +263,7 @@ protected:
 	 */
 	void incBufferPos(unsigned int id, size_t increment)
 	{
-		m_bufferPos[id] += increment;
+		m_buffer[id].position += increment;
 	}
 
 private:
@@ -221,9 +272,9 @@ private:
 	 */
 	void resetBufferPosition()
 	{
-		for (std::vector<size_t>::iterator it = m_bufferPos.begin();
-			it != m_bufferPos.end(); it++)
-			*it = 0;
+		for (typename std::vector<BufInfo>::iterator it = m_buffer.begin();
+				it != m_buffer.end(); it++)
+			it->position = 0;
 	}
 
 	unsigned int paramSize() const
@@ -231,18 +282,31 @@ private:
 		return std::max(sizeof(InitParameter), sizeof(Parameter));
 	}
 
+	virtual bool useAsyncCopy() const = 0;
+
+	bool useAsyncCopy(unsigned int id) const
+	{
+		assert(id < m_executorBuffer.size());
+
+		return useAsyncCopy() && !m_executorBuffer[id].sync;
+	}
+
 	unsigned int numBufferChunks() const
 	{
 		return m_numBufferChunks;
 	}
 
-	void _addBuffer()
+	void _addBuffer(bool sync)
 	{
-		_addBuffer(0L, 0);
+		_addBuffer(0L, 0, sync);
 	}
 
-	unsigned int _addBuffer(const void* origin, unsigned long size)
+	unsigned int _addBuffer(const void* origin, unsigned long size, bool sync, bool clone = false)
 	{
+		// If this buffer is a clone, only the first rank will send it
+		if (clone && m_scheduler->groupRank() != 0)
+			size = 0;
+
 		int executorRank = m_scheduler->groupSize()-1;
 
 		// Compute buffer size and offsets
@@ -258,36 +322,63 @@ private:
 				1, MPI_UNSIGNED_LONG, executorRank, m_scheduler->privateGroupComm());
 
 		if (m_scheduler->isExecutor()) {
-			// Compute total size and offsets
+			// Compute total size, offsets and buffer chunks
 			size = 0;
+			unsigned int bufferChunks = 0;
 			for (int i = 0; i < m_scheduler->groupSize()-1; i++) {
 				// Compute offsets from the size
 				unsigned long bufSize = bufferOffsets[i];
 				bufferOffsets[i] = size;
 
-				// Increment the total buffer size
-				size += bufSize;
+				if (bufSize > 0) {
+					// Increment the total buffer size
+					size += bufSize;
 
-				// Increment the number of buffer chunks
-				m_numBufferChunks += (bufSize + m_maxSend - 1) / m_maxSend;
+					if (!sync)
+						// Increment the number of buffer chunks
+						bufferChunks += (bufSize + m_maxSend - 1) / m_maxSend;
+				}
 			}
+
+			m_numBufferChunks += bufferChunks;
 
 			// Create the buffer
 			ThreadBase<Executor, InitParameter, Parameter>::addBuffer(0L, size);
 
-			ExecutorBuffer executorBuffer;
-			executorBuffer.offsets = bufferOffsets;
+			ExecutorBufInfo executorBufInfo;
+			executorBufInfo.sync = sync;
+			executorBufInfo.offsets = bufferOffsets;
+			executorBufInfo.bufferChunks = bufferChunks;
 
 			// Initialize the current position
-			executorBuffer.positions = new size_t[m_scheduler->groupSize()-1];
-			memset(executorBuffer.positions, 0, (m_scheduler->groupSize()-1) * sizeof(size_t));
+			executorBufInfo.positions = new size_t[m_scheduler->groupSize()-1];
+			memset(executorBufInfo.positions, 0, (m_scheduler->groupSize()-1) * sizeof(size_t));
 
-			m_executorBuffers.push_back(executorBuffer);
+			m_executorBuffer.push_back(executorBufInfo);
 		} else {
-			m_bufferPos.push_back(0);
+			BufInfo bufInfo;
+			bufInfo.clone = clone;
+			bufInfo.position = 0;
+
+			m_buffer.push_back(bufInfo);
 		}
 
 		return Base<Executor, InitParameter, Parameter>::numBuffers()-1;
+	}
+
+	void _removeBuffer(unsigned int id)
+	{
+		assert(id < m_executorBuffer.size());
+
+		m_numBufferChunks -= m_executorBuffer[id].bufferChunks;
+		m_executorBuffer[id].bufferChunks = 0;
+
+		delete [] m_executorBuffer[id].offsets;
+		m_executorBuffer[id].offsets = 0L;
+		delete [] m_executorBuffer[id].positions;
+		m_executorBuffer[id].positions = 0L;
+
+		Base<Executor, InitParameter, Parameter>::removeBuffer(id);
 	}
 
 	void _execInit(const void* paramBuffer)
@@ -304,7 +395,7 @@ private:
 		assert(bufferOffset(id, rank)+size <= (Base<Executor, InitParameter, Parameter>::bufferSize(id)));
 
 		void* buf = Base<Executor, InitParameter, Parameter>::_buffer(id)+bufferOffset(id, rank);
-		m_executorBuffers[id].positions[rank] += size;
+		m_executorBuffer[id].positions[rank] += size;
 		return buf;
 	}
 
@@ -323,8 +414,8 @@ private:
 
 	void _finalize()
 	{
-		for (typename std::vector<ExecutorBuffer>::iterator it = m_executorBuffers.begin();
-				it != m_executorBuffers.end(); it++) {
+		for (typename std::vector<ExecutorBufInfo>::iterator it = m_executorBuffer.begin();
+				it != m_executorBuffer.end(); it++) {
 			delete [] it->offsets;
 			it->offsets = 0L;
 			delete [] it->positions;
@@ -339,7 +430,7 @@ private:
 	 */
 	size_t bufferOffset(unsigned int id, int rank)
 	{
-		return m_executorBuffers[id].offsets[rank]+m_executorBuffers[id].positions[rank];
+		return m_executorBuffer[id].offsets[rank]+m_executorBuffer[id].positions[rank];
 	}
 
 	/**
@@ -349,9 +440,11 @@ private:
 	 */
 	void resetBufferPositionOnEexecutor()
 	{
-		for (typename std::vector<ExecutorBuffer>::iterator it = m_executorBuffers.begin();
-				it != m_executorBuffers.end(); it++)
-			memset(it->positions, 0, (m_scheduler->groupSize()-1) * sizeof(size_t));
+		for (typename std::vector<ExecutorBufInfo>::iterator it = m_executorBuffer.begin();
+				it != m_executorBuffer.end(); it++) {
+			if (it->positions)
+				memset(it->positions, 0, (m_scheduler->groupSize()-1) * sizeof(size_t));
+		}
 	}
 };
 

@@ -64,7 +64,7 @@ private:
 	/**
 	 * Description of a buffer
 	 */
-	struct Buffer
+	struct BufInfo
 	{
 		/** The original memory */
 		const void* origin;
@@ -79,7 +79,7 @@ private:
 	Executor* m_executor;
 
 	/** The buffers */
-	std::vector<Buffer> m_buffer;
+	std::vector<BufInfo> m_buffer;
 
 	/** Already cleanup everything? */
 	bool m_finalized;
@@ -121,11 +121,39 @@ public:
 	}
 
 	/**
+	 * Add a buffer that is not copied for asychronous calls.
+	 *
+	 * Can be used for constant data or for initialization calls.
+	 *
+	 * @param clone True of the buffer is the same (a clone) on all MPI processes.
+	 *  (Allows additional optimizations.)
+	 */
+	virtual unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false) = 0;
+
+	/**
 	 * @param buffer The original memory location in the application
 	 * @param bufferSize The size of the memory location
 	 * @return The id of the buffer
 	 */
 	virtual unsigned int addBuffer(const void* buffer, size_t size) = 0;
+
+	/**
+	 * Frees all memory allocated for the buffer.
+	 *
+	 * It is errornous to send buffers which have been removed. Removing buffers
+	 * should only be done between {@link wait()} and {@link call()}.
+	 *
+	 * @warning This will not change the results of {@link numBuffers()}.
+	 */
+	virtual void removeBuffer(unsigned int id)
+	{
+		assert(id < numBuffers());
+
+		m_buffer[id].origin = 0L;
+		free(m_buffer[id].buffer);
+		m_buffer[id].buffer = 0L;
+		m_buffer[id].size = 0;
+	}
 
 	unsigned int numBuffers() const
 	{
@@ -166,7 +194,7 @@ protected:
 
 	unsigned int _addBuffer(const void* origin, size_t size, bool allocate = true)
 	{
-		Buffer buffer;
+		BufInfo buffer;
 		buffer.origin = origin;
 		buffer.size = size;
 

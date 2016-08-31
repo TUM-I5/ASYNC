@@ -65,6 +65,12 @@ public:
 	{
 	}
 
+	unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false)
+	{
+		MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, true, clone);
+		return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
+	}
+
 	unsigned int addBuffer(const void* buffer, size_t size)
 	{
 		MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size);
@@ -77,30 +83,6 @@ public:
 			return MPIBase<Executor, InitParameter, Parameter>::buffer(id);
 
 		return Base<Executor, InitParameter, Parameter>::origin(id);
-	}
-
-	/**
-	 * @param id The id of the buffer
-	 */
-	void sendBuffer(unsigned int id, size_t size)
-	{
-		if (size == 0)
-			return;
-
-		assert(id < (Base<Executor, InitParameter, Parameter>::numBuffers()));
-
-		// We need to send the buffer in 1 GB chunks
-		for (size_t done = 0; done < size; done += MPIBase<Executor, InitParameter, Parameter>::maxSend()) {
-			size_t send = std::min(MPIBase<Executor, InitParameter, Parameter>::maxSend(), size-done);
-
-			MPIBase<Executor, InitParameter, Parameter>::scheduler().sendBuffer(
-				MPIBase<Executor, InitParameter, Parameter>::id(),
-				id,
-				Base<Executor, InitParameter, Parameter>::origin(id) +
-					MPIBase<Executor, InitParameter, Parameter>::bufferPos(id),
-				send);
-			MPIBase<Executor, InitParameter, Parameter>::incBufferPos(id, send);
-		}
 	}
 
 	/**

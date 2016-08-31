@@ -100,9 +100,19 @@ public:
 		setUp();
 	}
 
+	void addSyncBuffer(const void* buffer, size_t size, bool clone = false)
+	{
+		m_async->addSyncBuffer(buffer, size, clone);
+	}
+
 	void addBuffer(const void* buffer, size_t size)
 	{
 		m_async->addBuffer(buffer, size);
+	}
+
+	void removeBuffer(unsigned int id)
+	{
+		m_async->removeBuffer(id);
 	}
 
 	unsigned int numBuffers() const

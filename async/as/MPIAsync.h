@@ -57,14 +57,31 @@ template<class Executor, typename InitParameter, typename Parameter>
 class MPIAsync : public MPIBase<Executor, InitParameter, Parameter>
 {
 private:
-	/** Buffer for the parameter (required for async calls) */
+	/**
+	 * Buffer description (on non-executors)
+	 */
+	struct BufInfo
+	{
+		/** A sychnronized buffer */
+		bool sync;
+
+		/**
+		 * The number of asynchronous request required for this buffer.
+		 *
+		 * This is not counting the selecting isend.
+		 */
+		unsigned int requests;
+	};
+
+private:
+	/** Buffer for the parameter */
 	Parameter m_paramBuffer;
+
+	/** Buffer description */
+	std::vector<BufInfo> m_buffer;
 
 	/** List of MPI requests */
 	std::vector<MPI_Request> m_asyncRequests;
-
-	/** Number of asynchronous requests for each buffer (not counting selecting) */
-	std::vector<unsigned int> m_numAsyncRequests;
 
 public:
 	MPIAsync()
@@ -77,23 +94,57 @@ public:
 	{
 	}
 
+	unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false)
+	{
+		MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, true, clone);
+		unsigned int id = Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
+
+		// We directly send sync buffers
+		BufInfo bufInfo;
+		bufInfo.sync = true;
+		bufInfo.requests = 0;
+		m_buffer.push_back(bufInfo);
+
+		assert(m_buffer.size() == (Base<Executor, InitParameter, Parameter>::numBuffers()));
+
+		return id;
+	}
+
 	/**
 	 * @param bufferSize Should be 0 on the executor
 	 */
 	unsigned int addBuffer(const void* buffer, size_t size)
 	{
-		MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size);
+		MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, false);
 		unsigned int id = Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size);
 
 		// Initialize the requests
-		unsigned int requests = (size + MPIBase<Executor, InitParameter, Parameter>::maxSend() - 1)
-			/ MPIBase<Executor, InitParameter, Parameter>::maxSend();
-		m_asyncRequests.insert(m_asyncRequests.end(), requests*2, MPI_REQUEST_NULL);
-		m_numAsyncRequests.push_back(requests);
+		unsigned int requests = 0;
+		if (size > 0) {
+			requests = (size + MPIBase<Executor, InitParameter, Parameter>::maxSend() - 1)
+				/ MPIBase<Executor, InitParameter, Parameter>::maxSend();
+			m_asyncRequests.insert(m_asyncRequests.end(), requests*2, MPI_REQUEST_NULL);
+		}
 
-		assert(m_numAsyncRequests.size() == (Base<Executor, InitParameter, Parameter>::numBuffers()));
+		BufInfo bufInfo;
+		bufInfo.sync = false;
+		bufInfo.requests = requests;
+		m_buffer.push_back(bufInfo);
+
+		assert(m_buffer.size() == (Base<Executor, InitParameter, Parameter>::numBuffers()));
 
 		return id;
+	}
+
+	void removeBuffer(unsigned int id)
+	{
+		if (!m_buffer[id].sync) {
+			m_asyncRequests.erase(m_asyncRequests.end()-m_buffer[id].requests*2,
+				m_asyncRequests.end());
+			m_buffer[id].requests = 0;
+		}
+
+		MPIBase<Executor, InitParameter, Parameter>::removeBuffer(id);
 	}
 
 	const void* buffer(unsigned int id) const
@@ -125,6 +176,11 @@ public:
 			return;
 
 		assert(id < (Base<Executor, InitParameter, Parameter>::numBuffers()));
+
+		if (m_buffer[id].sync) {
+			MPIBase<Executor, InitParameter, Parameter>::sendBuffer(id, size);
+			return;
+		}
 
 		// Only copy it to the local buffer
 		assert((MPIBase<Executor, InitParameter, Parameter>::bufferPos(id)) + size
@@ -179,7 +235,7 @@ private:
 		// Send all buffers
 		for (unsigned int i = 0; i < Base<Executor, InitParameter, Parameter>::numBuffers(); i++) {
 			size_t done = 0;
-			for (unsigned int j = 0; j < m_numAsyncRequests[i]; j++) {
+			for (unsigned int j = 0; j < m_buffer[i].requests; j++) {
 				size_t send = std::min(MPIBase<Executor, InitParameter, Parameter>::maxSend(),
 					MPIBase<Executor, InitParameter, Parameter>::bufferPos(i)-done);
 				MPIRequest2 requests = MPIBase<Executor, InitParameter, Parameter>::scheduler().iSendBuffer(

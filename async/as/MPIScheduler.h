@@ -114,6 +114,11 @@ private:
 	virtual bool useAsyncCopy() const = 0;
 
 	/**
+	 * @return True if this class uses async copying for a specific buffer
+	 */
+	virtual bool useAsyncCopy(unsigned int id) const = 0;
+
+	/**
 	 * Returns the number of buffer chunks send to the executor
 	 *
 	 * This might differ from the number of buffers since large buffers
@@ -121,7 +126,12 @@ private:
 	 */
 	virtual unsigned int numBufferChunks() const = 0;
 
-	virtual void _addBuffer() = 0;
+	/**
+	 * @param sync True if the buffer is send sychronized
+	 */
+	virtual void _addBuffer(bool sync) = 0;
+
+	virtual void _removeBuffer(unsigned int id) = 0;
 
 	virtual void _execInit(const void* parameter) = 0;
 
@@ -258,6 +268,9 @@ public:
 		if (!m_isExecutor)
 			return;
 
+		int rank;
+		MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
 		// Save ready tasks for each call
 		unsigned int* readyTasks = new unsigned int[m_asyncCalls.size()];
 		memset(readyTasks, 0, m_asyncCalls.size() * sizeof(unsigned int));
@@ -276,6 +289,9 @@ public:
 			MPI_Status status;
 			int id, tag;
 
+			int sync; // Required for add tag
+			unsigned int bufferId; // Required for remove tag and buffer tag
+
 			do {
 				MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, m_privateGroupComm, &status);
 
@@ -285,15 +301,19 @@ public:
 				if (id > static_cast<int>(m_asyncCalls.size()) || m_asyncCalls[id] == 0L)
 					logError() << "ASYNC: Invalid id" << id << "received";
 
-				char tmp;
 				int size;
-				unsigned int bufferId;
 				void* buf;
 
 				switch (tag) {
 				case ADD_TAG:
-					MPI_Recv(&tmp, 1, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG,
-							m_privateGroupComm, MPI_STATUS_IGNORE);
+					MPI_Recv(&sync, 1, MPI_INT, status.MPI_SOURCE, status.MPI_TAG,
+						m_privateGroupComm, MPI_STATUS_IGNORE);
+
+					readyTasks[id]++;
+					break;
+				case REMOVE_TAG:
+					MPI_Recv(&bufferId, 1, MPI_UNSIGNED, status.MPI_SOURCE, status.MPI_TAG,
+						m_privateGroupComm, MPI_STATUS_IGNORE);
 
 					readyTasks[id]++;
 					break;
@@ -301,7 +321,7 @@ public:
 				case PARAM_TAG:
 					MPI_Get_count(&status, MPI_CHAR, &size);
 					MPI_Recv(m_asyncCalls[id]->paramBuffer(), size, MPI_CHAR,
-							status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm, MPI_STATUS_IGNORE);
+						status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm, MPI_STATUS_IGNORE);
 
 					lastTag[id] = tag;
 					if (m_asyncCalls[id]->useAsyncCopy())
@@ -312,8 +332,8 @@ public:
 				case BUFFER_TAG:
 					// Select a buffer
 					MPI_Recv(&bufferId, 1, MPI_UNSIGNED,
-							status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm,
-							MPI_STATUS_IGNORE);
+						status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm,
+						MPI_STATUS_IGNORE);
 
 					// Probe buffer receive from some source/tag
 					MPI_Probe(status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm, &status);
@@ -324,15 +344,15 @@ public:
 					// Receive the buffer
 					buf = m_asyncCalls[id]->getBufferPos(bufferId, status.MPI_SOURCE, size);
 					MPI_Recv(buf, size, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm,
-							MPI_STATUS_IGNORE);
+						MPI_STATUS_IGNORE);
 
-					if (m_asyncCalls[id]->useAsyncCopy())
-							asyncReadyTasks[id]++;
+					if (m_asyncCalls[id]->useAsyncCopy(bufferId))
+						asyncReadyTasks[id]++;
 					break;
 				case WAIT_TAG:
 				case FINALIZE_TAG:
 					MPI_Recv(0L, 0, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm,
-							MPI_STATUS_IGNORE);
+						MPI_STATUS_IGNORE);
 
 					readyTasks[id]++;
 					break;
@@ -352,7 +372,11 @@ public:
 			switch (tag) {
 			case ADD_TAG:
 				MPI_Barrier(m_privateGroupComm);
-				m_asyncCalls[id]->_addBuffer();
+				m_asyncCalls[id]->_addBuffer(sync);
+				break;
+			case REMOVE_TAG:
+				MPI_Barrier(m_privateGroupComm);
+				m_asyncCalls[id]->_removeBuffer(bufferId);
 				break;
 			case INIT_TAG:
 				MPI_Barrier(m_privateGroupComm);
@@ -425,7 +449,7 @@ private:
 		return id;
 	}
 
-	void addBuffer(int id, unsigned int bufferId)
+	void addBuffer(int id, unsigned int bufferId, bool sync = true)
 	{
 		if (bufferId >= m_heapBufferIds.size()) {
 			assert(bufferId == m_heapBufferIds.size()); // IDs always increment by 1
@@ -433,9 +457,17 @@ private:
 			m_heapBufferIds.push_back(bufferId);
 		}
 
-		char tmp;
-		MPI_Send(&tmp, 1, MPI_CHAR,
+		int syncInt = sync;
+		MPI_Send(&syncInt, 1, MPI_INT,
 			m_groupSize-1, id*NUM_TAGS+ADD_TAG, m_privateGroupComm);
+
+		MPI_Barrier(m_privateGroupComm);
+	}
+
+	void removeBuffer(int id, unsigned int bufferId)
+	{
+		MPI_Send(&bufferId, 1, MPI_UNSIGNED,
+			m_groupSize-1, id*NUM_TAGS+REMOVE_TAG, m_privateGroupComm);
 
 		MPI_Barrier(m_privateGroupComm);
 	}
@@ -525,11 +557,12 @@ private:
 
 private:
 	static const int ADD_TAG = 0;
-	static const int INIT_TAG = 1;
-	static const int BUFFER_TAG = 2;
-	static const int PARAM_TAG = 3;
-	static const int WAIT_TAG = 4;
-	static const int FINALIZE_TAG = 5;
+	static const int REMOVE_TAG = 1;
+	static const int INIT_TAG = 2;
+	static const int BUFFER_TAG = 3;
+	static const int PARAM_TAG = 4;
+	static const int WAIT_TAG = 5;
+	static const int FINALIZE_TAG = 6;
 	static const int NUM_TAGS = FINALIZE_TAG + 1;
 };
 

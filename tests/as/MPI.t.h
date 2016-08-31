@@ -319,6 +319,67 @@ public:
 		}
 	}
 
+	void testSyncBuffer()
+	{
+		Executor<TestMPI> executor(this);
+
+		MPITest<Executor<TestMPI>, Parameter, Parameter>::type async;
+		async.setScheduler(*m_scheduler);
+
+		async.setExecutor(executor);
+		m_async = &async;
+
+		if (m_scheduler->isExecutor()) {
+			m_scheduler->loop();
+
+			TS_ASSERT_LESS_THAN_EQUALS(1, m_buffers.size());
+			TS_ASSERT_LESS_THAN_EQUALS(m_buffers.size(), 2);
+			for (std::vector<int>::const_iterator i = m_buffers.begin();
+					i != m_buffers.end(); i++)
+				TS_ASSERT_EQUALS(*i, 3);
+		} else {
+			int buffer = 3;
+			async.addSyncBuffer(&buffer, sizeof(int));
+
+			async.sendBuffer(0, sizeof(int));
+
+			Parameter parameter;
+			async.callInit(parameter);
+
+			async.wait();
+		}
+	}
+
+	void testSyncCloneBuffer()
+	{
+		Executor<TestMPI> executor(this);
+
+		MPITest<Executor<TestMPI>, Parameter, Parameter>::type async;
+		async.setScheduler(*m_scheduler);
+
+		async.setExecutor(executor);
+		m_async = &async;
+
+		if (m_scheduler->isExecutor()) {
+			m_scheduler->loop();
+
+			TS_ASSERT_EQUALS(m_buffers.size(), 1);
+			for (std::vector<int>::const_iterator i = m_buffers.begin();
+					i != m_buffers.end(); i++)
+				TS_ASSERT_EQUALS(*i, 3);
+		} else {
+			int buffer = 3;
+			async.addSyncBuffer(&buffer, sizeof(int), true);
+
+			async.sendBuffer(0, sizeof(int));
+
+			Parameter parameter;
+			async.callInit(parameter);
+
+			async.wait();
+		}
+	}
+
 	void testBuffer2()
 	{
 		Executor<TestMPI> executor(this);
@@ -353,6 +414,94 @@ public:
 			async.sendBuffer(1, sizeof(int));
 
 			Parameter parameter;
+			async.call(parameter);
+
+			async.wait();
+		}
+	}
+
+	void testMixedBuffer()
+	{
+		Executor<TestMPI> executor(this);
+
+		MPITest<Executor<TestMPI>, Parameter, Parameter>::type async;
+		async.setScheduler(*m_scheduler);
+
+		async.setExecutor(executor);
+		m_async = &async;
+
+		if (m_scheduler->isExecutor()) {
+			m_scheduler->loop();
+
+			TS_ASSERT_LESS_THAN_EQUALS(4, m_buffers.size());
+			TS_ASSERT_LESS_THAN_EQUALS(m_buffers.size(), 8);
+			for (std::vector<int>::const_iterator i = m_buffers.begin();
+					i != m_buffers.end(); i++) {
+				TS_ASSERT_LESS_THAN_EQUALS(3, *i);
+				TS_ASSERT_LESS_THAN_EQUALS(*i, 4);
+			}
+		} else {
+			int buffer0 = 3;
+			async.addSyncBuffer(&buffer0, sizeof(int));
+
+			int buffer1 = 4;
+			async.addBuffer(&buffer1, sizeof(int));
+
+			async.sendBuffer(0, sizeof(int));
+			async.sendBuffer(1, sizeof(int));
+
+			Parameter parameter;
+			async.callInit(parameter);
+
+			async.wait();
+
+			async.sendBuffer(1, sizeof(int));
+
+			async.call(parameter);
+
+			async.wait();
+		}
+	}
+
+	void testRemoveBuffer()
+	{
+		Executor<TestMPI> executor(this);
+
+		MPITest<Executor<TestMPI>, Parameter, Parameter>::type async;
+		async.setScheduler(*m_scheduler);
+
+		async.setExecutor(executor);
+		m_async = &async;
+
+		if (m_scheduler->isExecutor()) {
+			m_scheduler->loop();
+		} else {
+			int buffer0 = 3;
+			async.addSyncBuffer(&buffer0, sizeof(int));
+
+			int buffer1 = 4;
+			async.addBuffer(&buffer1, sizeof(int));
+
+			async.sendBuffer(0, sizeof(int));
+			async.sendBuffer(1, sizeof(int));
+
+			Parameter parameter;
+			async.callInit(parameter);
+
+			async.wait();
+
+			async.removeBuffer(0);
+			TS_ASSERT_EQUALS(async.buffer(0), static_cast<const void*>(0L));
+
+			async.sendBuffer(1, sizeof(int));
+
+			async.call(parameter);
+
+			async.wait();
+
+			async.removeBuffer(1);
+			TS_ASSERT_EQUALS(async.buffer(1), static_cast<const void*>(0L));
+
 			async.call(parameter);
 
 			async.wait();

@@ -60,6 +60,11 @@ public:
 	{
 	}
 
+	unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false)
+	{
+		return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
+	}
+
 	unsigned int addBuffer(const void* buffer, size_t size)
 	{
 		return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
