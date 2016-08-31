@@ -57,9 +57,6 @@ template<class Executor, typename InitParameter, typename Parameter>
 class MPIAsync : public MPIBase<Executor, InitParameter, Parameter>
 {
 private:
-	/** Buffer offsets (only on the executor rank) */
-	std::vector<const unsigned long*> m_bufferOffsets;
-
 	/** Buffer for the parameter (required for async calls) */
 	Parameter m_paramBuffer;
 
