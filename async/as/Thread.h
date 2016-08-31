@@ -96,6 +96,8 @@ public:
 		unsigned int id = ThreadBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size);
 		m_bufferPos.push_back(0);
 
+		assert(m_bufferPos.size() == (Base<Executor, InitParameter, Parameter>::numBuffers()));
+
 		return id;
 	}
 
@@ -110,13 +112,31 @@ public:
 		m_bufferPos[id] += size;
 	}
 
+	void wait()
+	{
+		ThreadBase<Executor, InitParameter, Parameter>::wait();
+
+		resetBufferPosition();
+	}
+
+	void callInit(const InitParameter &parameters)
+	{
+		Base<Executor, InitParameter, Parameter>::callInit(parameters);
+
+		resetBufferPosition();
+	}
+
 	void call(const Parameter &parameters)
 	{
 		ThreadBase<Executor, InitParameter, Parameter>::call(parameters);
+	}
 
-		// Reset the buffer positions
-		for (unsigned int i = 0; i < Base<Executor, InitParameter, Parameter>::numBuffers(); i++)
-			m_bufferPos[i] = 0;
+private:
+	void resetBufferPosition()
+	{
+		for (std::vector<size_t>::iterator it = m_bufferPos.begin();
+			it != m_bufferPos.end(); it++)
+			*it = 0;
 	}
 };
 

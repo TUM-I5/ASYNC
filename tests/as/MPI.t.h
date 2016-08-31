@@ -43,8 +43,24 @@
 
 #include "utils/env.h"
 
+#ifdef ASYNC_MPI_COPY
+#include "async/as/MPIAsync.h"
+#else // ASYNC_MPI_COPY
 #include "async/as/MPI.h"
+#endif // ASYNC_MPI_COPY
 #include "Executor.h"
+
+#ifdef ASYNC_MPI_COPY
+template<class Executor, typename InitParameter, typename Parameter>
+struct MPI {
+	typedef async::as::MPIAsync<Executor, InitParameter, Parameter> type;
+};
+#else // ASYNC_MPI_COPY
+template<class Executor, typename InitParameter, typename Parameter>
+struct MPI {
+	typedef async::as::MPI<Executor, InitParameter, Parameter> type;
+};
+#endif // ASYNC_MPI_COPY
 
 /**
  * Setup for large buffer testing
@@ -77,7 +93,7 @@ class TestMPI : public CxxTest::TestSuite
 	std::vector<int> m_values;
 	pthread_spinlock_t m_valueLock;
 
-	async::as::MPI<Executor<TestMPI>, Parameter, Parameter>* m_async;
+	MPI<Executor<TestMPI>, Parameter, Parameter>::type* m_async;
 	std::vector<int> m_buffers;
 
 	bool m_largeBufferTest;
@@ -142,7 +158,7 @@ public:
 	{
 		Executor<TestMPI> executor(this);
 
-		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
+		MPI<Executor<TestMPI>, Parameter, Parameter>::type async;
 		async.setScheduler(*m_scheduler);
 
 		async.setExecutor(executor);
@@ -157,7 +173,7 @@ public:
 	{
 		Executor<TestMPI> executor(this);
 
-		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
+		MPI<Executor<TestMPI>, Parameter, Parameter>::type async;
 		async.setScheduler(*m_scheduler);
 
 		async.setExecutor(executor);
@@ -180,7 +196,7 @@ public:
 	{
 		Executor<TestMPI> executor(this);
 
-		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
+		MPI<Executor<TestMPI>, Parameter, Parameter>::type async;
 		async.setScheduler(*m_scheduler);
 
 		async.setExecutor(executor);
@@ -217,7 +233,7 @@ public:
 	{
 		Executor<TestMPI> executor(this);
 
-		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
+		MPI<Executor<TestMPI>, Parameter, Parameter>::type async;
 		async.setScheduler(*m_scheduler);
 
 		async.setExecutor(executor);
@@ -250,7 +266,7 @@ public:
 	{
 		Executor<TestMPI> executor(this);
 
-		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
+		MPI<Executor<TestMPI>, Parameter, Parameter>::type async;
 		async.setScheduler(*m_scheduler);
 
 		async.setExecutor(executor);
@@ -278,7 +294,7 @@ public:
 	{
 		Executor<TestMPI> executor(this);
 
-		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
+		MPI<Executor<TestMPI>, Parameter, Parameter>::type async;
 		async.setScheduler(*m_scheduler);
 
 		async.setExecutor(executor);
@@ -307,7 +323,7 @@ public:
 	{
 		Executor<TestMPI> executor(this);
 
-		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
+		MPI<Executor<TestMPI>, Parameter, Parameter>::type async;
 		async.setScheduler(*m_scheduler);
 
 		async.setExecutor(executor);
@@ -347,11 +363,11 @@ public:
 	{
 		Executor<TestMPI> executor(this);
 
-		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async1;
+		MPI<Executor<TestMPI>, Parameter, Parameter>::type async1;
 		async1.setScheduler(*m_scheduler);
 		async1.setExecutor(executor);
 
-		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async2;
+		MPI<Executor<TestMPI>, Parameter, Parameter>::type async2;
 		async2.setScheduler(*m_scheduler);
 		async2.setExecutor(executor);
 
@@ -380,7 +396,7 @@ public:
 	{
 		Executor<TestMPI> executor(this);
 
-		async::as::MPI<Executor<TestMPI>, Parameter, Parameter> async;
+		MPI<Executor<TestMPI>, Parameter, Parameter>::type async;
 		async.setScheduler(*m_scheduler);
 
 		async.setExecutor(executor);

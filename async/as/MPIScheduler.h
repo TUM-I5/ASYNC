@@ -63,7 +63,11 @@ struct MPIRequest2
 };
 
 template<class Executor, typename InitParameter, typename Parameter>
+class MPIBase;
+template<class Executor, typename InitParameter, typename Parameter>
 class MPI;
+template<class Executor, typename InitParameter, typename Parameter>
+class MPIAsync;
 class MPIScheduler;
 
 class Scheduled
@@ -105,6 +109,11 @@ private:
 	virtual unsigned int paramSize() const = 0;
 
 	/**
+	 * @return True if this class uses async copying
+	 */
+	virtual bool useAsyncCopy() const = 0;
+
+	/**
 	 * Returns the number of buffer chunks send to the executor
 	 *
 	 * This might differ from the number of buffers since large buffers
@@ -112,7 +121,7 @@ private:
 	 */
 	virtual unsigned int numBufferChunks() const = 0;
 
-	virtual void _addBuffer(unsigned long size) = 0;
+	virtual void _addBuffer() = 0;
 
 	virtual void _execInit(const void* parameter) = 0;
 
@@ -136,7 +145,11 @@ private:
 class MPIScheduler
 {
 	template<class Executor, typename InitParameter, typename Parameter>
+	friend class MPIBase;
+	template<class Executor, typename InitParameter, typename Parameter>
 	friend class MPI;
+	template<class Executor, typename InitParameter, typename Parameter>
+	friend class MPIAsync;
 private:
 	/** The group local communicator (incl. the executor) */
 	MPI_Comm m_privateGroupComm;
@@ -159,9 +172,6 @@ private:
 	/** All async objects */
 	std::vector<Scheduled*> m_asyncCalls;
 
-	/** Use asynchronous MPI for copying data to the executor */
-	const bool m_asyncCopy;
-
 	/**
 	 * A list of possible buffer ids
 	 *
@@ -181,7 +191,6 @@ public:
 		  m_groupRank(0), m_groupSize(0),
 		  m_isExecutor(false),
 		  m_commWorld(MPI_COMM_NULL),
-		  m_asyncCopy(async::Config::useAsyncCopy()),
 		  m_finalized(false)
 	{
 	}
@@ -241,11 +250,6 @@ public:
 		return m_groupComm;
 	}
 
-	bool useAyncCopy() const
-	{
-		return m_asyncCopy;
-	}
-
 	/**
 	 * Should be called on the executor to start the execution loop
 	 */
@@ -272,8 +276,6 @@ public:
 			MPI_Status status;
 			int id, tag;
 
-			unsigned long bufferSize; // required for the add tag
-
 			do {
 				MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, m_privateGroupComm, &status);
 
@@ -283,13 +285,14 @@ public:
 				if (id > static_cast<int>(m_asyncCalls.size()) || m_asyncCalls[id] == 0L)
 					logError() << "ASYNC: Invalid id" << id << "received";
 
+				char tmp;
 				int size;
 				unsigned int bufferId;
 				void* buf;
 
 				switch (tag) {
 				case ADD_TAG:
-					MPI_Recv(&bufferSize, 1, MPI_UNSIGNED_LONG, status.MPI_SOURCE, status.MPI_TAG,
+					MPI_Recv(&tmp, 1, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG,
 							m_privateGroupComm, MPI_STATUS_IGNORE);
 
 					readyTasks[id]++;
@@ -301,7 +304,7 @@ public:
 							status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm, MPI_STATUS_IGNORE);
 
 					lastTag[id] = tag;
-					if (m_asyncCopy)
+					if (m_asyncCalls[id]->useAsyncCopy())
 						asyncReadyTasks[id]++;
 					else
 						readyTasks[id]++;
@@ -323,7 +326,7 @@ public:
 					MPI_Recv(buf, size, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm,
 							MPI_STATUS_IGNORE);
 
-					if (m_asyncCopy)
+					if (m_asyncCalls[id]->useAsyncCopy())
 							asyncReadyTasks[id]++;
 					break;
 				case WAIT_TAG:
@@ -349,14 +352,14 @@ public:
 			switch (tag) {
 			case ADD_TAG:
 				MPI_Barrier(m_privateGroupComm);
-				m_asyncCalls[id]->_addBuffer(bufferSize);
+				m_asyncCalls[id]->_addBuffer();
 				break;
 			case INIT_TAG:
 				MPI_Barrier(m_privateGroupComm);
 				m_asyncCalls[id]->_execInit(m_asyncCalls[id]->paramBuffer());
 				break;
 			case PARAM_TAG:
-				if (!m_asyncCopy)
+				if (!m_asyncCalls[id]->useAsyncCopy())
 					MPI_Barrier(m_privateGroupComm);
 				m_asyncCalls[id]->_exec(m_asyncCalls[id]->paramBuffer());
 				break;
@@ -422,7 +425,7 @@ private:
 		return id;
 	}
 
-	void addBuffer(int id, unsigned int bufferId, unsigned long size)
+	void addBuffer(int id, unsigned int bufferId)
 	{
 		if (bufferId >= m_heapBufferIds.size()) {
 			assert(bufferId == m_heapBufferIds.size()); // IDs always increment by 1
@@ -430,19 +433,9 @@ private:
 			m_heapBufferIds.push_back(bufferId);
 		}
 
-		MPI_Send(&size, 1, MPI_UNSIGNED_LONG,
-				m_groupSize-1, id*NUM_TAGS+ADD_TAG, m_privateGroupComm);
-
-		MPI_Barrier(m_privateGroupComm);
-	}
-
-	template<typename Parameter>
-	void sendInitParam(int id, const Parameter &param)
-	{
-		// For simplification, we send the Parameter struct as a buffer
-		// TODO find a nice way for hybrid systems
-		MPI_Send(const_cast<Parameter*>(&param), sizeof(Parameter),
-				MPI_CHAR, m_groupSize-1, id*NUM_TAGS+INIT_TAG, m_privateGroupComm);
+		char tmp;
+		MPI_Send(&tmp, 1, MPI_CHAR,
+			m_groupSize-1, id*NUM_TAGS+ADD_TAG, m_privateGroupComm);
 
 		MPI_Barrier(m_privateGroupComm);
 	}
@@ -473,6 +466,17 @@ private:
 				&requests.r[1]);
 
 		return requests;
+	}
+
+	template<typename Parameter>
+	void sendInitParam(int id, const Parameter &param)
+	{
+		// For simplification, we send the Parameter struct as a buffer
+		// TODO find a nice way for hybrid systems
+		MPI_Send(const_cast<Parameter*>(&param), sizeof(Parameter),
+				MPI_CHAR, m_groupSize-1, id*NUM_TAGS+INIT_TAG, m_privateGroupComm);
+
+		MPI_Barrier(m_privateGroupComm);
 	}
 
 	/**

@@ -136,9 +136,9 @@ public:
 		Param param;
 		callInit(param);
 
-		sendBuffer(1, sizeof(int));
-
 		wait();
+
+		sendBuffer(1, sizeof(int));
 
 		call(param);
 

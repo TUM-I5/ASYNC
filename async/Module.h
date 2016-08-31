@@ -45,6 +45,7 @@
 
 #ifdef USE_MPI
 #include "async/as/MPI.h"
+#include "async/as/MPIAsync.h"
 #endif // USE_MPI
 #include "async/as/Thread.h"
 #include "async/as/Sync.h"
@@ -73,7 +74,10 @@ public:
 			break;
 		case MPI:
 #ifdef USE_MPI
-			m_async = new async::as::MPI<Executor, InitParameter, Parameter>();
+			if (Config::useAsyncCopy())
+				m_async = new async::as::MPIAsync<Executor, InitParameter, Parameter>();
+			else
+				m_async = new async::as::MPI<Executor, InitParameter, Parameter>();
 #else // USE_MPI
 			logError() << "Asynchronous MPI is not supported.";
 #endif // USE_MPI

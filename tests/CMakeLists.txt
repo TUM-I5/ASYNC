@@ -78,17 +78,17 @@ function( add_serial_cxx_test target source )
     endif( USE_MPI )
 endfunction( add_serial_cxx_test )
 
+# Add sub tests
+add_subdirectory( as )
+
 # Add tests
 add_serial_cxx_test( TestModuleSync ${CMAKE_CURRENT_SOURCE_DIR}/Module.t.h )
 set_tests_properties( TestModuleSync PROPERTIES ENVIRONMENT "ASYNC_MODE=SYNC" )
 add_serial_cxx_test( TestModuleThread ${CMAKE_CURRENT_SOURCE_DIR}/Module.t.h )
 set_tests_properties( TestModuleThread PROPERTIES ENVIRONMENT "ASYNC_MODE=THREAD" )
-# set_target_properties( TestModuleThread PROPERTIES COMPILE_DEFINITIONS "USE_ASYNC_THREAD" )
 if( USE_MPI )
     add_mpi_cxx_test( TestModuleMPI ${CMAKE_CURRENT_SOURCE_DIR}/Module.t.h 3 )
     set_tests_properties( TestModuleMPI PROPERTIES ENVIRONMENT "ASYNC_MODE=MPI" )
-#     set_target_properties( TestModuleMPI PROPERTIES COMPILE_DEFINITIONS "USE_ASYNC_MPI" )
+    add_mpi_cxx_test( TestModuleMPIAsync ${CMAKE_CURRENT_SOURCE_DIR}/Module.t.h 3 )
+    set_tests_properties( TestModuleMPIAsync PROPERTIES ENVIRONMENT "ASYNC_MODE=MPI;ASYNC_MPI_COPY=1" )
 endif( USE_MPI )
-
-# Add subdirectories
-add_subdirectory( as )

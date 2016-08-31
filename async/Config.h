@@ -80,7 +80,7 @@ public:
 
 	static bool useAsyncCopy()
 	{
-		return utils::Env::get<int>("ASYNC_ASYNC_MPI_COPY", 0);
+		return utils::Env::get<int>("ASYNC_MPI_COPY", 0);
 	}
 
 	static size_t alignment()
