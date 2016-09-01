@@ -45,6 +45,8 @@
 #include "utils/logger.h"
 
 #include "async/Config.h"
+#include "async/ExecInfo.h"
+#include "Magic.h"
 
 namespace async
 {
@@ -54,13 +56,18 @@ namespace as
 
 class MPIScheduler;
 
+
+
 /**
  * Base class for (a)synchronous communication
  */
 template<class Executor, typename InitParameter, typename Parameter>
-class Base
+class Base : public async::ExecInfo
 {
 private:
+	ASYNC_HAS_MEM_FUNC_T1(execInit, execInitHasExec, P, void, const ExecInfo&, const P&);
+	ASYNC_HAS_MEM_FUNC_T1(exec, execHasExec, P, void, const ExecInfo&, const P&);
+
 	/**
 	 * Description of a buffer
 	 */
@@ -68,10 +75,8 @@ private:
 	{
 		/** The original memory */
 		const void* origin;
-		/** The buffer on the executor (might be NULL) */
+		/** The buffer on the executor */
 		void* buffer;
-		/** Size of the original memory */
-		size_t size;
 	};
 
 private:
@@ -113,14 +118,6 @@ public:
 	}
 
 	/**
-	 * @return True, if this is an MPI executor
-	 */
-	virtual bool isExecutor() const
-	{
-		return false; // Default for sync and thread
-	}
-
-	/**
 	 * Add a buffer that is not copied for asychronous calls.
 	 *
 	 * Can be used for constant data or for initialization calls.
@@ -131,7 +128,8 @@ public:
 	virtual unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false) = 0;
 
 	/**
-	 * @param buffer The original memory location in the application
+	 * @param buffer The original memory location in the application or NULL if ASYNC should
+	 *  manage the buffer. (See {@link managedBuffer()}
 	 * @param bufferSize The size of the memory location
 	 * @return The id of the buffer
 	 */
@@ -152,21 +150,24 @@ public:
 		m_buffer[id].origin = 0L;
 		free(m_buffer[id].buffer);
 		m_buffer[id].buffer = 0L;
-		m_buffer[id].size = 0;
+		async::ExecInfo::_removeBuffer(id);
 	}
 
-	unsigned int numBuffers() const
+	/**
+	 * @return Pointer to the managed buffer or NULL if this buffer is
+	 *  not managed
+	 *
+	 * @warning This buffer might be shared by ASYNC modules.
+	 */
+	virtual void* managedBuffer(unsigned int id)
 	{
-		return m_buffer.size();
-	}
+		if (origin(id) == 0L) {
+			assert(_buffer(id));
+			return _buffer(id);
+		}
 
-	size_t bufferSize(unsigned int id) const
-	{
-		assert(id < numBuffers());
-		return m_buffer[id].size;
+		return 0L;
 	}
-
-	virtual const void* buffer(unsigned int id) const = 0;
 
 	/**
 	 * @param size The size that should be transfered
@@ -175,10 +176,13 @@ public:
 
 	virtual void callInit(const InitParameter &parameters)
 	{
-		m_executor->execInit(parameters);
+		_callInit<Executor, InitParameter>(parameters);
 	}
 
-	virtual void call(const Parameter &parameters) = 0;
+	virtual void call(const Parameter &parameters)
+	{
+		_call<Executor, Parameter>(parameters);
+	}
 
 	virtual void wait() = 0;
 
@@ -194,9 +198,10 @@ protected:
 
 	unsigned int _addBuffer(const void* origin, size_t size, bool allocate = true)
 	{
+		async::ExecInfo::_addBuffer(size);
+
 		BufInfo buffer;
 		buffer.origin = origin;
-		buffer.size = size;
 
 		if (size && allocate) {
 			if (m_alignment > 0) {
@@ -214,6 +219,7 @@ protected:
 			buffer.buffer = 0L;
 
 		m_buffer.push_back(buffer);
+		assert(m_buffer.size() == numBuffers());
 
 		return m_buffer.size()-1;
 	}
@@ -256,11 +262,38 @@ protected:
 			m_buffer[i].origin = 0L;
 			free(m_buffer[i].buffer);
 			m_buffer[i].buffer = 0L;
-			m_buffer[i].size = 0;
+			async::ExecInfo::_removeBuffer(i);
 		}
 
 		m_finalized = true;
 		return true;
+	}
+
+private:
+	template<typename E, typename P>
+	typename enable_if<execInitHasExec<E, P>::value>::type
+	_callInit(const P &parameters) {
+		const ExecInfo &info = *this;
+		m_executor->execInit(info, parameters);
+	}
+
+	template<typename E, typename P>
+	typename enable_if<!execInitHasExec<E, P>::value>::type
+	_callInit(const P &parameters) {
+		m_executor->execInit(parameters);
+	}
+
+	template<typename E, typename P>
+	typename enable_if<execHasExec<E, P>::value>::type
+	_call(const P &parameters) {
+		const ExecInfo &info = *this;
+		m_executor->exec(info, parameters);
+	}
+
+	template<typename E, typename P>
+	typename enable_if<!execHasExec<E, P>::value>::type
+	_call(const P &parameters) {
+		m_executor->exec(parameters);
 	}
 };
 

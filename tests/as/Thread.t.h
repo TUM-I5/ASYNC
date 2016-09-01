@@ -198,6 +198,25 @@ public:
 		TS_ASSERT_EQUALS(async.buffer(0), &buffer);
 	}
 
+	void testManagedBuffer()
+	{
+		Executor<TestThread> executor(this);
+
+		async::as::Thread<Executor<TestThread>, Parameter, Parameter> async;
+		async.setExecutor(executor);
+
+		async.addBuffer(0L, sizeof(int));
+
+		TS_ASSERT_DIFFERS(async.managedBuffer(0), static_cast<void*>(0L));
+
+		async.wait();
+
+		*static_cast<int*>(async.managedBuffer(0)) = 32;
+		async.sendBuffer(0, sizeof(int));
+
+		TS_ASSERT_EQUALS(*reinterpret_cast<const int*>(async.buffer(0)), 32);
+	}
+
 	void testRemoveBuffer()
 	{
 		Executor<TestThread> executor(this);

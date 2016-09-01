@@ -125,6 +125,12 @@ public:
 		return m_async->bufferSize(id);
 	}
 
+	template<typename T>
+	T managedBuffer(unsigned int id)
+	{
+		return static_cast<T>(m_async->managedBuffer(id));
+	}
+
 	const void* buffer(unsigned int id) const
 	{
 		return m_async->buffer(id);

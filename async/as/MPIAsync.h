@@ -186,11 +186,13 @@ public:
 		assert((MPIBase<Executor, InitParameter, Parameter>::bufferPos(id)) + size
 			<= (Base<Executor, InitParameter, Parameter>::bufferSize(id)));
 
-		memcpy(Base<Executor, InitParameter, Parameter>::_buffer(id) +
-				MPIBase<Executor, InitParameter, Parameter>::bufferPos(id),
-			Base<Executor, InitParameter, Parameter>::origin(id) +
-				MPIBase<Executor, InitParameter, Parameter>::bufferPos(id),
-			size);
+		if (Base<Executor, InitParameter, Parameter>::origin(id)) {
+			memcpy(Base<Executor, InitParameter, Parameter>::_buffer(id) +
+					MPIBase<Executor, InitParameter, Parameter>::bufferPos(id),
+				Base<Executor, InitParameter, Parameter>::origin(id) +
+					MPIBase<Executor, InitParameter, Parameter>::bufferPos(id),
+				size);
+		}
 		MPIBase<Executor, InitParameter, Parameter>::incBufferPos(id, size);
 	}
 

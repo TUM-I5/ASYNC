@@ -34,69 +34,65 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef ASYNC_AS_SYNC_H
-#define ASYNC_AS_SYNC_H
+#ifndef ASYNC_EXECINFO_H
+#define ASYNC_EXECINFO_H
 
-#include "Base.h"
+#include <cassert>
+#include <vector>
 
 namespace async
 {
 
-namespace as
-{
-
 /**
- * Asynchronous call via pthreads
+ * Buffer information send to the executor on each exec and execInit call
  */
-template<class Executor, typename InitParameter, typename Parameter>
-class Sync : public Base<Executor, InitParameter, Parameter>
+class ExecInfo
 {
+private:
+	/** The size for all buffers */
+	std::vector<size_t> m_bufferSize;
+
 public:
-	Sync()
+	virtual ~ExecInfo()
+	{ }
+
+	/**
+	 * @return True, if this is an MPI executor
+	 */
+	virtual bool isExecutor() const
 	{
+		return false; // Default for sync and thread
 	}
 
-	~Sync()
+	unsigned int numBuffers() const
 	{
+		return m_bufferSize.size();
 	}
 
-	unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false)
+	size_t bufferSize(unsigned int id) const
 	{
-		return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
-	}
-
-	unsigned int addBuffer(const void* buffer, size_t size)
-	{
-		return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, buffer == 0L);
-	}
-
-	const void* buffer(unsigned int id) const
-	{
-		if (Base<Executor, InitParameter, Parameter>::origin(id))
-			return Base<Executor, InitParameter, Parameter>::origin(id);
-
-		return Base<Executor, InitParameter, Parameter>::_buffer(id);
-	}
-
-	void sendBuffer(unsigned int id, size_t size)
-	{
+		assert(id < numBuffers());
+		return m_bufferSize[id];
 	}
 
 	/**
-	 * Does nothing (call has already finished because it is synchronous)
+	 * @return Read-only pointer to the buffer (Useful for executors.)
 	 */
-	void wait()
+	virtual const void* buffer(unsigned int id) const = 0;
+
+protected:
+	void _addBuffer(size_t size)
 	{
+		m_bufferSize.push_back(size);
 	}
 
-	void call(const Parameter &parameters)
+	void _removeBuffer(unsigned int id)
 	{
-		Base<Executor, InitParameter, Parameter>::executor().exec(parameters);
+		assert(id < numBuffers());
+		m_bufferSize[id] = 0;
 	}
 };
 
 }
 
-}
-
-#endif // ASYNC_AS_SYNC_H
+#endif // ASYNC_EXECINFO_H

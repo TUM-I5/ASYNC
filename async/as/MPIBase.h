@@ -171,13 +171,15 @@ public:
 		if (isClone(id) && m_scheduler->groupRank() != 0)
 			return;
 
+		const uint8_t* buffer = Base<Executor, InitParameter, Parameter>::origin(id);
+		if (!buffer)
+			buffer = m_scheduler->managedBuffer();
+
 		// We need to send the buffer in 1 GB chunks
 		for (size_t done = 0; done < size; done += maxSend()) {
 			size_t send = std::min(maxSend(), size-done);
 
-			m_scheduler->sendBuffer(m_id, id,
-				Base<Executor, InitParameter, Parameter>::origin(id) + bufferPos(id),
-				send);
+			m_scheduler->sendBuffer(m_id, id, buffer + bufferPos(id), send);
 			incBufferPos(id, send);
 		}
 	}
@@ -381,14 +383,6 @@ private:
 		Base<Executor, InitParameter, Parameter>::removeBuffer(id);
 	}
 
-	void _execInit(const void* paramBuffer)
-	{
-		const InitParameter* param = reinterpret_cast<const InitParameter*>(paramBuffer);
-		Base<Executor, InitParameter, Parameter>::executor().execInit(*param);
-
-		resetBufferPositionOnEexecutor();
-	}
-
 	void* getBufferPos(unsigned int id, int rank, int size)
 	{
 		assert(rank < m_scheduler->groupSize()-1);
@@ -397,6 +391,14 @@ private:
 		void* buf = Base<Executor, InitParameter, Parameter>::_buffer(id)+bufferOffset(id, rank);
 		m_executorBuffer[id].positions[rank] += size;
 		return buf;
+	}
+
+	void _execInit(const void* paramBuffer)
+	{
+		const InitParameter* param = reinterpret_cast<const InitParameter*>(paramBuffer);
+		Base<Executor, InitParameter, Parameter>::callInit(*param);
+
+		resetBufferPositionOnEexecutor();
 	}
 
 	void _exec(const void* paramBuffer)

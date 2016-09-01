@@ -39,9 +39,10 @@
 
 #include <mpi.h>
 
-#include <algorithm>
 #include <cassert>
 #include <cstring>
+#include <map>
+#include <stdint.h>
 #include <vector>
 
 #include "utils/logger.h"
@@ -181,6 +182,12 @@ private:
 
 	/** All async objects */
 	std::vector<Scheduled*> m_asyncCalls;
+
+	/** Managed buffer counters for each size */
+	std::map<size_t, unsigned int> m_managedBufferCounter;
+
+	/** Managed buffer size */
+	std::vector<uint8_t> m_managedBuffer;
 
 	/**
 	 * A list of possible buffer ids
@@ -555,6 +562,38 @@ private:
 	{
 		MPI_Send(0L, 0, MPI_CHAR, m_groupSize-1,
 				id*NUM_TAGS+FINALIZE_TAG, m_privateGroupComm);
+	}
+
+	void addManagedBuffer(size_t size)
+	{
+		m_managedBufferCounter[size]++;
+		if (m_managedBuffer.size() < size)
+			m_managedBuffer.resize(size);
+	}
+
+	void removeManagedBuffer(size_t size)
+	{
+		m_managedBufferCounter.at(size)--;
+		if (m_managedBufferCounter.at(size) == 0) {
+			m_managedBufferCounter.erase(size);
+			if (m_managedBuffer.size() >= size) {
+				// Last element removed that required this size
+				std::map<size_t, unsigned int>::const_reverse_iterator it
+					= m_managedBufferCounter.rbegin();
+				if (it == m_managedBufferCounter.rend())
+					m_managedBuffer.clear();
+				else
+					m_managedBuffer.resize(it->first);
+			}
+		}
+	}
+
+	/**
+	 * @return Current pointer to the managed buffer
+	 */
+	uint8_t* managedBuffer()
+	{
+		return &m_managedBuffer[0];
 	}
 
 private:

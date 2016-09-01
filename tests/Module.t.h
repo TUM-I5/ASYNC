@@ -85,8 +85,9 @@ public:
 		finalize();
 	}
 
-	void execInit(const Param &param)
+	void execInit(const async::ExecInfo &info, const Param &param)
 	{
+		TS_ASSERT_EQUALS(info.numBuffers(), 0);
 		m_execInit = true;
 	}
 
@@ -116,6 +117,7 @@ public:
 	unsigned int m_bufferSize;
 	unsigned int m_cloneBufferSize;
 	int m_buffer;
+	int m_managedBuffer;
 
 public:
 	BufferModule()
@@ -138,6 +140,10 @@ public:
 		int cloneBuffer = 1;
 		addSyncBuffer(&cloneBuffer, sizeof(int), true);
 
+		addBuffer(0L, 2*sizeof(int));
+
+		int* managedBuffer = async::Module<BufferModule, Param, Param>::managedBuffer<int*>(3);
+
 		Param param;
 		callInit(param);
 
@@ -145,12 +151,17 @@ public:
 
 		sendBuffer(1, sizeof(int));
 
+		managedBuffer[0] = 5;
+		managedBuffer[1] = 5;
+
+		sendBuffer(3, 2*sizeof(int));
+
 		call(param);
 
 		if (async::Config::mode() == async::MPI) {
 			// Set the params on non-executors
 			execInit(param);
-			exec(param);
+			exec(param, false);
 		}
 
 		wait();
@@ -163,13 +174,25 @@ public:
 		m_initBufferSize = bufferSize(0);
 	}
 
-	void exec(const Param &param)
+	void exec(const async::ExecInfo &info, const Param &param)
+	{
+		exec(param);
+	}
+
+	void exec(const Param &param, bool isExecutor = true)
 	{
 		m_bufferSize = bufferSize(1);
 		for (unsigned int i = 0; i < m_bufferSize/sizeof(int); i++) {
 			TS_ASSERT_EQUALS(42, *(static_cast<const int*>(buffer(1))+i));
 		}
 		m_cloneBufferSize = bufferSize(2);
+
+		if (isExecutor) {
+			unsigned int managedBufferSize = bufferSize(3);
+			for (unsigned int i = 0; i < managedBufferSize/sizeof(int); i++) {
+				TS_ASSERT_EQUALS(*(static_cast<const int*>(buffer(3))+i), 5);
+			}
+		}
 	}
 
 	void setUp()
@@ -187,6 +210,7 @@ class RemoveBufferModule : private async::Module<RemoveBufferModule, Param, Para
 public:
 	unsigned int m_buffer0Size;
 	unsigned int m_buffer1Size;
+	unsigned int m_managedBufferSize;
 
 public:
 	RemoveBufferModule()
@@ -205,12 +229,15 @@ public:
 		int buffer1 = 42;
 		addBuffer(&buffer1, sizeof(int));
 
+		addBuffer(0L, sizeof(int));
+
 		Param param;
 		callInit(param);
 
 		wait();
 
 		removeBuffer(0);
+		removeBuffer(2);
 		sendBuffer(1, sizeof(int));
 
 		call(param);
@@ -234,6 +261,7 @@ public:
 	{
 		m_buffer0Size = bufferSize(0);
 		m_buffer1Size = bufferSize(1);
+		m_managedBufferSize = bufferSize(2);
 	}
 
 	void setUp()
@@ -358,5 +386,6 @@ public:
 
 		TS_ASSERT_EQUALS(module.m_buffer0Size, 0);
 		TS_ASSERT_EQUALS(module.m_buffer1Size, buffer1Size);
+		TS_ASSERT_EQUALS(module.m_managedBufferSize, 0);
 	}
 };

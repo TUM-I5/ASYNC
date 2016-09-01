@@ -73,8 +73,28 @@ public:
 
 	unsigned int addBuffer(const void* buffer, size_t size)
 	{
+		if (buffer == 0L)
+			MPIBase<Executor, InitParameter, Parameter>::scheduler().addManagedBuffer(size);
+
 		MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size);
 		return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
+	}
+
+	void removeBuffer(unsigned int id)
+	{
+		if (!Base<Executor, InitParameter, Parameter>::origin(id))
+			MPIBase<Executor, InitParameter, Parameter>::scheduler().removeManagedBuffer(
+				Base<Executor, InitParameter, Parameter>::bufferSize(id));
+
+		MPIBase<Executor, InitParameter, Parameter>::removeBuffer(id);
+	}
+
+	void* managedBuffer(unsigned int id)
+	{
+		if (!Base<Executor, InitParameter, Parameter>::origin(id))
+			return MPIBase<Executor, InitParameter, Parameter>::scheduler().managedBuffer();
+
+		return 0L;
 	}
 
 	const void* buffer(unsigned int id) const

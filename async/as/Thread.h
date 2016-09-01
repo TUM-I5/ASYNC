@@ -148,11 +148,14 @@ public:
 			return;
 
 		assert((Base<Executor, InitParameter, Parameter>::_buffer(id)));
-		assert(m_buffer[id].position+size <= (Base<Executor, InitParameter, Parameter>::bufferSize(id)));
 
-		memcpy(Base<Executor, InitParameter, Parameter>::_buffer(id)+m_buffer[id].position,
-		       Base<Executor, InitParameter, Parameter>::origin(id)+m_buffer[id].position,
-		       size);
+		if (Base<Executor, InitParameter, Parameter>::origin(id)) {
+			assert(m_buffer[id].position+size <= (Base<Executor, InitParameter, Parameter>::bufferSize(id)));
+
+			memcpy(Base<Executor, InitParameter, Parameter>::_buffer(id)+m_buffer[id].position,
+				Base<Executor, InitParameter, Parameter>::origin(id)+m_buffer[id].position,
+				size);
+		}
 		m_buffer[id].position += size;
 	}
 
