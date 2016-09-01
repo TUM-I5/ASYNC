@@ -330,6 +330,8 @@ public:
 			bufferSize *= m_size-1;
 		}
 
+		dispatcher.finalize();
+
 		TS_ASSERT_EQUALS(module.m_initBufferSize, initBufferSize);
 		TS_ASSERT_EQUALS(module.m_bufferSize, bufferSize);
 		TS_ASSERT_EQUALS(module.m_cloneBufferSize, cloneBufferSize);
@@ -351,6 +353,8 @@ public:
 		if (dispatcher.isExecutor() && async::Config::mode() == async::MPI) {
 			buffer1Size *= m_size-1;
 		}
+
+		dispatcher.finalize();
 
 		TS_ASSERT_EQUALS(module.m_buffer0Size, 0);
 		TS_ASSERT_EQUALS(module.m_buffer1Size, buffer1Size);

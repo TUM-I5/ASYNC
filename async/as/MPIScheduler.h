@@ -200,7 +200,7 @@ public:
 		  m_groupComm(MPI_COMM_NULL),
 		  m_groupRank(0), m_groupSize(0),
 		  m_isExecutor(false),
-		  m_commWorld(MPI_COMM_NULL),
+		  m_commWorld(MPI_COMM_WORLD),
 		  m_finalized(false)
 	{
 	}
@@ -424,6 +424,8 @@ public:
 			MPI_Comm_free(&m_privateGroupComm);
 		if (m_groupComm != MPI_COMM_NULL)
 			MPI_Comm_free(&m_groupComm);
+		if (m_commWorld != MPI_COMM_WORLD)
+			MPI_Comm_free(&m_commWorld);
 
 		m_finalized = true;
 	}
