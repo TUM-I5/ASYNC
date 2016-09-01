@@ -572,4 +572,21 @@ public:
 			delete [] buffer;
 		}
 	}
+
+	void testPartialInit()
+	{
+		Executor<TestMPI> executor(this);
+
+		MPITest<Executor<TestMPI>, Parameter, Parameter>::type async;
+		async.setScheduler(*m_scheduler);
+
+		if (m_scheduler->isExecutor()) {
+			async.setExecutor(executor);
+
+			m_scheduler->loop();
+		}
+
+		// setExecutor is not called on non-executors
+		// This should not timeout
+	}
 };
