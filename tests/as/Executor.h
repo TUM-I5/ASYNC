@@ -41,6 +41,10 @@
 
 struct Parameter
 {
+	Parameter()
+		: value(0)
+	{ }
+	
 	int value;
 };
 
