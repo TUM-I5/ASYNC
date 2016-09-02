@@ -85,6 +85,12 @@ public:
 		finalize();
 	}
 
+	void norun()
+	{
+		init();
+		finalize();
+	}
+
 	void execInit(const async::ExecInfo &info, const Param &param)
 	{
 		TS_ASSERT_EQUALS(info.numBuffers(), 0);
@@ -388,5 +394,29 @@ public:
 		TS_ASSERT_EQUALS(module.m_buffer0Size, 0);
 		TS_ASSERT_EQUALS(module.m_buffer1Size, buffer1Size);
 		TS_ASSERT_EQUALS(module.m_managedBufferSize, 0);
+	}
+
+	void testModulesActiveDisabled()
+	{
+		async::Dispatcher dispatcher;
+
+		unsigned int groupSize = dispatcher.groupSize();
+		if (async::Config::mode() == async::MPI) {
+			TS_ASSERT_EQUALS(groupSize, 64); // the default
+		} else {
+			TS_ASSERT_EQUALS(groupSize, 1);
+		}
+
+		Module module0;
+		Module module1;
+
+		dispatcher.init();
+
+		if (dispatcher.dispatch()) {
+			// Run only one module
+			module0.run();
+		}
+
+		dispatcher.finalize();
 	}
 };

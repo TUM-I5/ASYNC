@@ -115,7 +115,7 @@ public:
 	MPIBase()
 		: m_maxSend(async::Config::maxSend()),
 		  m_scheduler(0L),
-		  m_id(0),
+		  m_id(-1),
 		  m_numBufferChunks(0)
 	{
 	}
@@ -128,6 +128,9 @@ public:
 	void setScheduler(MPIScheduler &scheduler)
 	{
 		m_scheduler = &scheduler;
+
+		// Add this to the scheduler
+		m_id = m_scheduler->addScheduled(this);
 	}
 
 	/**
@@ -138,9 +141,6 @@ public:
 		// Initialization on the executor
 		if (m_scheduler->isExecutor())
 			ThreadBase<Executor, InitParameter, Parameter>::setExecutor(executor);
-
-		// Add this to the scheduler
-		m_id = m_scheduler->addScheduled(this);
 	}
 
 	void removeBuffer(unsigned int id)
@@ -210,7 +210,7 @@ public:
 		if (!Base<Executor, InitParameter, Parameter>::_finalize())
 			return;
 
-		if (!m_scheduler->isExecutor())
+		if (m_id >= 0 && !m_scheduler->isExecutor())
 			m_scheduler->sendFinalize(m_id);
 	}
 

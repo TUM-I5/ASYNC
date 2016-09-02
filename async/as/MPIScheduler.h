@@ -299,8 +299,25 @@ public:
 			do {
 				MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, m_privateGroupComm, &status);
 
-				id = status.MPI_TAG / NUM_TAGS;
-				tag = status.MPI_TAG % NUM_TAGS;
+				if (status.MPI_TAG == KILL_TAG) {
+					// Dummy recv
+					assert(status.MPI_SOURCE == 0);
+					MPI_Recv(0L, 0, MPI_CHAR, 0, KILL_TAG, m_privateGroupComm, MPI_STATUS_IGNORE);
+
+					// Stop everything immediately (probably some finalizes were missing)
+					for (std::vector<Scheduled*>::iterator it = m_asyncCalls.begin();
+						it != m_asyncCalls.end(); it++) {
+						if (*it) {
+							(*it)->_finalize();
+							*it = 0;
+						}
+					}
+					goto kill;
+				}
+
+				tag = status.MPI_TAG - NUM_STATIC_TAGS;
+				id = tag / NUM_TAGS;
+				tag = tag % NUM_TAGS;
 
 				if (id > static_cast<int>(m_asyncCalls.size()) || m_asyncCalls[id] == 0L)
 					logError() << "ASYNC: Invalid id" << id << "received";
@@ -414,6 +431,8 @@ public:
 				asyncReadyTasks[id] = 0;
 		}
 
+		kill:
+
 		delete [] readyTasks;
 		delete [] asyncReadyTasks;
 		delete [] lastTag;
@@ -423,6 +442,11 @@ public:
 	{
 		if (m_finalized)
 			return;
+
+		if (m_asyncCalls.size() > 0 && m_groupRank == 0) {
+			// Some async calls are left, -> send the kill switch
+			MPI_Ssend(0L, 0, MPI_CHAR, m_groupSize-1, KILL_TAG, m_privateGroupComm);
+		}
 
 		if (m_privateGroupComm != MPI_COMM_NULL)
 			MPI_Comm_free(&m_privateGroupComm);
@@ -457,6 +481,8 @@ private:
 
 	void addBuffer(int id, unsigned int bufferId, bool sync = true)
 	{
+		assert(id >= 0);
+
 		if (bufferId >= m_heapBufferIds.size()) {
 			assert(bufferId == m_heapBufferIds.size()); // IDs always increment by 1
 
@@ -465,43 +491,55 @@ private:
 
 		int syncInt = sync;
 		MPI_Send(&syncInt, 1, MPI_INT,
-			m_groupSize-1, id*NUM_TAGS+ADD_TAG, m_privateGroupComm);
+			m_groupSize-1, id*NUM_TAGS+ADD_TAG+NUM_STATIC_TAGS,
+			m_privateGroupComm);
 
 		MPI_Barrier(m_privateGroupComm);
 	}
 
 	void removeBuffer(int id, unsigned int bufferId)
 	{
+		assert(id >= 0);
+
 		MPI_Send(&bufferId, 1, MPI_UNSIGNED,
-			m_groupSize-1, id*NUM_TAGS+REMOVE_TAG, m_privateGroupComm);
+			m_groupSize-1, id*NUM_TAGS+REMOVE_TAG+NUM_STATIC_TAGS,
+			m_privateGroupComm);
 
 		MPI_Barrier(m_privateGroupComm);
 	}
 
 	void sendBuffer(int id, unsigned int bufferId, const void* buffer, int size)
 	{
+		assert(id >= 0);
+
 		// Select the buffer
 		MPI_Send(&bufferId, 1, MPI_UNSIGNED,
-				m_groupSize-1, id*NUM_TAGS+BUFFER_TAG, m_privateGroupComm);
+			m_groupSize-1, id*NUM_TAGS+BUFFER_TAG+NUM_STATIC_TAGS,
+			m_privateGroupComm);
 
 		// Send the buffer (synchronous to avoid overtaking of other messages)
 		MPI_Ssend(const_cast<void*>(buffer), size, MPI_CHAR,
-				m_groupSize-1, id*NUM_TAGS+BUFFER_TAG, m_privateGroupComm);
+			m_groupSize-1, id*NUM_TAGS+BUFFER_TAG+NUM_STATIC_TAGS,
+			m_privateGroupComm);
 	}
 
 	MPIRequest2 iSendBuffer(int id, unsigned int bufferId, const void* buffer, int size)
 	{
+		assert(id >= 0);
+
 		MPIRequest2 requests;
 
 		// Select the buffer
 		MPI_Isend(&m_heapBufferIds[bufferId], 1, MPI_UNSIGNED,
-				m_groupSize-1, id*NUM_TAGS+BUFFER_TAG, m_privateGroupComm,
-				&requests.r[0]);
+			m_groupSize-1, id*NUM_TAGS+BUFFER_TAG+NUM_STATIC_TAGS,
+			m_privateGroupComm,
+			&requests.r[0]);
 
 		// Send the buffer
 		MPI_Isend(const_cast<void*>(buffer), size, MPI_CHAR,
-				m_groupSize-1, id*NUM_TAGS+BUFFER_TAG, m_privateGroupComm,
-				&requests.r[1]);
+			m_groupSize-1, id*NUM_TAGS+BUFFER_TAG+NUM_STATIC_TAGS,
+			m_privateGroupComm,
+			&requests.r[1]);
 
 		return requests;
 	}
@@ -509,10 +547,13 @@ private:
 	template<typename Parameter>
 	void sendInitParam(int id, const Parameter &param)
 	{
+		assert(id >= 0);
+
 		// For simplification, we send the Parameter struct as a buffer
 		// TODO find a nice way for hybrid systems
 		MPI_Send(const_cast<Parameter*>(&param), sizeof(Parameter),
-				MPI_CHAR, m_groupSize-1, id*NUM_TAGS+INIT_TAG, m_privateGroupComm);
+			MPI_CHAR, m_groupSize-1, id*NUM_TAGS+INIT_TAG+NUM_STATIC_TAGS,
+			m_privateGroupComm);
 
 		MPI_Barrier(m_privateGroupComm);
 	}
@@ -523,10 +564,13 @@ private:
 	template<typename Parameter>
 	void sendParam(int id, const Parameter &param)
 	{
+		assert(id >= 0);
+
 		// For simplification, we send the Parameter struct as a buffer
 		// TODO find a nice way for hybrid systems
 		MPI_Send(const_cast<Parameter*>(&param), sizeof(Parameter),
-				MPI_CHAR, m_groupSize-1, id*NUM_TAGS+PARAM_TAG, m_privateGroupComm);
+			MPI_CHAR, m_groupSize-1, id*NUM_TAGS+PARAM_TAG+NUM_STATIC_TAGS,
+			m_privateGroupComm);
 
 		MPI_Barrier(m_privateGroupComm);
 	}
@@ -537,19 +581,25 @@ private:
 	template<typename Parameter>
 	MPI_Request iSendParam(int id, const Parameter &param)
 	{
+		assert(id >= 0);
+
 		MPI_Request request;
 
 		MPI_Isend(const_cast<Parameter*>(&param), sizeof(Parameter), MPI_CHAR,
-				m_groupSize-1, id*NUM_TAGS+PARAM_TAG, m_privateGroupComm,
-				&request);
+			m_groupSize-1, id*NUM_TAGS+PARAM_TAG+NUM_STATIC_TAGS,
+			m_privateGroupComm,
+			&request);
 
 		return request;
 	}
 
 	void wait(int id)
 	{
+		assert(id >= 0);
+
 		MPI_Send(0L, 0, MPI_CHAR, m_groupSize-1,
-				id*NUM_TAGS+WAIT_TAG, m_privateGroupComm);
+			id*NUM_TAGS+WAIT_TAG+NUM_STATIC_TAGS,
+			m_privateGroupComm);
 
 		// Wait for the return of the async call
 		MPI_Barrier(m_privateGroupComm);
@@ -557,8 +607,20 @@ private:
 
 	void sendFinalize(int id)
 	{
+		assert(id >= 0);
+
+		if (m_privateGroupComm == MPI_COMM_NULL)
+			// Can happen if the dispatcher was already finalized
+			// We can ignore this here because, we have the kill switch
+			return;
+
 		MPI_Send(0L, 0, MPI_CHAR, m_groupSize-1,
-				id*NUM_TAGS+FINALIZE_TAG, m_privateGroupComm);
+			id*NUM_TAGS+FINALIZE_TAG+NUM_STATIC_TAGS,
+			m_privateGroupComm);
+
+		// Remove one async call from the list (it does not matter which one,
+		// since we do not need this list on non-executors anyway
+		m_asyncCalls.pop_back();
 	}
 
 	void addManagedBuffer(size_t size)
@@ -594,6 +656,9 @@ private:
 	}
 
 private:
+	static const int KILL_TAG = 0;
+	static const int NUM_STATIC_TAGS = KILL_TAG + 1;
+
 	static const int ADD_TAG = 0;
 	static const int REMOVE_TAG = 1;
 	static const int INIT_TAG = 2;
@@ -601,6 +666,7 @@ private:
 	static const int PARAM_TAG = 4;
 	static const int WAIT_TAG = 5;
 	static const int FINALIZE_TAG = 6;
+	/** The number of tags required for each async module */
 	static const int NUM_TAGS = FINALIZE_TAG + 1;
 };
 
