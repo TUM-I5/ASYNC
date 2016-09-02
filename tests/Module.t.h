@@ -277,7 +277,7 @@ public:
 
 /**
  * Test for {@link Dispatcher} and {@link Module} since
- * they only work together.
+ * they work closely together.
  */
 class TestModule : public CxxTest::TestSuite
 {

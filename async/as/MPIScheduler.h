@@ -204,10 +204,10 @@ private:
 public:
 	MPIScheduler()
 		: m_privateGroupComm(MPI_COMM_NULL),
-		  m_groupComm(MPI_COMM_NULL),
+		  m_groupComm(MPI_COMM_SELF), // Default for non MPI mode
 		  m_groupRank(0), m_groupSize(0),
 		  m_isExecutor(false),
-		  m_commWorld(MPI_COMM_WORLD),
+		  m_commWorld(MPI_COMM_WORLD), // Default for non MPI mode
 		  m_finalized(false)
 	{
 	}
@@ -274,9 +274,6 @@ public:
 	{
 		if (!m_isExecutor)
 			return;
-
-		int rank;
-		MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
 		// Save ready tasks for each call
 		unsigned int* readyTasks = new unsigned int[m_asyncCalls.size()];
@@ -429,7 +426,7 @@ public:
 
 		if (m_privateGroupComm != MPI_COMM_NULL)
 			MPI_Comm_free(&m_privateGroupComm);
-		if (m_groupComm != MPI_COMM_NULL)
+		if (m_groupComm != MPI_COMM_NULL && m_groupComm != MPI_COMM_SELF)
 			MPI_Comm_free(&m_groupComm);
 		if (m_commWorld != MPI_COMM_WORLD)
 			MPI_Comm_free(&m_commWorld);

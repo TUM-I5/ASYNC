@@ -86,21 +86,14 @@ public:
 #endif
 
 	/**
-	 * @return The groups size (or 1 for synchronous and asynchnchronous thread mode)
-	 */
-	unsigned int groupSize() const
-	{
-		return m_groupSize;
-	}
-
-	/**
-	 * The group size for the MPI async mode
+	 * Use this to overwrite the group size set from the environment variable
 	 *
 	 * @param groupSize The group size (excl. the MPI executor)
 	 */
 	void setGroupSize(unsigned int groupSize)
 	{
-		m_groupSize = groupSize;
+		if (Config::mode() == MPI)
+			m_groupSize = groupSize;
 	}
 
 	/**
@@ -123,6 +116,26 @@ public:
 			m_scheduler.setCommunicator(m_comm, m_groupSize);
 #endif // USE_MPI
 	}
+
+	/**
+	 * @return The groups size (or 1 for synchronous and asynchnchronous thread mode)
+	 */
+	unsigned int groupSize() const
+	{
+		return m_groupSize;
+	}
+
+#ifdef USE_MPI
+	MPI_Comm groupComm() const
+	{
+		return m_scheduler.groupComm();
+	}
+
+	MPI_Comm commWorld() const
+	{
+		return m_scheduler.commWorld();
+	}
+#endif // USE_MPI
 
 	/**
 	 * @return True if the process is an MPI executor
