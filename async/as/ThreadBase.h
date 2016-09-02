@@ -172,6 +172,15 @@ public:
 	}
 
 private:
+	/**
+	 * Wrapper for the parent class because parent class function cannot be called directly
+	 */
+	void _call(const Parameter &parameters)
+	{
+		Base<Executor, InitParameter, Parameter>::call(parameters);
+	}
+
+private:
 	static void* asyncThread(void* c)
 	{
 		ThreadBase* async = reinterpret_cast<ThreadBase*>(c);
@@ -194,7 +203,7 @@ private:
 				// Done
 				pthread_spin_unlock(&async->m_initBufferLock);
 			} else
-				async->executor().exec(async->m_nextParams);
+				async->_call(async->m_nextParams);
 
 			pthread_spin_unlock(&async->m_writerLock);
 		}

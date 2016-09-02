@@ -161,7 +161,7 @@ public:
 		if (async::Config::mode() == async::MPI) {
 			// Set the params on non-executors
 			execInit(param);
-			exec(param, false);
+			_exec(param, false);
 		}
 
 		wait();
@@ -176,10 +176,20 @@ public:
 
 	void exec(const async::ExecInfo &info, const Param &param)
 	{
-		exec(param);
+		_exec(param);
 	}
 
-	void exec(const Param &param, bool isExecutor = true)
+	void setUp()
+	{
+		setExecutor(*this);
+	}
+
+	void tearDown()
+	{
+	}
+
+private:
+	void _exec(const Param &param, bool isExecutor = true)
 	{
 		m_bufferSize = bufferSize(1);
 		for (unsigned int i = 0; i < m_bufferSize/sizeof(int); i++) {
@@ -193,15 +203,6 @@ public:
 				TS_ASSERT_EQUALS(*(static_cast<const int*>(buffer(3))+i), 5);
 			}
 		}
-	}
-
-	void setUp()
-	{
-		setExecutor(*this);
-	}
-
-	void tearDown()
-	{
 	}
 };
 

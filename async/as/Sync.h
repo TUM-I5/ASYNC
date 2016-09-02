@@ -91,7 +91,7 @@ public:
 
 	void call(const Parameter &parameters)
 	{
-		Base<Executor, InitParameter, Parameter>::executor().exec(parameters);
+		Base<Executor, InitParameter, Parameter>::call(parameters);
 	}
 };
 
