@@ -4,7 +4,7 @@
  *
  * @author Sebastian Rettenberger <sebastian.rettenberger@tum.de>
  *
- * @copyright Copyright (c) 2016, Technische Universitaet Muenchen.
+ * @copyright Copyright (c) 2016-2017, Technische Universitaet Muenchen.
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -417,7 +417,7 @@ private:
 	void _finalize()
 	{
 		for (typename std::vector<ExecutorBufInfo>::iterator it = m_executorBuffer.begin();
-				it != m_executorBuffer.end(); it++) {
+				it != m_executorBuffer.end(); ++it) {
 			delete [] it->offsets;
 			it->offsets = 0L;
 			delete [] it->positions;
@@ -430,7 +430,7 @@ private:
 	/**
 	 * @return The current offset on the buffer on the executor
 	 */
-	size_t bufferOffset(unsigned int id, int rank)
+	size_t bufferOffset(unsigned int id, int rank) const
 	{
 		return m_executorBuffer[id].offsets[rank]+m_executorBuffer[id].positions[rank];
 	}

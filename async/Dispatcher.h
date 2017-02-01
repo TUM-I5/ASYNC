@@ -4,7 +4,7 @@
  *
  * @author Sebastian Rettenberger <sebastian.rettenberger@tum.de>
  *
- * @copyright Copyright (c) 2016, Technische Universitaet Muenchen.
+ * @copyright Copyright (c) 2016-2017, Technische Universitaet Muenchen.
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -108,7 +108,7 @@ public:
 		const std::vector<ModuleBase*>& modules = ModuleBase::modules();
 		// Set the scheduler for all modules
 		for (std::vector<ModuleBase*>::const_iterator i = modules.begin();
-				i != modules.end(); i++)
+				i != modules.end(); ++i)
 			(*i)->setScheduler(m_scheduler);
 
 		if (Config::mode() == MPI)
@@ -164,7 +164,7 @@ public:
 			const std::vector<ModuleBase*>& modules = ModuleBase::modules();
 			// Initialize the executor modules
 			for (std::vector<ModuleBase*>::const_iterator i = modules.begin();
-					i != modules.end(); i++)
+					i != modules.end(); ++i)
 				(*i)->setUp();
 
 			// Run the executor loop
@@ -172,7 +172,7 @@ public:
 
 			// Finalize the executor modules
 			for (std::vector<ModuleBase*>::const_iterator i = modules.begin();
-					i != modules.end(); i++)
+					i != modules.end(); ++i)
 				(*i)->tearDown();
 			return false;
 		}

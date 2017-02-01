@@ -4,7 +4,7 @@
  *
  * @author Sebastian Rettenberger <sebastian.rettenberger@tum.de>
  *
- * @copyright Copyright (c) 2016, Technische Universitaet Muenchen.
+ * @copyright Copyright (c) 2016-2017, Technische Universitaet Muenchen.
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -306,7 +306,7 @@ public:
 
 					// Stop everything immediately (probably some finalizes were missing)
 					for (std::vector<Scheduled*>::iterator it = m_asyncCalls.begin();
-						it != m_asyncCalls.end(); it++) {
+						it != m_asyncCalls.end(); ++it) {
 						if (*it) {
 							(*it)->_finalize();
 							*it = 0;

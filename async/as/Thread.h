@@ -4,7 +4,7 @@
  *
  * @author Sebastian Rettenberger <sebastian.rettenberger@tum.de>
  *
- * @copyright Copyright (c) 2016, Technische Universitaet Muenchen.
+ * @copyright Copyright (c) 2016-2017, Technische Universitaet Muenchen.
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -182,7 +182,7 @@ private:
 	void resetBufferPosition()
 	{
 		for (typename std::vector<BufInfo>::iterator it = m_buffer.begin();
-			it != m_buffer.end(); it++)
+			it != m_buffer.end(); ++it)
 			it->position = 0;
 	}
 };
