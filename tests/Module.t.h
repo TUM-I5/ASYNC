@@ -4,7 +4,7 @@
  *
  * @author Sebastian Rettenberger <sebastian.rettenberger@tum.de>
  *
- * @copyright Copyright (c) 2016, Technische Universitaet Muenchen.
+ * @copyright Copyright (c) 2016-2017, Technische Universitaet Muenchen.
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -148,6 +148,9 @@ public:
 
 		addBuffer(0L, 2*sizeof(int));
 
+		int buffer2 = 43;
+		addBuffer(&buffer2, sizeof(int));
+
 		int* managedBuffer = async::Module<BufferModule, Param, Param>::managedBuffer<int*>(3);
 
 		Param param;
@@ -161,6 +164,8 @@ public:
 		managedBuffer[1] = 5;
 
 		sendBuffer(3, 2*sizeof(int));
+
+		sendBuffer(4);
 
 		call(param);
 
@@ -202,6 +207,12 @@ private:
 			TS_ASSERT_EQUALS(42, *(static_cast<const int*>(buffer(1))+i));
 		}
 		m_cloneBufferSize = bufferSize(2);
+
+		unsigned int bufferSize2 = bufferSize(4);
+		TS_ASSERT_EQUALS(bufferSize2, m_bufferSize);
+		for (unsigned int i = 0; i < bufferSize2/sizeof(int); i++) {
+			TS_ASSERT_EQUALS(43, *(static_cast<const int*>(buffer(4))+i));
+		}
 
 		if (isExecutor) {
 			unsigned int managedBufferSize = bufferSize(3);

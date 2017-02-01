@@ -4,7 +4,7 @@
  *
  * @author Sebastian Rettenberger <sebastian.rettenberger@tum.de>
  *
- * @copyright Copyright (c) 2016, Technische Universitaet Muenchen.
+ * @copyright Copyright (c) 2016-2017, Technische Universitaet Muenchen.
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -134,6 +134,14 @@ public:
 	const void* buffer(unsigned int id) const
 	{
 		return m_async->buffer(id);
+	}
+
+	/**
+	 * Sends the complete buffer
+	 */
+	void sendBuffer(unsigned int id)
+	{
+		sendBuffer(id, bufferSize(id));
 	}
 
 	void sendBuffer(unsigned int id, size_t size)
