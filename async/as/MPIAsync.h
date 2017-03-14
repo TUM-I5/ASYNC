@@ -120,7 +120,7 @@ public:
 
 		// Initialize the requests
 		unsigned int requests = 0;
-		if (size > 0) {
+		if (size > 0 && (!clone || MPIBase<Executor, InitParameter, Parameter>::scheduler().groupRank() == 0)) {
 			requests = (size + MPIBase<Executor, InitParameter, Parameter>::maxSend() - 1)
 				/ MPIBase<Executor, InitParameter, Parameter>::maxSend();
 			m_asyncRequests.insert(m_asyncRequests.end(), requests*2, MPI_REQUEST_NULL);

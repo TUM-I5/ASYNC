@@ -122,6 +122,7 @@ public:
 	unsigned int m_initBufferSize;
 	unsigned int m_bufferSize;
 	unsigned int m_cloneBufferSize;
+	unsigned int m_cloneSyncBufferSize;
 	int m_buffer;
 	int m_managedBuffer;
 
@@ -129,7 +130,8 @@ public:
 	BufferModule()
 		: m_initBufferSize(0),
 		  m_bufferSize(0),
-		  m_cloneBufferSize(0)
+		  m_cloneBufferSize(0),
+		  m_cloneSyncBufferSize(0)
 	{
 	}
 
@@ -144,14 +146,18 @@ public:
 		addBuffer(&buffer, sizeof(int));
 
 		int cloneBuffer = 1;
-		addSyncBuffer(&cloneBuffer, sizeof(int), true);
+		addBuffer(&cloneBuffer, sizeof(int), true);
+
+		long addCloneSyncBuffer = 2;
+		addBuffer(&addCloneSyncBuffer, sizeof(long), true);
 
 		addBuffer(0L, 2*sizeof(int));
 
 		int buffer2 = 43;
 		addBuffer(&buffer2, sizeof(int));
 
-		int* managedBuffer = async::Module<BufferModule, Param, Param>::managedBuffer<int*>(3);
+		int* managedBuffer = async::Module<BufferModule, Param, Param>::managedBuffer<int*>(4);
+		TS_ASSERT_DIFFERS(managedBuffer, static_cast<int*>(0L));
 
 		Param param;
 		callInit(param);
@@ -163,9 +169,9 @@ public:
 		managedBuffer[0] = 5;
 		managedBuffer[1] = 5;
 
-		sendBuffer(3, 2*sizeof(int));
+		sendBuffer(4, 2*sizeof(int));
 
-		sendBuffer(4);
+		sendBuffer(5);
 
 		call(param);
 
@@ -207,17 +213,18 @@ private:
 			TS_ASSERT_EQUALS(42, *(static_cast<const int*>(buffer(1))+i));
 		}
 		m_cloneBufferSize = bufferSize(2);
+		m_cloneSyncBufferSize = bufferSize(3);
 
-		unsigned int bufferSize2 = bufferSize(4);
+		unsigned int bufferSize2 = bufferSize(5);
 		TS_ASSERT_EQUALS(bufferSize2, m_bufferSize);
 		for (unsigned int i = 0; i < bufferSize2/sizeof(int); i++) {
-			TS_ASSERT_EQUALS(43, *(static_cast<const int*>(buffer(4))+i));
+			TS_ASSERT_EQUALS(43, *(static_cast<const int*>(buffer(5))+i));
 		}
 
 		if (isExecutor) {
-			unsigned int managedBufferSize = bufferSize(3);
+			unsigned int managedBufferSize = bufferSize(4);
 			for (unsigned int i = 0; i < managedBufferSize/sizeof(int); i++) {
-				TS_ASSERT_EQUALS(*(static_cast<const int*>(buffer(3))+i), 5);
+				TS_ASSERT_EQUALS(*(static_cast<const int*>(buffer(4))+i), 5);
 			}
 		}
 	}
@@ -370,6 +377,7 @@ public:
 		unsigned int initBufferSize = 2*sizeof(int);
 		unsigned int bufferSize = sizeof(int);
 		unsigned int cloneBufferSize = sizeof(int);
+		unsigned int cloneSyncBufferSize = sizeof(long);
 
 		if (dispatcher.isExecutor() && async::Config::mode() == async::MPI) {
 			initBufferSize *= m_size-1;
@@ -381,6 +389,7 @@ public:
 		TS_ASSERT_EQUALS(module.m_initBufferSize, initBufferSize);
 		TS_ASSERT_EQUALS(module.m_bufferSize, bufferSize);
 		TS_ASSERT_EQUALS(module.m_cloneBufferSize, cloneBufferSize);
+		TS_ASSERT_EQUALS(module.m_cloneSyncBufferSize, cloneSyncBufferSize);
 	}
 
 	void testRemoveBuffer()

@@ -299,7 +299,7 @@ private:
 
 	void _addBuffer(bool sync)
 	{
-		_addBuffer(0L, 0, sync);
+		_addBuffer(0L, 0, false, sync);
 	}
 
 	unsigned int _addBuffer(const void* origin, unsigned long size, bool clone = false, bool sync = true)
