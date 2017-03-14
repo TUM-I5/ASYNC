@@ -235,16 +235,15 @@ protected:
 		return *m_scheduler;
 	}
 
-	unsigned int addBuffer(const void* buffer, size_t size, bool sync = true, bool clone = false)
+	unsigned int addBuffer(const void* buffer, size_t size, bool clone = false, bool sync = true)
 	{
 		assert(m_scheduler);
 		assert(!m_scheduler->isExecutor());
-		assert(!clone || sync); // cloned buffers only implemented for synchronized sends
 
 		m_scheduler->addBuffer(m_id,
 			Base<Executor, InitParameter, Parameter>::numBuffers());
 
-		return _addBuffer(buffer, size, sync, clone);
+		return _addBuffer(buffer, size, clone, sync);
 	}
 
 	bool isClone(unsigned int id) const
@@ -303,7 +302,7 @@ private:
 		_addBuffer(0L, 0, sync);
 	}
 
-	unsigned int _addBuffer(const void* origin, unsigned long size, bool sync, bool clone = false)
+	unsigned int _addBuffer(const void* origin, unsigned long size, bool clone = false, bool sync = true)
 	{
 		// If this buffer is a clone, only the first rank will send it
 		if (clone && m_scheduler->groupRank() != 0)

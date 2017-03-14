@@ -96,7 +96,7 @@ public:
 
 	unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false)
 	{
-		MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, true, clone);
+		MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone);
 		unsigned int id = Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
 
 		// We directly send sync buffers
@@ -113,9 +113,9 @@ public:
 	/**
 	 * @param bufferSize Should be 0 on the executor
 	 */
-	unsigned int addBuffer(const void* buffer, size_t size)
+	unsigned int addBuffer(const void* buffer, size_t size, bool clone = false)
 	{
-		MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, false);
+		MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone, false);
 		unsigned int id = Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size);
 
 		// Initialize the requests

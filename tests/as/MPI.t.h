@@ -382,6 +382,36 @@ public:
 		}
 	}
 
+	void testCloneBuffer()
+	{
+		Executor<TestMPI> executor(this);
+
+		MPITest<Executor<TestMPI>, Parameter, Parameter>::type async;
+		async.setScheduler(*m_scheduler);
+
+		async.setExecutor(executor);
+		m_async = &async;
+
+		if (m_scheduler->isExecutor()) {
+			m_scheduler->loop();
+
+			TS_ASSERT_EQUALS(m_buffers.size(), 1);
+			for (std::vector<int>::const_iterator i = m_buffers.begin();
+					i != m_buffers.end(); i++)
+				TS_ASSERT_EQUALS(*i, 3);
+		} else {
+			int buffer = 3;
+			async.addBuffer(&buffer, sizeof(int), true);
+
+			async.sendBuffer(0, sizeof(int));
+
+			Parameter parameter;
+			async.callInit(parameter);
+
+			async.wait();
+		}
+	}
+
 	void testBuffer2()
 	{
 		Executor<TestMPI> executor(this);

@@ -65,7 +65,7 @@ public:
 		return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
 	}
 
-	unsigned int addBuffer(const void* buffer, size_t size)
+	unsigned int addBuffer(const void* buffer, size_t size, bool clone = false)
 	{
 		return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, buffer == 0L);
 	}

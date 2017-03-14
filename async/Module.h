@@ -105,9 +105,9 @@ public:
 		return m_async->addSyncBuffer(buffer, size, clone);
 	}
 
-	unsigned int addBuffer(const void* buffer, size_t size)
+	unsigned int addBuffer(const void* buffer, size_t size, bool clone = false)
 	{
-		return m_async->addBuffer(buffer, size);
+		return m_async->addBuffer(buffer, size, clone);
 	}
 
 	void removeBuffer(unsigned int id)

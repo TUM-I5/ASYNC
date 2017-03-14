@@ -131,9 +131,10 @@ public:
 	 * @param buffer The original memory location in the application or NULL if ASYNC should
 	 *  manage the buffer. (See {@link managedBuffer()}
 	 * @param bufferSize The size of the memory location
+	 * @param clone True of the buffer is the same (a clone) on all MPI processes.
 	 * @return The id of the buffer
 	 */
-	virtual unsigned int addBuffer(const void* buffer, size_t size) = 0;
+	virtual unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) = 0;
 
 	/**
 	 * Frees all memory allocated for the buffer.

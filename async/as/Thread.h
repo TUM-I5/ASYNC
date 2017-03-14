@@ -117,7 +117,7 @@ public:
 		return id;
 	}
 
-	unsigned int addBuffer(const void* buffer, size_t size)
+	unsigned int addBuffer(const void* buffer, size_t size, bool clone = false)
 	{
 		unsigned int id = ThreadBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size);
 		BufInfo bufInfo;

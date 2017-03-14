@@ -67,16 +67,16 @@ public:
 
 	unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false)
 	{
-		MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, true, clone);
+		MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone);
 		return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
 	}
 
-	unsigned int addBuffer(const void* buffer, size_t size)
+	unsigned int addBuffer(const void* buffer, size_t size, bool clone = false)
 	{
 		if (buffer == 0L)
 			MPIBase<Executor, InitParameter, Parameter>::scheduler().addManagedBuffer(size);
 
-		MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size);
+		MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone);
 		return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
 	}
 
