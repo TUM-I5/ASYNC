@@ -119,6 +119,11 @@ public:
 		if (pthread_create(&m_asyncThread, 0L, asyncThread, this) != 0)
 			logError() << "ASYNC: Failed to start asynchronous thread";
 	}
+	
+	void getAffinity(cpu_set_t &cpuSet)
+	{
+		pthread_getaffinity_np(m_asyncThread, sizeof(cpu_set_t), &cpuSet);
+	}
 
 	void setAffinity(const cpu_set_t &cpuSet)
 	{
