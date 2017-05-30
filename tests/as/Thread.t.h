@@ -4,7 +4,7 @@
  *
  * @author Sebastian Rettenberger <sebastian.rettenberger@tum.de>
  *
- * @copyright Copyright (c) 2016, Technische Universitaet Muenchen.
+ * @copyright Copyright (c) 2016-2017, Technische Universitaet Muenchen.
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -311,5 +311,34 @@ public:
 		async2.wait();
 
 		TS_ASSERT_EQUALS(m_value, 42+13);
+	}
+	
+	void testAddBuffer()
+	{
+		Executor<TestThread> executor(this);
+
+		async::as::Thread<Executor<TestThread>, Parameter, Parameter> async1;
+		async1.setExecutor(executor);
+
+		async1.wait();
+		
+		// Add buffer during send phase
+		int buffer = 40;
+		TS_ASSERT_EQUALS(async1.addBuffer(&buffer, sizeof(int)), 0);
+
+		async1.sendBuffer(0, sizeof(int));
+		TS_ASSERT_EQUALS(*reinterpret_cast<const int*>(async1.buffer(0)), 40);
+
+		Parameter parameter;
+		parameter.value = 42;
+		async1.call(parameter);
+		
+		// Add buffer during call phase
+		int buffer2;
+		TS_ASSERT_EQUALS(async1.addBuffer(&buffer2, sizeof(int)), 1);
+
+		async1.wait();
+
+		TS_ASSERT_EQUALS(m_value, 42);
 	}
 };
