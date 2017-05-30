@@ -165,6 +165,22 @@ public:
 
 		return id;
 	}
+	
+	void resizeBuffer(unsigned int id, const void* buffer, size_t size)
+	{
+		Base<Executor, InitParameter, Parameter>::_resizeBuffer(id, buffer, size);
+		
+		assert(m_phase != EXEC_PHASE);
+		
+		// Initialize the buffer on the executor thread with zeros
+		m_initBuffer = id; // Mark for buffer fill
+		pthread_mutex_unlock(&m_readerLock); // Similar to call() but without setting the parameters
+
+		// Wait for the initialization to finish
+		pthread_spin_lock(&m_initBufferLock);
+		
+		pthread_spin_lock(&m_writerLock);
+	}
 
 	const void* buffer(unsigned int id) const
 	{
