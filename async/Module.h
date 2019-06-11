@@ -95,9 +95,13 @@ public:
 		m_async->setExecutor(executor);
 	}
 
-	void setAffinityIfNecessary(cpu_set_t &cpuSet)
+	bool isAffinityNecessary()
 	{
-		// Pinning is only relevant for mode THREAD
+		return m_async->isAffinityNecessary();
+	}  
+
+	void setAffinityIfNecessary(const cpu_set_t &cpuSet)
+	{
 		m_async->setAffinityIfNecessary(cpuSet);
 	}  
 

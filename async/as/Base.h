@@ -117,7 +117,11 @@ public:
 		m_executor = &executor;
 	}
 
-	virtual void setAffinityIfNecessary(cpu_set_t &cpuMask) {
+	virtual bool isAffinityNecessary() {
+		return false;
+	}
+
+	virtual void setAffinityIfNecessary(const cpu_set_t &cpuMask) {
 		// Do nothing in the general case.
 	}
 

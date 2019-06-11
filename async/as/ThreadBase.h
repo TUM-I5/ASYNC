@@ -146,7 +146,12 @@ public:
 		pthread_setaffinity_np(m_asyncThread, sizeof(cpu_set_t), &cpuSet);
 	}
 
-	void setAffinityIfNecessary(cpu_set_t &cpuSet)
+	bool isAffinityNecessary() {
+		return true;
+	}
+
+
+	void setAffinityIfNecessary(const cpu_set_t &cpuSet)
 	{
 		setAffinity(cpuSet);
 	}
