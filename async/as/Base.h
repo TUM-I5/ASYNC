@@ -117,6 +117,10 @@ public:
 		m_executor = &executor;
 	}
 
+	virtual void setAffinityIfNecessary(cpu_set_t &cpuMask) {
+		// Do nothing in the general case.
+	}
+
 	/**
 	 * Add a buffer that is not copied for asychronous calls.
 	 *

@@ -146,6 +146,11 @@ public:
 		pthread_setaffinity_np(m_asyncThread, sizeof(cpu_set_t), &cpuSet);
 	}
 
+	void setAffinityIfNecessary(cpu_set_t &cpuSet)
+	{
+		setAffinity(cpuSet);
+	}
+
 	unsigned int addBuffer(const void* buffer, size_t size)
 	{
 		unsigned int id = Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size);
