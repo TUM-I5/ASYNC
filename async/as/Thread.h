@@ -90,9 +90,9 @@ public:
 #ifndef __APPLE__
 		ThreadBase<Executor, InitParameter, Parameter>::setExecutor(executor);
 
-		cpu_set_t oldCpuMask;
+		CpuMask oldCpuMask;
 		ThreadBase<Executor, InitParameter, Parameter>::getAffinity(oldCpuMask);
-		const int numCores = CPU_COUNT(&oldCpuMask); // Number of cores we have available
+		const int numCores = CPU_COUNT(&(oldCpuMask.set)); // Number of cores we have available
 
 		int core = async::Config::getPinCore();
 		if (core < 0)
@@ -108,7 +108,7 @@ public:
 		int realCore = -1;
 		while (core >= 0) {
 			realCore++;
-			if (CPU_ISSET(realCore, &oldCpuMask))
+			if (CPU_ISSET(realCore, &(oldCpuMask.set)))
 				core--;
 			
 			if (realCore >= totalCores)
@@ -121,7 +121,7 @@ public:
 		CPU_ZERO(&cpuMask);
 		CPU_SET(realCore, &cpuMask);
 		
-		ThreadBase<Executor, InitParameter, Parameter>::setAffinity(CpuMask(cpuMask);
+		ThreadBase<Executor, InitParameter, Parameter>::setAffinity(CpuMask{cpuMask});
 #endif // __APPLE__
 	}
 

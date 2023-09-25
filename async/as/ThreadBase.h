@@ -44,6 +44,7 @@
 #include "utils/logger.h"
 
 #include "Base.h"
+#include "Pin.h"
 
 namespace async
 {
@@ -100,7 +101,7 @@ private:
 	spinlock_t m_writerLock;
 
 	/** Mutex locked by the reader (callee) */
-        spinlock_t m_readerLock;
+        pthread_mutex_t m_readerLock;
 
 	/** Parameters for the next call */
 	Parameter m_nextParams;
@@ -112,7 +113,7 @@ private:
 	Phase m_phase;
 
 	/** Mutex to wait for the buffer initialization to finish */
-	pthread_mutex_t m_initBufferLock;
+	spinlock_t m_initBufferLock;
 
 	/** Shutdown the thread */
 	bool m_shutdown;
