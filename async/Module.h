@@ -47,6 +47,7 @@
 #include "async/as/MPI.h"
 #include "async/as/MPIAsync.h"
 #endif // USE_MPI
+#include "async/as/Pin.h"
 #include "async/as/Thread.h"
 #include "async/as/Sync.h"
 
@@ -100,9 +101,10 @@ public:
 		return m_async->isAffinityNecessary();
 	}  
 
-	void setAffinityIfNecessary(const cpu_set_t &cpuSet)
+
+	void setAffinityIfNecessary(const as::CpuMask& cpuMask)
 	{
-		m_async->setAffinityIfNecessary(cpuSet);
+		m_async->setAffinityIfNecessary(cpuMask);
 	}  
 
 	void init()

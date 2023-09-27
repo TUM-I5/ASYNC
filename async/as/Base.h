@@ -44,6 +44,7 @@
 
 #include "utils/logger.h"
 
+#include "async/as/Pin.h"
 #include "async/Config.h"
 #include "async/ExecInfo.h"
 #include "Magic.h"
@@ -121,7 +122,7 @@ public:
 		return false;
 	}
 
-	virtual void setAffinityIfNecessary(const cpu_set_t &cpuMask) {
+	virtual void setAffinityIfNecessary(const as::CpuMask& cpuMask) {
 		// Do nothing in the general case.
 	}
 
