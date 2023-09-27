@@ -87,8 +87,8 @@ public:
 
 	void setExecutor(Executor &executor)
 	{
+                ThreadBase<Executor, InitParameter, Parameter>::setExecutor(executor);
 #ifndef __APPLE__
-		ThreadBase<Executor, InitParameter, Parameter>::setExecutor(executor);
 
 		CpuMask oldCpuMask;
 		ThreadBase<Executor, InitParameter, Parameter>::getAffinity(oldCpuMask);

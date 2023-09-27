@@ -22,8 +22,5 @@ struct CpuMask {
   }
 };
 
-#ifdef __APPLE__
-#endif
-
 } // async::as
 #endif // ASYNC_AS_PIN_H
