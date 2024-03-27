@@ -38,6 +38,7 @@
 #define ASYNC_EXECINFO_H
 
 #include <cassert>
+#include <cstddef>
 #include <vector>
 
 namespace async
