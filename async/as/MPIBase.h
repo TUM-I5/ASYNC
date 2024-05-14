@@ -463,7 +463,7 @@ private:
 		const InitParameter* param = reinterpret_cast<const InitParameter*>(paramBuffer);
 		Base<Executor, InitParameter, Parameter>::callInit(*param);
 
-		resetBufferPositionOnEexecutor();
+		resetBufferPositionOnExecutor();
 	}
 
 	void _exec(const void* paramBuffer)
@@ -476,7 +476,7 @@ private:
 	{
 		ThreadBase<Executor, InitParameter, Parameter>::wait();
 
-		resetBufferPositionOnEexecutor();
+		resetBufferPositionOnExecutor();
 	}
 
 	void _finalize()
@@ -505,7 +505,7 @@ private:
 	 *
 	 * Should only be called on the executor.
 	 */
-	void resetBufferPositionOnEexecutor()
+	void resetBufferPositionOnExecutor()
 	{
 		for (typename std::vector<ExecutorBufInfo>::iterator it = m_executorBuffer.begin();
 				it != m_executorBuffer.end(); it++) {
