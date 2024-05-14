@@ -27,9 +27,9 @@
 # ARISING IN ANY WAY OUT OF THE  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-cmake_minimum_required( VERSION 2.8 )
+cmake_minimum_required( VERSION 3.10 )
 
-project( Async )
+project( ASYNC )
 
 option( USE_MPI "Compile with MPI" ON )
 
@@ -40,18 +40,6 @@ add_definitions( -Wall )
 if( USE_MPI )
 	# Find MPI
 	find_package( MPI REQUIRED )
-	if( MPI_LIBRARY )
-		include_directories( SYSTEM ${MPI_C_INCLUDE_PATH} )
-	else( MPI_LIBRARY )
-		#Workaround for stupid mpicc/mpicxx
-		get_filename_component( MPI_BASE ${MPI_C_COMPILER} PATH )
-		set( MPI_BASE ${MPI_BASE}/.. )
-		include_directories( SYSTEM ${MPI_BASE}/include )
-		link_directories( ${MPI_BASE}/lib )
-	endif( MPI_LIBRARY )
-	set( CMAKE_C_COMPILER ${MPI_C_COMPILER} )
-	set( CMAKE_CXX_COMPILER ${MPI_CXX_COMPILER} )
-	set( CMAKE_Fortran_COMPILER ${MPI_Fortran_COMPILER} )
 
 	# Do not include OpenMPI C++ Bindings
 	add_definitions( -DOMPI_SKIP_MPICXX )
