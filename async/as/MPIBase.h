@@ -120,7 +120,7 @@ public:
 	{
 	}
 
-	~MPIBase()
+	~MPIBase() override
 	{
 		finalize();
 	}
@@ -143,7 +143,7 @@ public:
 			ThreadBase<Executor, InitParameter, Parameter>::setExecutor(executor);
 	}
 
-	void removeBuffer(unsigned int id)
+	void removeBuffer(unsigned int id) override
 	{
 		m_scheduler->removeBuffer(m_id, id);
 

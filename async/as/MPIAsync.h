@@ -90,9 +90,7 @@ public:
 		m_asyncRequests.push_back(MPI_REQUEST_NULL);
 	}
 
-	~MPIAsync()
-	{
-	}
+	~MPIAsync() = default;
 
 	unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false)
 	{
@@ -113,7 +111,7 @@ public:
 	/**
 	 * @param bufferSize Should be 0 on the executor
 	 */
-	unsigned int addBuffer(const void* buffer, size_t size, bool clone = false)
+	unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) override
 	{
 		MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone, false);
 		unsigned int id = Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size);
@@ -136,7 +134,7 @@ public:
 		return id;
 	}
 	
-	void resizeBuffer(unsigned int id, const void* buffer, size_t size)
+	void resizeBuffer(unsigned int id, const void* buffer, size_t size) override
 	{
 		assert(id < m_buffer.size());
 		
@@ -156,7 +154,7 @@ public:
 		MPIBase<Executor, InitParameter, Parameter>::resizeBuffer(id, buffer, size);
 	}
 
-	void removeBuffer(unsigned int id)
+	void removeBuffer(unsigned int id) override
 	{
 		if (!m_buffer[id].sync) {
 			m_asyncRequests.erase(m_asyncRequests.end()-m_buffer[id].requests*2,
@@ -167,7 +165,7 @@ public:
 		MPIBase<Executor, InitParameter, Parameter>::removeBuffer(id);
 	}
 
-	const void* buffer(unsigned int id) const
+	const void* buffer(unsigned int id) const override
 	{
 		if (MPIBase<Executor, InitParameter, Parameter>::scheduler().isExecutor())
 			return MPIBase<Executor, InitParameter, Parameter>::buffer(id);
@@ -178,7 +176,7 @@ public:
 	/**
 	 * Wait for an asynchronous call to finish
 	 */
-	void wait()
+	void wait() override
 	{
 		// Wait for all requests first
 		MPI_Waitall(m_asyncRequests.size(), &m_asyncRequests[0], MPI_STATUSES_IGNORE);
@@ -190,7 +188,7 @@ public:
 	/**
 	 * @param id The id of the buffer
 	 */
-	void sendBuffer(unsigned int id, size_t size)
+	void sendBuffer(unsigned int id, size_t size) override
 	{
 		if (size == 0)
 			return;
@@ -219,7 +217,7 @@ public:
 	/**
 	 * @warning Only the parameter from the last task will be considered
 	 */
-	void callInit(const InitParameter &parameters)
+	void callInit(const InitParameter &parameters) override
 	{
 		iSendAllBuffers();
 
@@ -229,7 +227,7 @@ public:
 	/**
 	 * @warning Only the parameter from the last task will be considered
 	 */
-	void call(const Parameter &parameters)
+	void call(const Parameter &parameters) override
 	{
 		iSendAllBuffers();
 

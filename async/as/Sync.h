@@ -52,30 +52,26 @@ template<class Executor, typename InitParameter, typename Parameter>
 class Sync : public Base<Executor, InitParameter, Parameter>
 {
 public:
-	Sync()
-	{
-	}
+	Sync() = default;
 
-	~Sync()
-	{
-	}
+	~Sync() = default;
 
-	unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false)
+	unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false) override
 	{
 		return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
 	}
 
-	unsigned int addBuffer(const void* buffer, size_t size, bool clone = false)
+	unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) override
 	{
 		return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, buffer == 0L);
 	}
 	
-	void resizeBuffer(unsigned int id, const void* buffer, size_t size)
+	void resizeBuffer(unsigned int id, const void* buffer, size_t size) override
 	{
 		Base<Executor, InitParameter, Parameter>::_resizeBuffer(id, buffer, size);
 	}
 
-	const void* buffer(unsigned int id) const
+	const void* buffer(unsigned int id) const override
 	{
 		if (Base<Executor, InitParameter, Parameter>::origin(id))
 			return Base<Executor, InitParameter, Parameter>::origin(id);
@@ -83,17 +79,17 @@ public:
 		return Base<Executor, InitParameter, Parameter>::_buffer(id);
 	}
 
-	void sendBuffer(unsigned int id, size_t size)
+	void sendBuffer(unsigned int id, size_t size) override
 	{
 	}
 
-	void wait()
+	void wait() override
 	{
 		// wait for the executor to finish
 		Base<Executor, InitParameter, Parameter>::wait();
 	}
 
-	void call(const Parameter &parameters)
+	void call(const Parameter &parameters) override
 	{
 		Base<Executor, InitParameter, Parameter>::call(parameters);
 	}

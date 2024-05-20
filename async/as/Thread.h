@@ -77,13 +77,9 @@ private:
 	std::vector<BufInfo> m_buffer;
 
 public:
-	Thread()
-	{
-	}
+	Thread() = default;
 
-	~Thread()
-	{
-	}
+	~Thread() = default;
 
 	void setExecutor(Executor &executor)
 	{
@@ -125,7 +121,7 @@ public:
 #endif // __APPLE__
 	}
 
-	unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false)
+	unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false) override
 	{
 		unsigned int id = Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
 		BufInfo bufInfo;
@@ -138,7 +134,7 @@ public:
 		return id;
 	}
 
-	unsigned int addBuffer(const void* buffer, size_t size, bool clone = false)
+	unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) override
 	{
 		unsigned int id = ThreadBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size);
 		BufInfo bufInfo;
@@ -151,7 +147,7 @@ public:
 		return id;
 	}
 
-	const void* buffer(unsigned int id) const
+	const void* buffer(unsigned int id) const override
 	{
 		assert(id < m_buffer.size());
 

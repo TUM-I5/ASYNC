@@ -57,21 +57,17 @@ template<class Executor, typename InitParameter, typename Parameter>
 class MPI : public MPIBase<Executor, InitParameter, Parameter>
 {
 public:
-	MPI()
-	{
-	}
+	MPI() = default;
 
-	~MPI()
-	{
-	}
+	~MPI() = default;
 
-	unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false)
+	unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false) override
 	{
 		MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone);
 		return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
 	}
 
-	unsigned int addBuffer(const void* buffer, size_t size, bool clone = false)
+	unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) override
 	{
 		if (buffer == 0L)
 			MPIBase<Executor, InitParameter, Parameter>::scheduler().addManagedBuffer(size);
@@ -80,7 +76,7 @@ public:
 		return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
 	}
 	
-	void resizeBuffer(unsigned int id, const void* buffer, size_t size)
+	void resizeBuffer(unsigned int id, const void* buffer, size_t size) override
 	{
 		if (!Base<Executor, InitParameter, Parameter>::origin(id)) {
 			// Resize the managed buffer
@@ -91,7 +87,7 @@ public:
 		MPIBase<Executor, InitParameter, Parameter>::resizeBuffer(id, buffer, size);
 	}
 
-	void removeBuffer(unsigned int id)
+	void removeBuffer(unsigned int id) override
 	{
 		if (!Base<Executor, InitParameter, Parameter>::origin(id))
 			MPIBase<Executor, InitParameter, Parameter>::scheduler().removeManagedBuffer(
@@ -100,7 +96,7 @@ public:
 		MPIBase<Executor, InitParameter, Parameter>::removeBuffer(id);
 	}
 
-	void* managedBuffer(unsigned int id)
+	void* managedBuffer(unsigned int id) override
 	{
 		if (!Base<Executor, InitParameter, Parameter>::origin(id))
 			return MPIBase<Executor, InitParameter, Parameter>::scheduler().managedBuffer();
@@ -108,7 +104,7 @@ public:
 		return 0L;
 	}
 
-	const void* buffer(unsigned int id) const
+	const void* buffer(unsigned int id) const override
 	{
 		if (MPIBase<Executor, InitParameter, Parameter>::scheduler().isExecutor())
 			return MPIBase<Executor, InitParameter, Parameter>::buffer(id);
@@ -119,7 +115,7 @@ public:
 	/**
 	 * @warning Only the parameter from one task will be considered
 	 */
-	void call(const Parameter &parameters)
+	void call(const Parameter &parameters) override
 	{
 		MPIBase<Executor, InitParameter, Parameter>::scheduler().sendParam(
 			MPIBase<Executor, InitParameter, Parameter>::id(), parameters);

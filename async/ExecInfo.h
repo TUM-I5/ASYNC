@@ -53,9 +53,8 @@ private:
 	std::vector<size_t> m_bufferSize;
 
 public:
-	virtual ~ExecInfo()
-	{ }
-
+	virtual ~ExecInfo() = default;
+	
 	/**
 	 * @return True, if this is an MPI executor
 	 */

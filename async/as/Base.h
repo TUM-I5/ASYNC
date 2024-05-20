@@ -42,6 +42,7 @@
 #include <stdint.h>
 #include <vector>
 
+#include "Pin.h"
 #include "utils/logger.h"
 
 #include "async/as/Pin.h"
@@ -215,6 +216,8 @@ public:
 	{
 		_finalize();
 	}
+
+	virtual const void* buffer(unsigned int id) const = 0;
 
 protected:
 	Executor& executor() {

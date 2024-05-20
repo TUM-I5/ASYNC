@@ -86,7 +86,7 @@ public:
 		}
 	}
 
-	virtual ~Module()
+	~Module() override
 	{
 		delete m_async;
 	}

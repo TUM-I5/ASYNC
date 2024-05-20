@@ -143,7 +143,7 @@ protected:
 	}
 
 public:
-	~ThreadBase()
+	~ThreadBase() override
 	{
 		finalize();
 
@@ -157,7 +157,7 @@ public:
                 pthread_mutex_destroy(&m_readerLock);
 	}
 
-	void setExecutor(Executor &executor)
+	void setExecutor(Executor &executor) override
 	{
 		Base<Executor, InitParameter, Parameter>::setExecutor(executor);
 
@@ -169,8 +169,9 @@ public:
                 // initBuffer is only unlocked when the buffer initialization is done
                 lock_spinlock(&m_initBufferLock);
 
-		if (pthread_create(&m_asyncThread, 0L, asyncThread, this) != 0)
+		if (pthread_create(&m_asyncThread, 0L, asyncThread, this) != 0) {
 			logError() << "ASYNC: Failed to start asynchronous thread";
+		}
 	}
 
 	void getAffinity(CpuMask& cpuMask)
@@ -183,17 +184,17 @@ public:
                 cpuMask.setaffinity_np(m_asyncThread);
 	}
 
-	bool isAffinityNecessary() {
+	bool isAffinityNecessary() override {
 		return true;
 	}
 
 
-	void setAffinityIfNecessary(const CpuMask &cpuSet)
+	void setAffinityIfNecessary(const CpuMask &cpuSet) override
 	{
 		setAffinity(cpuSet);
 	}
 
-	unsigned int addBuffer(const void* buffer, size_t size)
+	unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) override
 	{
 		unsigned int id = Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size);
 
@@ -214,7 +215,7 @@ public:
 		return id;
 	}
 	
-	void resizeBuffer(unsigned int id, const void* buffer, size_t size)
+	void resizeBuffer(unsigned int id, const void* buffer, size_t size) override
 	{
 		Base<Executor, InitParameter, Parameter>::_resizeBuffer(id, buffer, size);
 		
@@ -238,7 +239,7 @@ public:
 	/**
 	 * Wait for the asynchronous call to finish
 	 */
-	void wait()
+	void wait() override
 	{
 		m_waiting = true;
 		pthread_mutex_unlock(&m_readerLock);
@@ -246,7 +247,7 @@ public:
 		m_phase = SEND_PHASE;
 	}
 
-	void call(const Parameter &parameters)
+	void call(const Parameter &parameters) override
 	{
 		memcpy(&m_nextParams, &parameters, sizeof(Parameter));
 
@@ -254,7 +255,7 @@ public:
 		pthread_mutex_unlock(&m_readerLock);
 	}
 
-	void finalize()
+	void finalize() override
 	{
 		if (!Base<Executor, InitParameter, Parameter>::_finalize())
 			return;
