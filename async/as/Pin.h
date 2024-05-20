@@ -22,5 +22,5 @@ struct CpuMask {
   }
 };
 
-} // async::as
+} // namespace async::as
 #endif // ASYNC_AS_PIN_H

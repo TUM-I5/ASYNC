@@ -46,31 +46,20 @@
 #include "Base.h"
 #include "Pin.h"
 
-namespace async
-{
+namespace async {
 
-namespace as
-{
+namespace as {
 
 #ifndef __APPLE__
 using spinlock_t = pthread_spinlock_t;
-inline void lock_spinlock(spinlock_t* lock) {
-  pthread_spin_lock(lock);
-}
-inline void unlock_spinlock(spinlock_t* lock) {
-  pthread_spin_unlock(lock);
-}
+inline void lock_spinlock(spinlock_t* lock) { pthread_spin_lock(lock); }
+inline void unlock_spinlock(spinlock_t* lock) { pthread_spin_unlock(lock); }
 #else
 // Spinlock is a LINUX-only feature
 using spinlock_t = pthread_mutex_t;
-inline void lock_spinlock(spinlock_t* lock) {
-  pthread_mutex_lock(lock);
-}
-inline void unlock_spinlock(spinlock_t* lock) {
-  pthread_mutex_unlock(lock);
-}
+inline void lock_spinlock(spinlock_t* lock) { pthread_mutex_lock(lock); }
+inline void unlock_spinlock(spinlock_t* lock) { pthread_mutex_unlock(lock); }
 #endif // __APPLE__
-
 
 /**
  * Base class for asynchronous calls via pthreads.
@@ -78,245 +67,215 @@ inline void unlock_spinlock(spinlock_t* lock) {
  * This class is used by {@link Thread} and
  * {@link MPI}.
  */
-template<class Executor, typename InitParameter, typename Parameter>
-class ThreadBase : public Base<Executor, InitParameter, Parameter>
-{
-private:
-	/**
-	 * The possible phases, indicated whether we
-	 * are betwenn wait() and call() or between
-	 * call() and wait()
-	 */
-	enum Phase {
-		/** We are between call() and wait() */
-		EXEC_PHASE,
-		/** We are between wait() and call() */
-		SEND_PHASE
-	};
-	
-	/** Async thread */
-	pthread_t m_asyncThread;
+template <class Executor, typename InitParameter, typename Parameter>
+class ThreadBase : public Base<Executor, InitParameter, Parameter> {
+  private:
+  /**
+   * The possible phases, indicated whether we
+   * are betwenn wait() and call() or between
+   * call() and wait()
+   */
+  enum Phase {
+    /** We are between call() and wait() */
+    EXEC_PHASE,
+    /** We are between wait() and call() */
+    SEND_PHASE
+  };
 
-	/** Mutex locked by the writer (caller) */
-	spinlock_t m_writerLock;
+  /** Async thread */
+  pthread_t m_asyncThread;
 
-	/** Mutex locked by the reader (callee) */
-        pthread_mutex_t m_readerLock;
+  /** Mutex locked by the writer (caller) */
+  spinlock_t m_writerLock;
 
-	/** Parameters for the next call */
-	Parameter m_nextParams;
+  /** Mutex locked by the reader (callee) */
+  pthread_mutex_t m_readerLock;
 
-	/** The buffer we need to initialize */
-	int m_initBuffer;
-	
-	/** The current phase */
-	Phase m_phase;
+  /** Parameters for the next call */
+  Parameter m_nextParams;
 
-	/** Mutex to wait for the buffer initialization to finish */
-	spinlock_t m_initBufferLock;
+  /** The buffer we need to initialize */
+  int m_initBuffer;
 
-	/** Shutdown the thread */
-	bool m_shutdown;
+  /** The current phase */
+  Phase m_phase;
 
-	bool m_waiting;
+  /** Mutex to wait for the buffer initialization to finish */
+  spinlock_t m_initBufferLock;
 
-protected:
-	ThreadBase()
-		: m_asyncThread(pthread_self()),
-		  m_initBuffer(-1),
-		  m_phase(EXEC_PHASE),
-		  m_shutdown(false),
-		  m_waiting(false)
-	{
+  /** Shutdown the thread */
+  bool m_shutdown;
+
+  bool m_waiting;
+
+  protected:
+  ThreadBase()
+      : m_asyncThread(pthread_self()), m_initBuffer(-1), m_phase(EXEC_PHASE), m_shutdown(false),
+        m_waiting(false) {
 #ifndef __APPLE__
-                pthread_spin_init(&m_writerLock, PTHREAD_PROCESS_PRIVATE);
-                pthread_spin_init(&m_initBufferLock, PTHREAD_PROCESS_PRIVATE);
+    pthread_spin_init(&m_writerLock, PTHREAD_PROCESS_PRIVATE);
+    pthread_spin_init(&m_initBufferLock, PTHREAD_PROCESS_PRIVATE);
 #else
-                pthread_mutexattr_t attr;
-                pthread_mutexattr_init(&attr);
-                pthread_mutexattr_settype(&attr, PTHREAD_PROCESS_PRIVATE);
-                pthread_mutex_init(&m_writerLock, &attr);
-                pthread_mutex_init(&m_initBufferLock, &attr);
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_settype(&attr, PTHREAD_PROCESS_PRIVATE);
+    pthread_mutex_init(&m_writerLock, &attr);
+    pthread_mutex_init(&m_initBufferLock, &attr);
 
 #endif // __APPLE__
-                pthread_mutex_init(&m_readerLock, 0L);
-	}
+    pthread_mutex_init(&m_readerLock, 0L);
+  }
 
-public:
-	~ThreadBase() override
-	{
-		finalize();
+  public:
+  ~ThreadBase() override {
+    finalize();
 
 #ifndef __APPLE__
-                pthread_spin_destroy(&m_initBufferLock);
-                pthread_spin_destroy(&m_writerLock);
+    pthread_spin_destroy(&m_initBufferLock);
+    pthread_spin_destroy(&m_writerLock);
 #else
-                pthread_mutex_destroy(&m_initBufferLock);
-                pthread_mutex_destroy(&m_writerLock);
+    pthread_mutex_destroy(&m_initBufferLock);
+    pthread_mutex_destroy(&m_writerLock);
 #endif // __APPLE__
-                pthread_mutex_destroy(&m_readerLock);
-	}
+    pthread_mutex_destroy(&m_readerLock);
+  }
 
-	void setExecutor(Executor &executor) override
-	{
-		Base<Executor, InitParameter, Parameter>::setExecutor(executor);
+  void setExecutor(Executor& executor) override {
+    Base<Executor, InitParameter, Parameter>::setExecutor(executor);
 
-		// Lock the reader until data is available
-		pthread_mutex_lock(&m_readerLock);
+    // Lock the reader until data is available
+    pthread_mutex_lock(&m_readerLock);
 
-                // Lock writer until the memory is initialized
-                lock_spinlock(&m_writerLock);
-                // initBuffer is only unlocked when the buffer initialization is done
-                lock_spinlock(&m_initBufferLock);
+    // Lock writer until the memory is initialized
+    lock_spinlock(&m_writerLock);
+    // initBuffer is only unlocked when the buffer initialization is done
+    lock_spinlock(&m_initBufferLock);
 
-		if (pthread_create(&m_asyncThread, 0L, asyncThread, this) != 0) {
-			logError() << "ASYNC: Failed to start asynchronous thread";
-		}
-	}
+    if (pthread_create(&m_asyncThread, 0L, asyncThread, this) != 0) {
+      logError() << "ASYNC: Failed to start asynchronous thread";
+    }
+  }
 
-	void getAffinity(CpuMask& cpuMask)
-	{
-                cpuMask.getaffinity_np(m_asyncThread);
-	}
+  void getAffinity(CpuMask& cpuMask) { cpuMask.getaffinity_np(m_asyncThread); }
 
-	void setAffinity(const CpuMask& cpuMask)
-	{
-                cpuMask.setaffinity_np(m_asyncThread);
-	}
+  void setAffinity(const CpuMask& cpuMask) { cpuMask.setaffinity_np(m_asyncThread); }
 
-	bool isAffinityNecessary() override {
-		return true;
-	}
+  bool isAffinityNecessary() override { return true; }
 
+  void setAffinityIfNecessary(const CpuMask& cpuSet) override { setAffinity(cpuSet); }
 
-	void setAffinityIfNecessary(const CpuMask &cpuSet) override
-	{
-		setAffinity(cpuSet);
-	}
+  unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) override {
+    unsigned int id = Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size);
 
-	unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) override
-	{
-		unsigned int id = Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size);
+    // Now, initialize the buffer on the executor thread with zeros
+    if (m_phase == EXEC_PHASE) {
+      lock_spinlock(&m_writerLock);
+    }
 
-		// Now, initialize the buffer on the executor thread with zeros
-		if (m_phase == EXEC_PHASE) {
-                        lock_spinlock(&m_writerLock);
-                }
+    m_initBuffer = id;                   // Mark for buffer fill
+    pthread_mutex_unlock(&m_readerLock); // Similar to call() but without setting the parameters
 
-		m_initBuffer = id; // Mark for buffer fill
-		pthread_mutex_unlock(&m_readerLock); // Similar to call() but without setting the parameters
+    // Wait for the initialization to finish
+    lock_spinlock(&m_initBufferLock);
 
-		// Wait for the initialization to finish
-		lock_spinlock(&m_initBufferLock);
-		
-		if (m_phase != EXEC_PHASE) { // SEND_PHASE
-                        lock_spinlock(&m_writerLock);
-                }
-		return id;
-	}
-	
-	void resizeBuffer(unsigned int id, const void* buffer, size_t size) override
-	{
-		Base<Executor, InitParameter, Parameter>::_resizeBuffer(id, buffer, size);
-		
-		assert(m_phase != EXEC_PHASE);
-		
-		// Initialize the buffer on the executor thread with zeros
-		m_initBuffer = id; // Mark for buffer fill
-		pthread_mutex_unlock(&m_readerLock); // Similar to call() but without setting the parameters
+    if (m_phase != EXEC_PHASE) { // SEND_PHASE
+      lock_spinlock(&m_writerLock);
+    }
+    return id;
+  }
 
-		// Wait for the initialization to finish
-		lock_spinlock(&m_initBufferLock);
-		
-		lock_spinlock(&m_writerLock);
-	}
+  void resizeBuffer(unsigned int id, const void* buffer, size_t size) override {
+    Base<Executor, InitParameter, Parameter>::_resizeBuffer(id, buffer, size);
 
-	const void* buffer(unsigned int id) const
-	{
-		return Base<Executor, InitParameter, Parameter>::_buffer(id);
-	}
+    assert(m_phase != EXEC_PHASE);
 
-	/**
-	 * Wait for the asynchronous call to finish
-	 */
-	void wait() override
-	{
-		m_waiting = true;
-		pthread_mutex_unlock(&m_readerLock);
-		lock_spinlock(&m_writerLock);
-		m_phase = SEND_PHASE;
-	}
+    // Initialize the buffer on the executor thread with zeros
+    m_initBuffer = id;                   // Mark for buffer fill
+    pthread_mutex_unlock(&m_readerLock); // Similar to call() but without setting the parameters
 
-	void call(const Parameter &parameters) override
-	{
-		memcpy(&m_nextParams, &parameters, sizeof(Parameter));
+    // Wait for the initialization to finish
+    lock_spinlock(&m_initBufferLock);
 
-		m_phase = EXEC_PHASE;
-		pthread_mutex_unlock(&m_readerLock);
-	}
+    lock_spinlock(&m_writerLock);
+  }
 
-	void finalize() override
-	{
-		if (!Base<Executor, InitParameter, Parameter>::_finalize())
-			return;
+  const void* buffer(unsigned int id) const {
+    return Base<Executor, InitParameter, Parameter>::_buffer(id);
+  }
 
-		// Shutdown the thread
-		m_shutdown = true;
-		pthread_mutex_unlock(&m_readerLock);
-		pthread_join(m_asyncThread, 0L);
-	}
+  /**
+   * Wait for the asynchronous call to finish
+   */
+  void wait() override {
+    m_waiting = true;
+    pthread_mutex_unlock(&m_readerLock);
+    lock_spinlock(&m_writerLock);
+    m_phase = SEND_PHASE;
+  }
 
-private:
-	void _wait() {
-		Base<Executor, InitParameter, Parameter>::wait();
-	}
+  void call(const Parameter& parameters) override {
+    memcpy(&m_nextParams, &parameters, sizeof(Parameter));
 
-	/**
-	 * Wrapper for the parent class because parent class function cannot be called directly
-	 */
-	void _call(const Parameter &parameters)
-	{
-		Base<Executor, InitParameter, Parameter>::call(parameters);
-	}
+    m_phase = EXEC_PHASE;
+    pthread_mutex_unlock(&m_readerLock);
+  }
 
-private:
-	static void* asyncThread(void* c)
-	{
-		ThreadBase* async = reinterpret_cast<ThreadBase*>(c);
+  void finalize() override {
+    if (!Base<Executor, InitParameter, Parameter>::_finalize())
+      return;
 
-		// Tell everyone that we are read to go
-		unlock_spinlock(&async->m_writerLock);
+    // Shutdown the thread
+    m_shutdown = true;
+    pthread_mutex_unlock(&m_readerLock);
+    pthread_join(m_asyncThread, 0L);
+  }
 
-		while (true) {
-			// We assume that this lock happens before any unlock from the main thread
-			pthread_mutex_lock(&async->m_readerLock);
-			if (async->m_shutdown)
-				break;
+  private:
+  void _wait() { Base<Executor, InitParameter, Parameter>::wait(); }
 
-			if (async->m_waiting) {
-				async->_wait();
-				async->m_waiting = false;
-			}
-			else if (async->m_initBuffer >= 0) {
-				// Touch the memory on this thread
-				unsigned int id = async->m_initBuffer;
-				memset(async->_buffer(id), 0, async->bufferSize(id));
-				async->m_initBuffer = -1;
+  /**
+   * Wrapper for the parent class because parent class function cannot be called directly
+   */
+  void _call(const Parameter& parameters) {
+    Base<Executor, InitParameter, Parameter>::call(parameters);
+  }
 
-				// Done
-				unlock_spinlock(&async->m_initBufferLock);
-			} else
-				async->_call(async->m_nextParams);
+  private:
+  static void* asyncThread(void* c) {
+    ThreadBase* async = reinterpret_cast<ThreadBase*>(c);
 
-			unlock_spinlock(&async->m_writerLock);
-		}
+    // Tell everyone that we are read to go
+    unlock_spinlock(&async->m_writerLock);
 
-		return 0L;
-	}
+    while (true) {
+      // We assume that this lock happens before any unlock from the main thread
+      pthread_mutex_lock(&async->m_readerLock);
+      if (async->m_shutdown)
+        break;
+
+      if (async->m_waiting) {
+        async->_wait();
+        async->m_waiting = false;
+      } else if (async->m_initBuffer >= 0) {
+        // Touch the memory on this thread
+        unsigned int id = async->m_initBuffer;
+        memset(async->_buffer(id), 0, async->bufferSize(id));
+        async->m_initBuffer = -1;
+
+        // Done
+        unlock_spinlock(&async->m_initBufferLock);
+      } else
+        async->_call(async->m_nextParams);
+
+      unlock_spinlock(&async->m_writerLock);
+    }
+
+    return 0L;
+  }
 };
 
-}
+} // namespace as
 
-}
+} // namespace async
 
 #endif // ASYNC_AS_THREADBASE_H

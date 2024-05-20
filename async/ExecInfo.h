@@ -40,64 +40,52 @@
 #include <cassert>
 #include <vector>
 
-namespace async
-{
+namespace async {
 
 /**
  * Buffer information send to the executor on each exec and execInit call
  */
-class ExecInfo
-{
-private:
-	/** The size for all buffers */
-	std::vector<size_t> m_bufferSize;
+class ExecInfo {
+  private:
+  /** The size for all buffers */
+  std::vector<size_t> m_bufferSize;
 
-public:
-	virtual ~ExecInfo() = default;
-	
-	/**
-	 * @return True, if this is an MPI executor
-	 */
-	virtual bool isExecutor() const
-	{
-		return false; // Default for sync and thread
-	}
+  public:
+  virtual ~ExecInfo() = default;
 
-	unsigned int numBuffers() const
-	{
-		return m_bufferSize.size();
-	}
+  /**
+   * @return True, if this is an MPI executor
+   */
+  virtual bool isExecutor() const {
+    return false; // Default for sync and thread
+  }
 
-	size_t bufferSize(unsigned int id) const
-	{
-		assert(id < numBuffers());
-		return m_bufferSize[id];
-	}
+  unsigned int numBuffers() const { return m_bufferSize.size(); }
 
-	/**
-	 * @return Read-only pointer to the buffer (Useful for executors.)
-	 */
-	virtual const void* buffer(unsigned int id) const = 0;
+  size_t bufferSize(unsigned int id) const {
+    assert(id < numBuffers());
+    return m_bufferSize[id];
+  }
 
-protected:
-	void _addBuffer(size_t size)
-	{
-		m_bufferSize.push_back(size);
-	}
-	
-	void _resizeBuffer(unsigned int id, size_t size)
-	{
-		assert(id < numBuffers());
-		m_bufferSize[id] = size;
-	}
+  /**
+   * @return Read-only pointer to the buffer (Useful for executors.)
+   */
+  virtual const void* buffer(unsigned int id) const = 0;
 
-	void _removeBuffer(unsigned int id)
-	{
-		assert(id < numBuffers());
-		m_bufferSize[id] = 0;
-	}
+  protected:
+  void _addBuffer(size_t size) { m_bufferSize.push_back(size); }
+
+  void _resizeBuffer(unsigned int id, size_t size) {
+    assert(id < numBuffers());
+    m_bufferSize[id] = size;
+  }
+
+  void _removeBuffer(unsigned int id) {
+    assert(id < numBuffers());
+    m_bufferSize[id] = 0;
+  }
 };
 
-}
+} // namespace async
 
 #endif // ASYNC_EXECINFO_H

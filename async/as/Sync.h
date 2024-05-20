@@ -39,64 +39,53 @@
 
 #include "Base.h"
 
-namespace async
-{
+namespace async {
 
-namespace as
-{
+namespace as {
 
 /**
  * Asynchronous call via pthreads
  */
-template<class Executor, typename InitParameter, typename Parameter>
-class Sync : public Base<Executor, InitParameter, Parameter>
-{
-public:
-	Sync() = default;
+template <class Executor, typename InitParameter, typename Parameter>
+class Sync : public Base<Executor, InitParameter, Parameter> {
+  public:
+  Sync() = default;
 
-	~Sync() = default;
+  ~Sync() = default;
 
-	unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false) override
-	{
-		return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
-	}
+  unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false) override {
+    return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
+  }
 
-	unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) override
-	{
-		return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, buffer == 0L);
-	}
-	
-	void resizeBuffer(unsigned int id, const void* buffer, size_t size) override
-	{
-		Base<Executor, InitParameter, Parameter>::_resizeBuffer(id, buffer, size);
-	}
+  unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) override {
+    return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, buffer == 0L);
+  }
 
-	const void* buffer(unsigned int id) const override
-	{
-		if (Base<Executor, InitParameter, Parameter>::origin(id))
-			return Base<Executor, InitParameter, Parameter>::origin(id);
+  void resizeBuffer(unsigned int id, const void* buffer, size_t size) override {
+    Base<Executor, InitParameter, Parameter>::_resizeBuffer(id, buffer, size);
+  }
 
-		return Base<Executor, InitParameter, Parameter>::_buffer(id);
-	}
+  const void* buffer(unsigned int id) const override {
+    if (Base<Executor, InitParameter, Parameter>::origin(id))
+      return Base<Executor, InitParameter, Parameter>::origin(id);
 
-	void sendBuffer(unsigned int id, size_t size) override
-	{
-	}
+    return Base<Executor, InitParameter, Parameter>::_buffer(id);
+  }
 
-	void wait() override
-	{
-		// wait for the executor to finish
-		Base<Executor, InitParameter, Parameter>::wait();
-	}
+  void sendBuffer(unsigned int id, size_t size) override {}
 
-	void call(const Parameter &parameters) override
-	{
-		Base<Executor, InitParameter, Parameter>::call(parameters);
-	}
+  void wait() override {
+    // wait for the executor to finish
+    Base<Executor, InitParameter, Parameter>::wait();
+  }
+
+  void call(const Parameter& parameters) override {
+    Base<Executor, InitParameter, Parameter>::call(parameters);
+  }
 };
 
-}
+} // namespace as
 
-}
+} // namespace async
 
 #endif // ASYNC_AS_SYNC_H

@@ -37,16 +37,14 @@
 #ifndef ASYNC_NOPARAM_H
 #define ASYNC_NOPARAM_H
 
-namespace async
-{
+namespace async {
 
 /**
  * Empty struct that can be used if init parameters or parameters
  * are not required.
  */
-struct NoParam
-{ };
+struct NoParam {};
 
-}
+} // namespace async
 
 #endif // ASYNC_NOPARAM_H
