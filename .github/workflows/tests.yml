@@ -1,0 +1,33 @@
+name: clang-format
+on:
+  - push
+
+jobs:
+  clang-format:
+    name: clang-format
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install-packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install libomp-dev libopenmpi-dev openmpi-bin openmpi-common ninja-build
+
+      - name: build-mpi
+        run: |
+          mkdir build-mpi
+          cd build-mpi
+          cmake ..
+          ninja
+          ninja test
+          cd ..
+      
+      - name: build-nompi
+        run: |
+          mkdir build-nompi
+          cd build-nompi
+          cmake .. -DUSE_MPI=OFF
+          ninja
+          ninja test
+          cd ..
