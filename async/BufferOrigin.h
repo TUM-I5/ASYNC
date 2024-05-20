@@ -2,9 +2,9 @@
  * @file
  *  This file is part of ASYNC
  *
- * @author Sebastian Rettenberger <sebastian.rettenberger@tum.de>
+ * @author David Schneller <david.schneller@tum.de>
  *
- * @copyright Copyright (c) 2016-2017, Technische Universitaet Muenchen.
+ * @copyright Copyright (c) 2024, Technische Universitaet Muenchen.
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -34,11 +34,12 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef ASYNC_EXECINFO_H
-#define ASYNC_EXECINFO_H
+#ifndef ASYNC_BUFFERORIGIN_H
+#define ASYNC_BUFFERORIGIN_H
 
-#include "async/BufferOrigin.h"
 #include <cassert>
+#include <cstdlib>
+#include <cstring>
 #include <vector>
 
 namespace async {
@@ -46,54 +47,43 @@ namespace async {
 /**
  * Buffer information send to the executor on each exec and execInit call
  */
-class ExecInfo {
-  private:
-  /** The size for all buffers */
-  std::vector<size_t> m_bufferSize;
-
-  std::vector<BufferOrigin*> m_bufferOrigin;
-
+class BufferOrigin {
   public:
-  virtual ~ExecInfo() = default;
+  // allocates memory in the buffer allocation zone
+  virtual void* malloc(size_t size) = 0;
 
-  /**
-   * @return True, if this is an MPI executor
-   */
-  virtual bool isExecutor() const {
-    return false; // Default for sync and thread
+  // frees memory in the buffer allocation zone
+  virtual void free(void* ptr) = 0;
+
+  // copies memory from the buffer allocation zone to the host
+  virtual void copyFrom(void* dest, void* source, size_t size) = 0;
+
+  // copies memory from the host to the buffer allocation zone
+  virtual void copyTo(void* dest, void* source, size_t size) = 0;
+
+  // copies memory from the buffer allocation zone to the buffer allocation zone
+  virtual void copyBetween(void* dest, void* source, size_t size) = 0;
+
+  // memory can be accessed on host
+  virtual bool transparentHost() = 0;
+
+  // memory can be directly passed to MPI
+  virtual bool transparentMPI() = 0;
+};
+
+class HostBufferOrigin : public BufferOrigin {
+  public:
+  void* malloc(size_t size) override { return std::malloc(size); }
+  void free(void* ptr) override { std::free(ptr); }
+  void copyTo(void* dest, void* source, size_t size) override { std::memcpy(dest, source, size); }
+  void copyFrom(void* dest, void* source, size_t size) override { std::memcpy(dest, source, size); }
+  void copyBetween(void* dest, void* source, size_t size) override {
+    std::memcpy(dest, source, size);
   }
-
-  unsigned int numBuffers() const { return m_bufferSize.size(); }
-
-  size_t bufferSize(unsigned int id) const {
-    assert(id < numBuffers());
-    return m_bufferSize[id];
-  }
-
-  BufferOrigin& bufferOrigin(unsigned int id) const {
-    assert(id < numBuffers());
-    return *m_bufferOrigin[id];
-  }
-
-  /**
-   * @return Read-only pointer to the buffer (Useful for executors.)
-   */
-  virtual const void* buffer(unsigned int id) const = 0;
-
-  protected:
-  void _addBuffer(size_t size) { m_bufferSize.push_back(size); }
-
-  void _resizeBuffer(unsigned int id, size_t size) {
-    assert(id < numBuffers());
-    m_bufferSize[id] = size;
-  }
-
-  void _removeBuffer(unsigned int id) {
-    assert(id < numBuffers());
-    m_bufferSize[id] = 0;
-  }
+  bool transparentHost() override { return true; }
+  bool transparentMPI() override { return true; }
 };
 
 } // namespace async
 
-#endif // ASYNC_EXECINFO_H
+#endif // ASYNC_BUFFERORIGIN_H

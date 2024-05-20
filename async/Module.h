@@ -37,6 +37,8 @@
 #ifndef ASYNC_MODULE_H
 #define ASYNC_MODULE_H
 
+#include "async/BufferOrigin.h"
+#include <memory>
 #ifdef USE_MPI
 #include <mpi.h>
 #endif // USE_MPI
@@ -59,31 +61,29 @@ namespace async {
 template <class Executor, typename InitParameter, typename Parameter>
 class Module : public ModuleBase {
   private:
-  async::as::Base<Executor, InitParameter, Parameter>* m_async;
+  std::unique_ptr<async::as::Base<Executor, InitParameter, Parameter>> m_async;
 
   public:
   Module() {
     switch (Config::mode()) {
     case SYNC:
-      m_async = new async::as::Sync<Executor, InitParameter, Parameter>();
+      m_async = std::make_unique<async::as::Sync<Executor, InitParameter, Parameter>>();
       break;
     case THREAD:
-      m_async = new async::as::Thread<Executor, InitParameter, Parameter>();
+      m_async = std::make_unique<async::as::Thread<Executor, InitParameter, Parameter>>();
       break;
     case MPI:
 #ifdef USE_MPI
       if (Config::useAsyncCopy())
-        m_async = new async::as::MPIAsync<Executor, InitParameter, Parameter>();
+        m_async = std::make_unique<async::as::MPIAsync<Executor, InitParameter, Parameter>>();
       else
-        m_async = new async::as::MPI<Executor, InitParameter, Parameter>();
+        m_async = std::make_unique<async::as::MPI<Executor, InitParameter, Parameter>>();
 #else  // USE_MPI
       logError() << "Asynchronous MPI is not supported.";
 #endif // USE_MPI
       break;
     }
   }
-
-  ~Module() override { delete m_async; }
 
   void setExecutor(Executor& executor) { m_async->setExecutor(executor); }
 
@@ -113,6 +113,8 @@ class Module : public ModuleBase {
 
   size_t bufferSize(unsigned int id) const { return m_async->bufferSize(id); }
 
+  BufferOrigin& bufferOrigin() const { return m_async->bufferOrigin(id); }
+
   template <typename T>
   T managedBuffer(unsigned int id) {
     return static_cast<T>(m_async->managedBuffer(id));
@@ -141,7 +143,7 @@ class Module : public ModuleBase {
 
   private:
 #ifdef USE_MPI
-  void setScheduler(as::MPIScheduler& scheduler) { m_async->setScheduler(scheduler); }
+  void setScheduler(as::MPIScheduler& scheduler) override { m_async->setScheduler(scheduler); }
 #endif // USE_MPI
 };
 

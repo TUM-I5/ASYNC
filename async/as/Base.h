@@ -187,8 +187,6 @@ class Base : public async::ExecInfo {
 
   virtual void finalize() { _finalize(); }
 
-  virtual const void* buffer(unsigned int id) const = 0;
-
   protected:
   Executor& executor() { return *m_executor; }
 
