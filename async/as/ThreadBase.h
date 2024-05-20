@@ -118,12 +118,15 @@ private:
 	/** Shutdown the thread */
 	bool m_shutdown;
 
+	bool m_waiting;
+
 protected:
 	ThreadBase()
 		: m_asyncThread(pthread_self()),
 		  m_initBuffer(-1),
 		  m_phase(EXEC_PHASE),
-		  m_shutdown(false)
+		  m_shutdown(false),
+		  m_waiting(false)
 	{
 #ifndef __APPLE__
                 pthread_spin_init(&m_writerLock, PTHREAD_PROCESS_PRIVATE);
@@ -237,6 +240,8 @@ public:
 	 */
 	void wait()
 	{
+		m_waiting = true;
+		pthread_mutex_unlock(&m_readerLock);
 		lock_spinlock(&m_writerLock);
 		m_phase = SEND_PHASE;
 	}
@@ -261,6 +266,10 @@ public:
 	}
 
 private:
+	void _wait() {
+		Base<Executor, InitParameter, Parameter>::wait();
+	}
+
 	/**
 	 * Wrapper for the parent class because parent class function cannot be called directly
 	 */
@@ -283,7 +292,11 @@ private:
 			if (async->m_shutdown)
 				break;
 
-			if (async->m_initBuffer >= 0) {
+			if (async->m_waiting) {
+				async->_wait();
+				async->m_waiting = false;
+			}
+			else if (async->m_initBuffer >= 0) {
 				// Touch the memory on this thread
 				unsigned int id = async->m_initBuffer;
 				memset(async->_buffer(id), 0, async->bufferSize(id));

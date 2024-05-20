@@ -47,6 +47,7 @@
 #include "async/as/Pin.h"
 #include "async/Config.h"
 #include "async/ExecInfo.h"
+#include "async/NoParam.h"
 #include "Magic.h"
 
 namespace async
@@ -57,17 +58,17 @@ namespace as
 
 class MPIScheduler;
 
-
-
 /**
  * Base class for (a)synchronous communication
  */
-template<class Executor, typename InitParameter, typename Parameter>
+template<class Executor, typename InitParameter = NoParam, typename Parameter = NoParam>
 class Base : public async::ExecInfo
 {
 private:
 	ASYNC_HAS_MEM_FUNC_T1(execInit, execInitHasExec, P, void, const ExecInfo&, const P&);
 	ASYNC_HAS_MEM_FUNC_T1(exec, execHasExec, P, void, const ExecInfo&, const P&);
+	ASYNC_HAS_MEM_FUNC_T1(execWait, execWaitHasExec, P, void, const ExecInfo&);
+	ASYNC_HAS_MEM_FUNC_T1(execWait, execWaitHasNoExec, P, void);
 
 	/**
 	 * Description of a buffer
@@ -92,6 +93,8 @@ private:
 
 	/** Aligment of buffers (might be requested for I/O back-ends) */
 	const size_t m_alignment;
+
+	Parameter m_lastParameters;
 
 protected:
 	Base()
@@ -203,7 +206,10 @@ public:
 		_call<Executor, Parameter>(parameters);
 	}
 
-	virtual void wait() = 0;
+	virtual void wait()
+	{
+		_callWait<Executor, Parameter>();
+	}
 
 	virtual void finalize()
 	{
@@ -347,6 +353,18 @@ private:
 	typename enable_if<!execHasExec<E, P>::value>::type
 	_call(const P &parameters) {
 		m_executor->exec(parameters);
+	}
+
+	template<typename E, typename P>
+	typename enable_if<execWaitHasExec<E, P>::value>::type
+	_callWait() {
+		const ExecInfo &info = *this;
+		m_executor->execWait(info);
+	}
+
+	template<typename E, typename P>
+	typename enable_if<!execWaitHasNoExec<E, P>::value && !execWaitHasExec<E, P>::value>::type
+	_callWait() {
 	}
 };
 

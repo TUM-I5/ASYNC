@@ -87,11 +87,10 @@ public:
 	{
 	}
 
-	/**
-	 * Does nothing (call has already finished because it is synchronous)
-	 */
 	void wait()
 	{
+		// wait for the executor to finish
+		Base<Executor, InitParameter, Parameter>::wait();
 	}
 
 	void call(const Parameter &parameters)
