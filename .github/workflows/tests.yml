@@ -1,10 +1,10 @@
-name: clang-format
+name: unittest
 on:
   - push
 
 jobs:
-  clang-format:
-    name: clang-format
+  unittest:
+    name: unittest
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
