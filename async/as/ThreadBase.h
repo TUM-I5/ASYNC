@@ -207,9 +207,15 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
    * Wait for the asynchronous call to finish
    */
   void wait() override {
+    // wait for the previous call to finish
     lock_spinlock(&m_writerLock);
-    // call wait synchronously here (TODO: move to output)
-    Base<Executor, InitParameter, Parameter>::wait();
+    
+    // signal wait
+    m_waiting = true;
+    pthread_mutex_unlock(&m_readerLock);
+
+    // wait for the wait to finish
+    lock_spinlock(&m_writerLock);
     m_phase = SEND_PHASE;
   }
 
