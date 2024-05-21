@@ -163,7 +163,7 @@ class Thread : public ThreadBase<Executor, InitParameter, Parameter> {
       assert(m_buffer[id].position + size <=
              (Base<Executor, InitParameter, Parameter>::bufferSize(id)));
 
-      async::ExecInfo::bufferOrigin(id)->copyFrom(
+      async::ExecInfo::bufferOrigin(id).copyFrom(
           Base<Executor, InitParameter, Parameter>::_buffer(id) + m_buffer[id].position,
           Base<Executor, InitParameter, Parameter>::origin(id) + m_buffer[id].position,
           size);

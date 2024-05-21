@@ -195,7 +195,7 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
            (Base<Executor, InitParameter, Parameter>::bufferSize(id)));
 
     if (Base<Executor, InitParameter, Parameter>::origin(id)) {
-      async::ExecInfo::bufferOrigin(id)->copyFrom(
+      async::ExecInfo::bufferOrigin(id).copyFrom(
           Base<Executor, InitParameter, Parameter>::_buffer(id) +
               MPIBase<Executor, InitParameter, Parameter>::bufferPos(id),
           Base<Executor, InitParameter, Parameter>::origin(id) +
