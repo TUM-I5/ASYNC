@@ -113,7 +113,7 @@ class Module : public ModuleBase {
 
   size_t bufferSize(unsigned int id) const { return m_async->bufferSize(id); }
 
-  BufferOrigin& bufferOrigin() const { return m_async->bufferOrigin(id); }
+  BufferOrigin& bufferOrigin(unsigned int id) const { return m_async->bufferOrigin(id); }
 
   template <typename T>
   T managedBuffer(unsigned int id) {
