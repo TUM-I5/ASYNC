@@ -64,6 +64,9 @@ class BufferOrigin {
   // copies memory from the buffer allocation zone to the buffer allocation zone
   virtual void copyBetween(void* dest, void* source, size_t size) = 0;
 
+  // initializes memory on the target device
+  virtual void touch(void* ptr, size_t size) = 0;
+
   // memory can be accessed on host
   virtual bool transparentHost() = 0;
 
@@ -80,6 +83,7 @@ class HostBufferOrigin : public BufferOrigin {
   void copyBetween(void* dest, void* source, size_t size) override {
     std::memcpy(dest, source, size);
   }
+  void touch(void* ptr, size_t size) override { std::memset(ptr, 0, size); }
   bool transparentHost() override { return true; }
   bool transparentMPI() override { return true; }
 };

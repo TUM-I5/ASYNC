@@ -205,8 +205,9 @@ class Base : public async::ExecInfo {
       } else {
         buffer.buffer = malloc(size);
       }
-    } else
+    } else {
       buffer.buffer = 0L;
+    }
 
     m_buffer.push_back(buffer);
     assert(m_buffer.size() == numBuffers());
@@ -216,11 +217,13 @@ class Base : public async::ExecInfo {
 
   void _resizeBuffer(unsigned int id, const void* origin, size_t size) {
     assert(id < numBuffers());
-    if (origin && m_buffer[id].origin)
+    if (origin && m_buffer[id].origin) {
       m_buffer[id].origin = origin;
+    }
 
-    if (async::ExecInfo::bufferSize(id) == size)
+    if (async::ExecInfo::bufferSize(id) == size) {
       return;
+    }
 
     async::ExecInfo::_resizeBuffer(id, size);
 

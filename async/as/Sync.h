@@ -38,6 +38,7 @@
 #define ASYNC_AS_SYNC_H
 
 #include "Base.h"
+#include "async/ExecInfo.h"
 
 namespace async {
 
@@ -66,13 +67,23 @@ class Sync : public Base<Executor, InitParameter, Parameter> {
   }
 
   const void* buffer(unsigned int id) const override {
-    if (Base<Executor, InitParameter, Parameter>::origin(id))
+    if (Base<Executor, InitParameter, Parameter>::origin(id) &&
+        async::ExecInfo::bufferOrigin(id)->transparentHost()) {
       return Base<Executor, InitParameter, Parameter>::origin(id);
+    }
 
     return Base<Executor, InitParameter, Parameter>::_buffer(id);
   }
 
-  void sendBuffer(unsigned int id, size_t size) override {}
+  void sendBuffer(unsigned int id, size_t size) override {
+    if (Base<Executor, InitParameter, Parameter>::origin(id) &&
+        !async::ExecInfo::bufferOrigin(id)->transparentHost()) {
+      async::ExecInfo::bufferOrigin(id)->copyFrom(
+          Base<Executor, InitParameter, Parameter>::_buffer(id),
+          Base<Executor, InitParameter, Parameter>::origin(id),
+          async::ExecInfo::bufferSize(id));
+    }
+  }
 
   void wait() override {
     // wait for the executor to finish
