@@ -158,8 +158,9 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
   }
 
   const void* buffer(unsigned int id) const override {
-    if (MPIBase<Executor, InitParameter, Parameter>::scheduler().isExecutor())
+    if (MPIBase<Executor, InitParameter, Parameter>::scheduler().isExecutor()) {
       return MPIBase<Executor, InitParameter, Parameter>::buffer(id);
+    }
 
     return Base<Executor, InitParameter, Parameter>::_buffer(id);
   }

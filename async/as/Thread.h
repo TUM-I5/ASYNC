@@ -153,8 +153,9 @@ class Thread : public ThreadBase<Executor, InitParameter, Parameter> {
   void sendBuffer(unsigned int id, size_t size) {
     assert(id < (Base<Executor, InitParameter, Parameter>::numBuffers()));
 
-    if (m_buffer[id].init)
+    if (m_buffer[id].init || size == 0) {
       return;
+    }
 
     assert((Base<Executor, InitParameter, Parameter>::_buffer(id)));
 
