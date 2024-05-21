@@ -56,13 +56,13 @@ class BufferOrigin {
   virtual void free(void* ptr) = 0;
 
   // copies memory from the buffer allocation zone to the host
-  virtual void copyFrom(void* dest, void* source, size_t size) = 0;
+  virtual void copyFrom(void* dest, const void* source, size_t size) = 0;
 
   // copies memory from the host to the buffer allocation zone
-  virtual void copyTo(void* dest, void* source, size_t size) = 0;
+  virtual void copyTo(void* dest, const void* source, size_t size) = 0;
 
   // copies memory from the buffer allocation zone to the buffer allocation zone
-  virtual void copyBetween(void* dest, void* source, size_t size) = 0;
+  virtual void copyBetween(void* dest, const void* source, size_t size) = 0;
 
   // initializes memory on the target device
   virtual void touch(void* ptr, size_t size) = 0;
@@ -78,9 +78,13 @@ class HostBufferOrigin : public BufferOrigin {
   public:
   void* malloc(size_t size) override { return std::malloc(size); }
   void free(void* ptr) override { std::free(ptr); }
-  void copyTo(void* dest, void* source, size_t size) override { std::memcpy(dest, source, size); }
-  void copyFrom(void* dest, void* source, size_t size) override { std::memcpy(dest, source, size); }
-  void copyBetween(void* dest, void* source, size_t size) override {
+  void copyTo(void* dest, const void* source, size_t size) override {
+    std::memcpy(dest, source, size);
+  }
+  void copyFrom(void* dest, const void* source, size_t size) override {
+    std::memcpy(dest, source, size);
+  }
+  void copyBetween(void* dest, const void* source, size_t size) override {
     std::memcpy(dest, source, size);
   }
   void touch(void* ptr, size_t size) override { std::memset(ptr, 0, size); }
