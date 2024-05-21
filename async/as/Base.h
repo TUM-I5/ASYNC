@@ -165,7 +165,7 @@ class Base : public async::ExecInfo {
    */
   virtual void* managedBuffer(unsigned int id) {
     if (origin(id) == 0L) {
-      assert(_buffer(id));
+      assert(_buffer(id) != nullptr || async::ExecInfo::bufferSize(id) == 0);
       return _buffer(id);
     }
 
