@@ -209,7 +209,7 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
   void wait() override {
     // wait for the previous call to finish
     lock_spinlock(&m_writerLock);
-    
+
     // signal wait
     m_waiting = true;
     pthread_mutex_unlock(&m_readerLock);

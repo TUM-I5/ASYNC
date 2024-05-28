@@ -240,9 +240,8 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
    * Reset the buffer position on non-executors
    */
   void resetBufferPosition() {
-    for (typename std::vector<BufInfo>::iterator it = m_buffer.begin(); it != m_buffer.end();
-         it++) {
-      it->position = 0;
+    for (auto& buffer : m_buffer) {
+      buffer.position = 0;
     }
   }
 
@@ -431,13 +430,11 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   }
 
   void _finalize() override {
-    for (typename std::vector<ExecutorBufInfo>::iterator it = m_executorBuffer.begin();
-         it != m_executorBuffer.end();
-         ++it) {
-      delete[] it->offsets;
-      it->offsets = 0L;
-      delete[] it->positions;
-      it->positions = 0L;
+    for (auto& execBuffer : m_executorBuffer) {
+      delete[] execBuffer.offsets;
+      execBuffer.offsets = 0L;
+      delete[] execBuffer.positions;
+      execBuffer.positions = 0L;
     }
 
     ThreadBase<Executor, InitParameter, Parameter>::finalize();
@@ -456,11 +453,9 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
    * Should only be called on the executor.
    */
   void resetBufferPositionOnExecutor() {
-    for (typename std::vector<ExecutorBufInfo>::iterator it = m_executorBuffer.begin();
-         it != m_executorBuffer.end();
-         it++) {
-      if (it->positions) {
-        memset(it->positions, 0, (m_scheduler->groupSize() - 1) * sizeof(size_t));
+    for (auto& execBuffer : m_executorBuffer) {
+      if (execBuffer.positions) {
+        memset(execBuffer.positions, 0, (m_scheduler->groupSize() - 1) * sizeof(size_t));
       }
     }
   }

@@ -270,12 +270,10 @@ class MPIScheduler {
           MPI_Mrecv(0L, 0, MPI_CHAR, &message, MPI_STATUS_IGNORE);
 
           // Stop everything immediately (probably some finalizes were missing)
-          for (std::vector<Scheduled*>::iterator it = m_asyncCalls.begin();
-               it != m_asyncCalls.end();
-               ++it) {
-            if (*it) {
-              (*it)->_finalize();
-              *it = 0;
+          for (auto& call : m_asyncCalls) {
+            if (call) {
+              call->_finalize();
+              call = 0;
             }
           }
           goto kill;

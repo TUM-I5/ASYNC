@@ -189,8 +189,9 @@ class Thread : public ThreadBase<Executor, InitParameter, Parameter> {
 
   private:
   void resetBufferPosition() {
-    for (typename std::vector<BufInfo>::iterator it = m_buffer.begin(); it != m_buffer.end(); ++it)
-      it->position = 0;
+    for (auto& buffer : m_buffer) {
+      buffer.position = 0;
+    }
   }
 };
 
