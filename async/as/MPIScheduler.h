@@ -261,12 +261,13 @@ class MPIScheduler {
       unsigned int bufferId; // Required for remove tag and buffer tag
 
       do {
-        MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, m_privateGroupComm, &status);
+        MPI_Message message;
+        MPI_Mprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, m_privateGroupComm, &message, &status);
 
         if (status.MPI_TAG == KILL_TAG) {
           // Dummy recv
           assert(status.MPI_SOURCE == 0);
-          MPI_Recv(0L, 0, MPI_CHAR, 0, KILL_TAG, m_privateGroupComm, MPI_STATUS_IGNORE);
+          MPI_Mrecv(0L, 0, MPI_CHAR, &message, MPI_STATUS_IGNORE);
 
           // Stop everything immediately (probably some finalizes were missing)
           for (std::vector<Scheduled*>::iterator it = m_asyncCalls.begin();
@@ -284,101 +285,62 @@ class MPIScheduler {
         id = tag / NUM_TAGS;
         tag = tag % NUM_TAGS;
 
-        if (id > static_cast<int>(m_asyncCalls.size()) || m_asyncCalls[id] == 0L)
+        if (id > static_cast<int>(m_asyncCalls.size()) || m_asyncCalls[id] == 0L) {
           logError() << "ASYNC: Invalid id" << id << "received";
+        }
 
         int size;
         void* buf;
 
         switch (tag) {
         case ADD_TAG:
-          MPI_Recv(&sync,
-                   1,
-                   MPI_INT,
-                   status.MPI_SOURCE,
-                   status.MPI_TAG,
-                   m_privateGroupComm,
-                   MPI_STATUS_IGNORE);
+          MPI_Mrecv(&sync, 1, MPI_INT, &message, MPI_STATUS_IGNORE);
 
           readyTasks[id]++;
           break;
         case RESIZE_TAG:
-          MPI_Recv(&bufferId,
-                   1,
-                   MPI_UNSIGNED,
-                   status.MPI_SOURCE,
-                   status.MPI_TAG,
-                   m_privateGroupComm,
-                   MPI_STATUS_IGNORE);
+          MPI_Mrecv(&bufferId, 1, MPI_UNSIGNED, &message, MPI_STATUS_IGNORE);
 
           readyTasks[id]++;
           break;
         case REMOVE_TAG:
-          MPI_Recv(&bufferId,
-                   1,
-                   MPI_UNSIGNED,
-                   status.MPI_SOURCE,
-                   status.MPI_TAG,
-                   m_privateGroupComm,
-                   MPI_STATUS_IGNORE);
+          MPI_Mrecv(&bufferId, 1, MPI_UNSIGNED, &message, MPI_STATUS_IGNORE);
 
           readyTasks[id]++;
           break;
         case INIT_TAG:
         case PARAM_TAG:
           MPI_Get_count(&status, MPI_CHAR, &size);
-          MPI_Recv(m_asyncCalls[id]->paramBuffer(),
-                   size,
-                   MPI_CHAR,
-                   status.MPI_SOURCE,
-                   status.MPI_TAG,
-                   m_privateGroupComm,
-                   MPI_STATUS_IGNORE);
+          MPI_Mrecv(m_asyncCalls[id]->paramBuffer(), size, MPI_CHAR, &message, MPI_STATUS_IGNORE);
 
           lastTag[id] = tag;
-          if (m_asyncCalls[id]->useAsyncCopy())
+          if (m_asyncCalls[id]->useAsyncCopy()) {
             asyncReadyTasks[id]++;
-          else
+          } else {
             readyTasks[id]++;
+          }
           break;
         case BUFFER_TAG:
           // Select a buffer
-          MPI_Recv(&bufferId,
-                   1,
-                   MPI_UNSIGNED,
-                   status.MPI_SOURCE,
-                   status.MPI_TAG,
-                   m_privateGroupComm,
-                   MPI_STATUS_IGNORE);
+          MPI_Mrecv(&bufferId, 1, MPI_UNSIGNED, &message, MPI_STATUS_IGNORE);
 
           // Probe buffer receive from some source/tag
-          MPI_Probe(status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm, &status);
+          MPI_Mprobe(status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm, &message, &status);
 
           // Get the size that is received
           MPI_Get_count(&status, MPI_CHAR, &size);
 
           // Receive the buffer
           buf = m_asyncCalls[id]->getBufferPos(bufferId, status.MPI_SOURCE, size);
-          MPI_Recv(buf,
-                   size,
-                   MPI_CHAR,
-                   status.MPI_SOURCE,
-                   status.MPI_TAG,
-                   m_privateGroupComm,
-                   MPI_STATUS_IGNORE);
+          MPI_Mrecv(buf, size, MPI_CHAR, &message, MPI_STATUS_IGNORE);
 
-          if (m_asyncCalls[id]->useAsyncCopy(bufferId))
+          if (m_asyncCalls[id]->useAsyncCopy(bufferId)) {
             asyncReadyTasks[id]++;
+          }
           break;
         case WAIT_TAG:
         case FINALIZE_TAG:
-          MPI_Recv(0L,
-                   0,
-                   MPI_CHAR,
-                   status.MPI_SOURCE,
-                   status.MPI_TAG,
-                   m_privateGroupComm,
-                   MPI_STATUS_IGNORE);
+          MPI_Mrecv(0L, 0, MPI_CHAR, &message, MPI_STATUS_IGNORE);
 
           readyTasks[id]++;
           break;
@@ -413,11 +375,13 @@ class MPIScheduler {
         m_asyncCalls[id]->_execInit(m_asyncCalls[id]->paramBuffer());
         break;
       case PARAM_TAG:
-        if (!m_asyncCalls[id]->useAsyncCopy())
+        if (!m_asyncCalls[id]->useAsyncCopy()) {
           MPI_Barrier(m_privateGroupComm);
+        }
         m_asyncCalls[id]->_exec(m_asyncCalls[id]->paramBuffer());
         break;
       case WAIT_TAG:
+        MPI_Barrier(m_privateGroupComm);
         m_asyncCalls[id]->_wait();
         // This barrier can probably be called before _wait()
         // Just leave it here to be 100% sure that everything is done

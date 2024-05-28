@@ -139,10 +139,11 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
       requests = m_buffer[id].requests - requests;
     }
 
-    if (requests > 0)
+    if (requests > 0) {
       m_asyncRequests.insert(m_asyncRequests.end(), requests * 2, MPI_REQUEST_NULL);
-    else if (requests < 0)
+    } else if (requests < 0) {
       m_asyncRequests.erase(m_asyncRequests.end() + requests * 2, m_asyncRequests.end());
+    }
 
     MPIBase<Executor, InitParameter, Parameter>::resizeBuffer(id, buffer, size);
   }

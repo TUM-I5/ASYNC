@@ -240,8 +240,10 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
    * Reset the buffer position on non-executors
    */
   void resetBufferPosition() {
-    for (typename std::vector<BufInfo>::iterator it = m_buffer.begin(); it != m_buffer.end(); it++)
+    for (typename std::vector<BufInfo>::iterator it = m_buffer.begin(); it != m_buffer.end();
+         it++) {
       it->position = 0;
+    }
   }
 
   unsigned int paramSize() const override {
@@ -457,8 +459,9 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
     for (typename std::vector<ExecutorBufInfo>::iterator it = m_executorBuffer.begin();
          it != m_executorBuffer.end();
          it++) {
-      if (it->positions)
+      if (it->positions) {
         memset(it->positions, 0, (m_scheduler->groupSize() - 1) * sizeof(size_t));
+      }
     }
   }
 };
