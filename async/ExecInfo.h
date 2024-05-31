@@ -37,69 +37,71 @@
 #ifndef ASYNC_EXECINFO_H
 #define ASYNC_EXECINFO_H
 
+#include "async/BufferOrigin.h"
 #include <cassert>
 #include <cstddef>
 #include <vector>
 
-namespace async
-{
+namespace async {
 
 /**
  * Buffer information send to the executor on each exec and execInit call
  */
-class ExecInfo
-{
-private:
-	/** The size for all buffers */
-	std::vector<size_t> m_bufferSize;
+class ExecInfo {
+  private:
+  /** The size for all buffers */
+  std::vector<size_t> m_bufferSize;
 
-public:
-	virtual ~ExecInfo()
-	{ }
+  std::vector<BufferOrigin*> m_bufferOrigin;
 
-	/**
-	 * @return True, if this is an MPI executor
-	 */
-	virtual bool isExecutor() const
-	{
-		return false; // Default for sync and thread
-	}
+  HostBufferOrigin* hostBuffer;
 
-	unsigned int numBuffers() const
-	{
-		return m_bufferSize.size();
-	}
+  public:
+  ExecInfo() { hostBuffer = new HostBufferOrigin(); }
 
-	size_t bufferSize(unsigned int id) const
-	{
-		assert(id < numBuffers());
-		return m_bufferSize[id];
-	}
+  virtual ~ExecInfo() = default;
 
-	/**
-	 * @return Read-only pointer to the buffer (Useful for executors.)
-	 */
-	virtual const void* buffer(unsigned int id) const = 0;
+  /**
+   * @return True, if this is an MPI executor
+   */
+  virtual bool isExecutor() const {
+    return false; // Default for sync and thread
+  }
 
-protected:
-	void _addBuffer(size_t size)
-	{
-		m_bufferSize.push_back(size);
-	}
-	
-	void _resizeBuffer(unsigned int id, size_t size)
-	{
-		assert(id < numBuffers());
-		m_bufferSize[id] = size;
-	}
+  unsigned int numBuffers() const { return m_bufferSize.size(); }
 
-	void _removeBuffer(unsigned int id)
-	{
-		assert(id < numBuffers());
-		m_bufferSize[id] = 0;
-	}
+  size_t bufferSize(unsigned int id) const {
+    assert(id < numBuffers());
+    return m_bufferSize[id];
+  }
+
+  BufferOrigin& bufferOrigin(unsigned int id) const {
+    assert(id < numBuffers());
+    return *m_bufferOrigin[id];
+  }
+
+  /**
+   * @return Read-only pointer to the buffer (Useful for executors.)
+   */
+  virtual const void* buffer(unsigned int id) const = 0;
+
+  protected:
+  void _addBuffer(size_t size) {
+    m_bufferSize.push_back(size);
+    m_bufferOrigin.push_back(hostBuffer);
+  }
+
+  void _resizeBuffer(unsigned int id, size_t size) {
+    assert(id < numBuffers());
+    m_bufferSize[id] = size;
+  }
+
+  void _removeBuffer(unsigned int id) {
+    assert(id < numBuffers());
+    m_bufferSize[id] = 0;
+  }
 };
 
-}
+} // namespace async
 
 #endif // ASYNC_EXECINFO_H

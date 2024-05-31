@@ -43,8 +43,7 @@
 #include "async/as/MPIScheduler.h"
 #endif // USE_MPI
 
-namespace async
-{
+namespace async {
 
 class Dispatcher;
 
@@ -52,53 +51,47 @@ class Dispatcher;
  * Base class for asynchronous modules. Works closely together
  * with the {@link Dispatcher}.
  */
-class ModuleBase
-{
-	friend class Dispatcher;
-protected:
-	ModuleBase()
-	{
-		modules().push_back(this);
-	}
+class ModuleBase {
+  friend class Dispatcher;
 
-public:
-	virtual ~ModuleBase()
-	{ }
+  protected:
+  ModuleBase() { modules().push_back(this); }
 
-	/**
-	 * Called at initialization. Is also called by the {@link Dispatcher}
-	 * on MPI executors.
-	 *
-	 * Should at least call {@link setExecutor}(*this).
-	 */
-	virtual void setUp() = 0;
+  public:
+  virtual ~ModuleBase() {}
 
-	/**
-	 * Called after finalization. Is also called on MPI
-	 * executors.
-	 */
-	virtual void tearDown()
-	{ }
+  /**
+   * Called at initialization. Is also called by the {@link Dispatcher}
+   * on MPI executors.
+   *
+   * Should at least call {@link setExecutor}(*this).
+   */
+  virtual void setUp() = 0;
 
-private:
-	/**
-	 * List of all I/O modules (required by the dispatcher)
-	 */
-	static std::vector<ModuleBase*>& modules()
-	{
-		// Use a function here to avoid an additional .cpp file
-		static std::vector<ModuleBase*> moduleList;
-		return moduleList;
-	}
+  /**
+   * Called after finalization. Is also called on MPI
+   * executors.
+   */
+  virtual void tearDown() {}
+
+  private:
+  /**
+   * List of all I/O modules (required by the dispatcher)
+   */
+  static std::vector<ModuleBase*>& modules() {
+    // Use a function here to avoid an additional .cpp file
+    static std::vector<ModuleBase*> moduleList;
+    return moduleList;
+  }
 
 #ifdef USE_MPI
-	/**
-	 * Set the scheduler for this module.
-	 */
-	virtual void setScheduler(as::MPIScheduler &scheduler) = 0;
+  /**
+   * Set the scheduler for this module.
+   */
+  virtual void setScheduler(as::MPIScheduler& scheduler) = 0;
 #endif // USE_MPI
 };
 
-}
+} // namespace async
 
 #endif // ASYNC_MODULEBASE_H

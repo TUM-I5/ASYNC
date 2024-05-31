@@ -37,11 +37,9 @@
 #ifndef ASYNC_AS_MAGIC_H
 #define ASYNC_AS_MAGIC_H
 
-namespace async
-{
+namespace async {
 
-namespace as
-{
+namespace as {
 
 /**
  * @class      : ASYNC_HAS_MEM_FUNC
@@ -54,34 +52,35 @@ namespace as
  * @param ellipsis(...) : Since this is macro should provide test case for every
  * possible member function we use variadic macros to cover all possibilities
  *
- * source: http://stackoverflow.com/questions/257288/is-it-possible-to-write-a-c-template-to-check-for-a-functions-existence
+ * source:
+ * http://stackoverflow.com/questions/257288/is-it-possible-to-write-a-c-template-to-check-for-a-functions-existence
  * Modified to allow for an additional template function.
  */
-#define ASYNC_HAS_MEM_FUNC_T1(func, name, T1, return_type, ...)   \
-   template <typename T, typename T1>                             \
-   struct name {                                                  \
-      typedef return_type (T::*Sign)(__VA_ARGS__);                \
-      typedef char yes[1];                                        \
-      typedef char no[2];                                         \
-      template <typename U, U>                                    \
-      struct type_check;                                          \
-      template <typename _1>                                      \
-      static yes& chk(type_check<Sign, &_1::func>*);              \
-      template <typename>                                         \
-      static no& chk(...);                                        \
-      static bool const value = sizeof(chk<T>(0)) == sizeof(yes); \
-   }
+#define ASYNC_HAS_MEM_FUNC_T1(func, name, T1, return_type, ...)                                    \
+  template <typename T, typename T1>                                                               \
+  struct name {                                                                                    \
+    typedef return_type (T::*Sign)(__VA_ARGS__);                                                   \
+    typedef char yes[1];                                                                           \
+    typedef char no[2];                                                                            \
+    template <typename U, U>                                                                       \
+    struct type_check;                                                                             \
+    template <typename _1>                                                                         \
+    static yes& chk(type_check<Sign, &_1::func>*);                                                 \
+    template <typename>                                                                            \
+    static no& chk(...);                                                                           \
+    static bool const value = sizeof(chk<T>(0)) == sizeof(yes);                                    \
+  }
 
-template<bool C, typename T = void>
+template <bool C, typename T = void>
 struct enable_if {
-	typedef T type;
+  typedef T type;
 };
 
-template<typename T>
-struct enable_if<false, T> { };
+template <typename T>
+struct enable_if<false, T> {};
 
-}
+} // namespace as
 
-}
+} // namespace async
 
 #endif // ASYNC_AS_MAGIC_H

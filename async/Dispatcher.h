@@ -48,148 +48,125 @@
 #include "Config.h"
 #include "ModuleBase.h"
 
-namespace async
-{
+namespace async {
 
-class Dispatcher
-{
-private:
+class Dispatcher {
+  private:
 #ifdef USE_MPI
-	async::as::MPIScheduler m_scheduler;
+  async::as::MPIScheduler m_scheduler;
 
-	MPI_Comm m_comm;
+  MPI_Comm m_comm;
 #endif // USE_MPI
 
-	unsigned int m_groupSize;
+  unsigned int m_groupSize;
 
-public:
-	Dispatcher() :
+  public:
+  Dispatcher()
+      :
 #ifdef USE_MPI
-			m_comm(MPI_COMM_WORLD),
+        m_comm(MPI_COMM_WORLD),
 #endif // USE_MPI
-			m_groupSize(Config::groupSize())
-	{
-	}
+        m_groupSize(Config::groupSize()) {
+  }
 
-	~Dispatcher()
-	{
-		// Delete all modules so we can create a new dispatcher
-		// probably only important for testing
-		ModuleBase::modules().clear();
-	}
+  ~Dispatcher() {
+    // Delete all modules so we can create a new dispatcher
+    // probably only important for testing
+    ModuleBase::modules().clear();
+  }
 
 #ifdef USE_MPI
-	void setCommunicator(MPI_Comm comm)
-	{
-		m_comm = comm;
-	}
+  void setCommunicator(MPI_Comm comm) { m_comm = comm; }
 #endif
 
-	/**
-	 * Use this to overwrite the group size set from the environment variable
-	 *
-	 * @param groupSize The group size (excl. the MPI executor)
-	 * @deprecated Use {@link Config::setGroupSize}
-	 */
-	void setGroupSize(unsigned int groupSize)
-	{
-		if (Config::mode() == MPI)
-			m_groupSize = groupSize;
-	}
+  /**
+   * Use this to overwrite the group size set from the environment variable
+   *
+   * @param groupSize The group size (excl. the MPI executor)
+   * @deprecated Use {@link Config::setGroupSize}
+   */
+  void setGroupSize(unsigned int groupSize) {
+    if (Config::mode() == MPI)
+      m_groupSize = groupSize;
+  }
 
-	/**
-	 * Initialize the dispatcher
-	 *
-	 * This has to be called after {@link setCommunicator} and
-	 * {@link setGroupSize}
-	 */
-	void init()
-	{
+  /**
+   * Initialize the dispatcher
+   *
+   * This has to be called after {@link setCommunicator} and
+   * {@link setGroupSize}
+   */
+  void init() {
 #ifdef USE_MPI
-		const std::vector<ModuleBase*>& modules = ModuleBase::modules();
-		// Set the scheduler for all modules
-		for (std::vector<ModuleBase*>::const_iterator i = modules.begin();
-				i != modules.end(); ++i)
-			(*i)->setScheduler(m_scheduler);
+    const std::vector<ModuleBase*>& modules = ModuleBase::modules();
+    // Set the scheduler for all modules
+    for (std::vector<ModuleBase*>::const_iterator i = modules.begin(); i != modules.end(); ++i)
+      (*i)->setScheduler(m_scheduler);
 
-		if (Config::mode() == MPI)
-			// Initialize the scheduler
-			m_scheduler.setCommunicator(m_comm, m_groupSize);
+    if (Config::mode() == MPI)
+      // Initialize the scheduler
+      m_scheduler.setCommunicator(m_comm, m_groupSize);
 #endif // USE_MPI
-	}
+  }
 
-	/**
-	 * @return The groups size (or 1 for synchronous and asynchnchronous thread mode)
-	 */
-	unsigned int groupSize() const
-	{
-		return m_groupSize;
-	}
+  /**
+   * @return The groups size (or 1 for synchronous and asynchnchronous thread mode)
+   */
+  unsigned int groupSize() const { return m_groupSize; }
 
 #ifdef USE_MPI
-	MPI_Comm groupComm() const
-	{
-		return m_scheduler.groupComm();
-	}
+  MPI_Comm groupComm() const { return m_scheduler.groupComm(); }
 
-	MPI_Comm commWorld() const
-	{
-		return m_scheduler.commWorld();
-	}
+  MPI_Comm commWorld() const { return m_scheduler.commWorld(); }
 #endif // USE_MPI
 
-	/**
-	 * @return True if the process is an MPI executor
-	 */
-	bool isExecutor() const
-	{
+  /**
+   * @return True if the process is an MPI executor
+   */
+  bool isExecutor() const {
 #ifdef USE_MPI
-		return m_scheduler.isExecutor();
-#else // USE_MPI
-		return false;
+    return m_scheduler.isExecutor();
+#else  // USE_MPI
+    return false;
 #endif // USE_MPI
-	}
+  }
 
-	/**
-	 * This function will not return for MPI executors until all executors have been
-	 * finalized. The function has to be called after all async {@link Module}s have
-	 * been created.
-	 *
-	 * @return False if this rank is an MPI executor that does not contribute to the
-	 *  computation.
-	 */
-	bool dispatch()
-	{
+  /**
+   * This function will not return for MPI executors until all executors have been
+   * finalized. The function has to be called after all async {@link Module}s have
+   * been created.
+   *
+   * @return False if this rank is an MPI executor that does not contribute to the
+   *  computation.
+   */
+  bool dispatch() {
 #ifdef USE_MPI
-		if (m_scheduler.isExecutor()) {
-			const std::vector<ModuleBase*>& modules = ModuleBase::modules();
-			// Initialize the executor modules
-			for (std::vector<ModuleBase*>::const_iterator i = modules.begin();
-					i != modules.end(); ++i)
-				(*i)->setUp();
+    if (m_scheduler.isExecutor()) {
+      const std::vector<ModuleBase*>& modules = ModuleBase::modules();
+      // Initialize the executor modules
+      for (std::vector<ModuleBase*>::const_iterator i = modules.begin(); i != modules.end(); ++i)
+        (*i)->setUp();
 
-			// Run the executor loop
-			m_scheduler.loop();
+      // Run the executor loop
+      m_scheduler.loop();
 
-			// Finalize the executor modules
-			for (std::vector<ModuleBase*>::const_iterator i = modules.begin();
-					i != modules.end(); ++i)
-				(*i)->tearDown();
-			return false;
-		}
+      // Finalize the executor modules
+      for (std::vector<ModuleBase*>::const_iterator i = modules.begin(); i != modules.end(); ++i)
+        (*i)->tearDown();
+      return false;
+    }
 #endif // USE_MPI
 
-		return true;
-	}
+    return true;
+  }
 
-	void finalize()
-	{
+  void finalize() {
 #ifdef USE_MPI
-		m_scheduler.finalize();
+    m_scheduler.finalize();
 #endif // USE_MPI
-	}
+  }
 };
 
-}
+} // namespace async
 
 #endif // ASYNC_DISPATCHER_H
