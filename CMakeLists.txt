@@ -53,13 +53,17 @@ endif()
 find_package(Threads REQUIRED)
 target_link_libraries(ASYNC INTERFACE Threads::Threads)
 
-# Enable testing
-enable_testing()
-
 # Make sure we find the header files
 target_include_directories(ASYNC INTERFACE ${CMAKE_SOURCE_DIR})
 
 # Submodules
 target_include_directories(ASYNC INTERFACE ${CMAKE_SOURCE_DIR}/submodules )
 
-add_subdirectory( tests )
+option(TESTING "Build unit tests" OFF)
+
+if (TESTING)
+  # Enable testing
+  enable_testing()
+
+  add_subdirectory( tests )
+endif()

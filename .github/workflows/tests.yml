@@ -19,20 +19,20 @@ jobs:
           sudo apt-get install -y libomp-dev libopenmpi-dev openmpi-bin openmpi-common ninja-build
           sudo apt-get install -y cxxtest
 
-      - name: build-mpi
-        run: |
-          mkdir build-mpi
-          cd build-mpi
-          cmake .. -GNinja -DUSE_MPI=ON
-          ninja
-          ninja test
-          cd ..
-      
       - name: build-nompi
         run: |
           mkdir build-nompi
           cd build-nompi
-          cmake .. -GNinja -DUSE_MPI=OFF
+          cmake .. -GNinja -DUSE_MPI=OFF -DTESTING=ON
+          ninja
+          ninja test
+          cd ..
+
+      - name: build-mpi
+        run: |
+          mkdir build-mpi
+          cd build-mpi
+          cmake .. -GNinja -DUSE_MPI=ON -DTESTING=ON
           ninja
           ninja test
           cd ..
