@@ -1,4 +1,4 @@
-# Copyright (c) 2016, Technische Universitaet Muenchen
+# Copyright (c) 2016-2024, Technische Universitaet Muenchen
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -27,18 +27,9 @@
 # ARISING IN ANY WAY OUT OF THE  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-# Add cxxtest pathes
-set( CXXTEST_PATH ${CMAKE_SOURCE_DIR}/submodules/cxxtest )
-set( CMAKE_INCLUDE_PATH
-    ${CMAKE_SOURCE_DIR}/submodules/cxxtest
-    ${CMAKE_INCLUDE_PATH} )
-set( CMAKE_MODULE_PATH
-	${CMAKE_SOURCE_DIR}/submodules/cxxtest/build_tools/cmake
-	${CMAKE_MODULE_PATH} )
-
 # Get cxxtest
 find_package( CxxTest REQUIRED )
-include_directories( ${CXXTEST_INCLUDES} )
+include_directories( ${CxxTest_INCLUDES} )
 
 # Timout for tests
 set( test_timeout 20 )
