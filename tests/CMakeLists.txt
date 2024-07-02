@@ -42,7 +42,7 @@ function( add_cxx_test target source )
     string(REGEX REPLACE "h$|hpp$" "cpp" CPP_FILE_NAME ${CPP_FILE_NAME})
     set(CPP_FULL_NAME "${CMAKE_CURRENT_BINARY_DIR}/${CPP_FILE_NAME}")
     CXXTEST_ADD_TEST( ${target} "${CPP_FULL_NAME}" ${source} )
-    target_link_libraries( ${target} ${CMAKE_THREAD_LIBS_INIT} )
+    target_link_libraries( ${target} PRIVATE ASYNC )
     set_tests_properties( ${target} PROPERTIES TIMEOUT ${test_timeout} ) # Detect deadlocks
 endfunction( add_cxx_test )
 
@@ -59,7 +59,7 @@ function( add_mpi_cxx_test target source ranks )
     )
     add_executable(${target} ${CPP_FULL_NAME})
     set_target_properties(${target} PROPERTIES COMPILE_FLAGS "-Wno-effc++")
-    target_link_libraries( ${target} ${CMAKE_THREAD_LIBS_INIT} )
+    target_link_libraries( ${target} PRIVATE ASYNC )
     add_test( NAME ${target} COMMAND ${MPIEXEC} ${MPIEXEC_PREFLAGS}
         ${MPIEXEC_NUMPROC_FLAG} ${ranks} ${CMAKE_CURRENT_BINARY_DIR}/${target} )
     set_tests_properties( ${target} PROPERTIES TIMEOUT ${test_timeout} ) # Detect deadlocks
