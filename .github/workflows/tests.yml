@@ -21,7 +21,7 @@ jobs:
         run: |
           mkdir build-mpi
           cd build-mpi
-          cmake ..
+          cmake .. -GNinja -DUSE_MPI=ON
           ninja
           ninja test
           cd ..
@@ -30,7 +30,7 @@ jobs:
         run: |
           mkdir build-nompi
           cd build-nompi
-          cmake .. -DUSE_MPI=OFF
+          cmake .. -GNinja -DUSE_MPI=OFF
           ninja
           ninja test
           cd ..

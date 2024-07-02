@@ -27,16 +27,21 @@
 # ARISING IN ANY WAY OUT OF THE  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+# cf. https://cmake.org/cmake/help/v3.8/module/FindCxxTest.html
+
 # Get cxxtest
 find_package( CxxTest REQUIRED )
-include_directories( ${CxxTest_INCLUDES} )
+include_directories( ${CXXTEST_INCLUDE_DIR} )
 
 # Timout for tests
 set( test_timeout 20 )
 
 # Add test functions
 function( add_cxx_test target source )
-    cxx_test( ${target} ${source} )
+    get_filename_component(CPP_FILE_NAME ${source} NAME)
+    string(REGEX REPLACE "h$|hpp$" "cpp" CPP_FILE_NAME ${CPP_FILE_NAME})
+    set(CPP_FULL_NAME "${CMAKE_CURRENT_BINARY_DIR}/${CPP_FILE_NAME}")
+    CXXTEST_ADD_TEST( ${target} "${CPP_FULL_NAME}" ${source} )
     target_link_libraries( ${target} ${CMAKE_THREAD_LIBS_INIT} )
     set_tests_properties( ${target} PROPERTIES TIMEOUT ${test_timeout} ) # Detect deadlocks
 endfunction( add_cxx_test )
@@ -48,7 +53,7 @@ function( add_mpi_cxx_test target source ranks )
     set(CPP_FULL_NAME "${CMAKE_CURRENT_BINARY_DIR}/${CPP_FILE_NAME}")
     add_custom_command(
         OUTPUT "${CPP_FULL_NAME}"
-        COMMAND ${CXXTESTGEN} --runner=ErrorPrinter --output "${CPP_FULL_NAME}"
+        COMMAND ${CXXTEST_PYTHON_TESTGEN_EXECUTABLE} --error-printer --output "${CPP_FULL_NAME}"
          --template "${cxx_template}" "${source}"
         DEPENDS "${source}" "${cxx_template}"
     )
