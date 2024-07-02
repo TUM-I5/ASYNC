@@ -27,37 +27,39 @@
 # ARISING IN ANY WAY OUT OF THE  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-cmake_minimum_required( VERSION 3.10 )
+cmake_minimum_required(VERSION 3.13)
 
-project( ASYNC )
+project(ASYNC)
 
-option( USE_MPI "Compile with MPI" ON )
+option(USE_MPI "Compile with MPI" ON)
 
-# Enable warnings
-add_definitions( -Wall )
+add_library(ASYNC INTERFACE)
 
 # MPI
-if( USE_MPI )
-	# Find MPI
-	find_package( MPI REQUIRED )
+if(USE_MPI)
+  # Find MPI
+  find_package(MPI REQUIRED)
 
-	# Do not include OpenMPI C++ Bindings
-	add_definitions( -DOMPI_SKIP_MPICXX )
+  # Do not include OpenMPI C++ Bindings
+  target_compile_definitions(ASYNC INTERFACE -DOMPI_SKIP_MPICXX)
 
-	# Use MPI
-	add_definitions( -DUSE_MPI )
-endif( USE_MPI )
+  # Use MPI
+  target_compile_definitions(ASYNC INTERFACE -DUSE_MPI)
+
+  target_link_libraries(ASYNC INTERFACE MPI::MPI_C)
+endif()
 
 # Threads
-find_package( Threads REQUIRED )
+find_package(Threads REQUIRED)
+target_link_libraries(ASYNC INTERFACE Threads::Threads)
 
 # Enable testing
 enable_testing()
 
 # Make sure we find the header files
-include_directories( ${CMAKE_SOURCE_DIR} )
+target_include_directories(ASYNC INTERFACE ${CMAKE_SOURCE_DIR})
 
 # Submodules
-include_directories( ${CMAKE_SOURCE_DIR}/submodules )
+target_include_directories(ASYNC INTERFACE ${CMAKE_SOURCE_DIR}/submodules )
 
 add_subdirectory( tests )
