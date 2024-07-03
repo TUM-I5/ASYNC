@@ -133,10 +133,12 @@ public:
 		// Set affinity (choose a random CPU)
 		srand(time(0L));
 		int cpu = rand() % get_nprocs();
-		cpu_set_t cpuSet;
-		CPU_ZERO(&cpuSet);
-		CPU_SET(cpu, &cpuSet);
-		async.setAffinity(cpuSet);
+		async::as::CpuMask mask;
+#ifndef __APPLE__
+		CPU_ZERO(&mask.set);
+		CPU_SET(cpu, &mask.set);
+#endif
+		async.setAffinity(mask);
 
 		async.wait();
 		Parameter parameter;
