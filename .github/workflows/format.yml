@@ -25,6 +25,7 @@ jobs:
 
           # cf. https://stackoverflow.com/a/36046965
           find async/ -iname '*.h' | xargs clang-format -i
+          find tests/ -iname '*.h' | xargs clang-format -i
           
           git diff > formatting.patch
           cat formatting.patch 

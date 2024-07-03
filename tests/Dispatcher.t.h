@@ -45,28 +45,24 @@
 /**
  * Test the dispatcher for non MPI mode
  */
-class TestDispatcher : public CxxTest::TestSuite
-{
-public:
-	void testGroupSize()
-	{
-		async::Dispatcher dispatcher;
-		TS_ASSERT_EQUALS(dispatcher.groupSize(), 1);
-	}
+class TestDispatcher : public CxxTest::TestSuite {
+  public:
+  void testGroupSize() {
+    async::Dispatcher dispatcher;
+    TS_ASSERT_EQUALS(dispatcher.groupSize(), 1);
+  }
 
-	void testGroupComm()
-	{
-		async::Dispatcher dispatcher;
+  void testGroupComm() {
+    async::Dispatcher dispatcher;
 #ifdef USE_MPI
-		TS_ASSERT_EQUALS(dispatcher.groupComm(), MPI_COMM_SELF);
+    TS_ASSERT_EQUALS(dispatcher.groupComm(), MPI_COMM_SELF);
 #endif // USE_MPI
-	}
+  }
 
-	void testCommWorld()
-	{
-		async::Dispatcher dispatcher;
+  void testCommWorld() {
+    async::Dispatcher dispatcher;
 #ifdef USE_MPI
-		TS_ASSERT_EQUALS(dispatcher.commWorld(), MPI_COMM_WORLD);
+    TS_ASSERT_EQUALS(dispatcher.commWorld(), MPI_COMM_WORLD);
 #endif // USE_MPI
-	}
+  }
 };

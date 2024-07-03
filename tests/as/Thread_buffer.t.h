@@ -41,38 +41,33 @@
 #include "async/as/Thread.h"
 #include "Executor.h"
 
-class TestThread : public CxxTest::TestSuite
-{
-private:
-	pthread_spinlock_t m_lock;
+class TestThread : public CxxTest::TestSuite {
+  private:
+  pthread_spinlock_t m_lock;
 
-	int m_value;
+  int m_value;
 
-public:
-	void setValue(int value)
-	{
-		m_value += value;
-	}
+  public:
+  void setValue(int value) { m_value += value; }
 
-	/**
-	 * Tests the buffer alignement.
-	 * Make sure that the environment variable ASYNC_BUFFER_ALIGNMENT=65536
-	 * is set for this test.
-	 */
-	void testBuffer()
-	{
-		Executor<TestThread> executor(this);
+  /**
+   * Tests the buffer alignement.
+   * Make sure that the environment variable ASYNC_BUFFER_ALIGNMENT=65536
+   * is set for this test.
+   */
+  void testBuffer() {
+    Executor<TestThread> executor(this);
 
-		async::as::Thread<Executor<TestThread>, Parameter, Parameter> async;
-		async.setExecutor(executor);
+    async::as::Thread<Executor<TestThread>, Parameter, Parameter> async;
+    async.setExecutor(executor);
 
-		int buffer = 42;
-		async.addBuffer(&buffer, sizeof(int));
+    int buffer = 42;
+    async.addBuffer(&buffer, sizeof(int));
 
-		async.wait();
-		async.sendBuffer(0, sizeof(int));
-		TS_ASSERT_EQUALS(*reinterpret_cast<const int*>(async.buffer(0)), 42);
-		uintptr_t p = reinterpret_cast<uintptr_t>(async.buffer(0));
-		TS_ASSERT_EQUALS(p % 65536, 0);
-	}
+    async.wait();
+    async.sendBuffer(0, sizeof(int));
+    TS_ASSERT_EQUALS(*reinterpret_cast<const int*>(async.buffer(0)), 42);
+    uintptr_t p = reinterpret_cast<uintptr_t>(async.buffer(0));
+    TS_ASSERT_EQUALS(p % 65536, 0);
+  }
 };

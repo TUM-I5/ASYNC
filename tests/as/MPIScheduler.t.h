@@ -40,72 +40,64 @@
 
 #include "async/as/MPIScheduler.h"
 
-class TestMPIScheduler : public CxxTest::TestSuite
-{
-	int m_rank;
+class TestMPIScheduler : public CxxTest::TestSuite {
+  int m_rank;
 
-public:
-	void setUp()
-	{
-		MPI_Comm_rank(MPI_COMM_WORLD, &m_rank);
-	}
+  public:
+  void setUp() { MPI_Comm_rank(MPI_COMM_WORLD, &m_rank); }
 
-	void testIsExecutor()
-	{
-		async::as::MPIScheduler scheduler;
-		scheduler.setCommunicator(MPI_COMM_WORLD, 2);
+  void testIsExecutor() {
+    async::as::MPIScheduler scheduler;
+    scheduler.setCommunicator(MPI_COMM_WORLD, 2);
 
-		switch (m_rank) {
-		case 2:
-		case 4:
-			TS_ASSERT(scheduler.isExecutor());
-			break;
-		default:
-			TS_ASSERT(!scheduler.isExecutor());
-		}
-	}
+    switch (m_rank) {
+    case 2:
+    case 4:
+      TS_ASSERT(scheduler.isExecutor());
+      break;
+    default:
+      TS_ASSERT(!scheduler.isExecutor());
+    }
+  }
 
-	void testCommWorld()
-	{
-		async::as::MPIScheduler scheduler;
-		scheduler.setCommunicator(MPI_COMM_WORLD, 2);
+  void testCommWorld() {
+    async::as::MPIScheduler scheduler;
+    scheduler.setCommunicator(MPI_COMM_WORLD, 2);
 
-		int size;
-		MPI_Comm_size(scheduler.commWorld(), &size);
+    int size;
+    MPI_Comm_size(scheduler.commWorld(), &size);
 
-		switch (m_rank) {
-		case 2:
-		case 4:
-			TS_ASSERT_EQUALS(size, 2);
-			break;
-		default:
-			TS_ASSERT_EQUALS(size, 3);
-		}
-	}
+    switch (m_rank) {
+    case 2:
+    case 4:
+      TS_ASSERT_EQUALS(size, 2);
+      break;
+    default:
+      TS_ASSERT_EQUALS(size, 3);
+    }
+  }
 
-	void testGroupComm()
-	{
-		async::as::MPIScheduler scheduler;
-		scheduler.setCommunicator(MPI_COMM_WORLD, 2);
+  void testGroupComm() {
+    async::as::MPIScheduler scheduler;
+    scheduler.setCommunicator(MPI_COMM_WORLD, 2);
 
-		TS_ASSERT_EQUALS(scheduler.groupRank(), m_rank % 3);
+    TS_ASSERT_EQUALS(scheduler.groupRank(), m_rank % 3);
 
-		int size;
+    int size;
 
-		switch (m_rank) {
-		case 2:
-		case 4:
-			TS_ASSERT_EQUALS(scheduler.groupComm(), MPI_COMM_NULL);
-			break;
-		case 0:
-		case 1:
-			MPI_Comm_size(scheduler.groupComm(), &size);
-			TS_ASSERT_EQUALS(size, 2);
-			break;
-		case 3:
-			MPI_Comm_size(scheduler.groupComm(), &size);
-			TS_ASSERT_EQUALS(size, 1);
-		}
-
-	}
+    switch (m_rank) {
+    case 2:
+    case 4:
+      TS_ASSERT_EQUALS(scheduler.groupComm(), MPI_COMM_NULL);
+      break;
+    case 0:
+    case 1:
+      MPI_Comm_size(scheduler.groupComm(), &size);
+      TS_ASSERT_EQUALS(size, 2);
+      break;
+    case 3:
+      MPI_Comm_size(scheduler.groupComm(), &size);
+      TS_ASSERT_EQUALS(size, 1);
+    }
+  }
 };

@@ -46,523 +46,450 @@
 #include "async/Dispatcher.h"
 #include "async/Module.h"
 
-struct Param
-{
-	int step;
+struct Param {
+  int step;
 };
 
-class Module : private async::Module<Module, Param, Param>
-{
-public:
-	bool m_setUp;
-	bool m_execInit;
-	bool m_exec;
-	bool m_tearDown;
+class Module : private async::Module<Module, Param, Param> {
+  public:
+  bool m_setUp;
+  bool m_execInit;
+  bool m_exec;
+  bool m_tearDown;
 
-	int m_cpu;
+  int m_cpu;
 
-public:
-	Module()
-		: m_setUp(false),
-		  m_execInit(false),
-		  m_exec(false),
-		  m_tearDown(false)
-	{
-	}
+  public:
+  Module() : m_setUp(false), m_execInit(false), m_exec(false), m_tearDown(false) {}
 
-	void run()
-	{
-		init();
+  void run() {
+    init();
 
-		Param param;
-		callInit(param);
+    Param param;
+    callInit(param);
 
-		wait();
+    wait();
 
-		call(param);
+    call(param);
 
-		wait();
+    wait();
 
-		finalize();
-	}
+    finalize();
+  }
 
-	void norun()
-	{
-		init();
-		finalize();
-	}
+  void norun() {
+    init();
+    finalize();
+  }
 
-	void execInit(const async::ExecInfo &info, const Param &param)
-	{
-		TS_ASSERT_EQUALS(info.numBuffers(), 0);
-		m_execInit = true;
-	}
+  void execInit(const async::ExecInfo& info, const Param& param) {
+    TS_ASSERT_EQUALS(info.numBuffers(), 0);
+    m_execInit = true;
+  }
 
-	void exec(const Param &param)
-	{
-		m_exec = true;
+  void exec(const Param& param) {
+    m_exec = true;
 
-		m_cpu = sched_getcpu();
-	}
+    m_cpu = sched_getcpu();
+  }
 
-	void setUp()
-	{
-		setExecutor(*this);
-		m_setUp = true;
-	}
+  void setUp() {
+    setExecutor(*this);
+    m_setUp = true;
+  }
 
-	void tearDown()
-	{
-		m_tearDown = true;
-	}
+  void tearDown() { m_tearDown = true; }
 };
 
-class BufferModule : private async::Module<BufferModule, Param, Param>
-{
-public:
-	unsigned int m_initBufferSize;
-	unsigned int m_bufferSize;
-	unsigned int m_cloneBufferSize;
-	unsigned int m_cloneSyncBufferSize;
-	int m_buffer;
-	int m_managedBuffer;
+class BufferModule : private async::Module<BufferModule, Param, Param> {
+  public:
+  unsigned int m_initBufferSize;
+  unsigned int m_bufferSize;
+  unsigned int m_cloneBufferSize;
+  unsigned int m_cloneSyncBufferSize;
+  int m_buffer;
+  int m_managedBuffer;
 
-public:
-	BufferModule()
-		: m_initBufferSize(0),
-		  m_bufferSize(0),
-		  m_cloneBufferSize(0),
-		  m_cloneSyncBufferSize(0)
-	{
-	}
+  public:
+  BufferModule()
+      : m_initBufferSize(0), m_bufferSize(0), m_cloneBufferSize(0), m_cloneSyncBufferSize(0) {}
 
-	void run()
-	{
-		init();
+  void run() {
+    init();
 
-		int initBuffer[2];
-		addBuffer(initBuffer, 2*sizeof(int));
+    int initBuffer[2];
+    addBuffer(initBuffer, 2 * sizeof(int));
 
-		int buffer = 42;
-		addBuffer(&buffer, sizeof(int));
+    int buffer = 42;
+    addBuffer(&buffer, sizeof(int));
 
-		int cloneBuffer = 1;
-		addBuffer(&cloneBuffer, sizeof(int), true);
+    int cloneBuffer = 1;
+    addBuffer(&cloneBuffer, sizeof(int), true);
 
-		long addCloneSyncBuffer = 2;
-		addSyncBuffer(&addCloneSyncBuffer, sizeof(long), true);
+    long addCloneSyncBuffer = 2;
+    addSyncBuffer(&addCloneSyncBuffer, sizeof(long), true);
 
-		addBuffer(0L, 2*sizeof(int));
+    addBuffer(0L, 2 * sizeof(int));
 
-		int buffer2 = 43;
-		addBuffer(&buffer2, sizeof(int));
+    int buffer2 = 43;
+    addBuffer(&buffer2, sizeof(int));
 
-		int* managedBuffer = async::Module<BufferModule, Param, Param>::managedBuffer<int*>(4);
-		TS_ASSERT_DIFFERS(managedBuffer, static_cast<int*>(0L));
+    int* managedBuffer = async::Module<BufferModule, Param, Param>::managedBuffer<int*>(4);
+    TS_ASSERT_DIFFERS(managedBuffer, static_cast<int*>(0L));
 
-		Param param;
-		callInit(param);
+    Param param;
+    callInit(param);
 
-		wait();
+    wait();
 
-		sendBuffer(1, sizeof(int));
+    sendBuffer(1, sizeof(int));
 
-		managedBuffer[0] = 5;
-		managedBuffer[1] = 5;
+    managedBuffer[0] = 5;
+    managedBuffer[1] = 5;
 
-		sendBuffer(4, 2*sizeof(int));
+    sendBuffer(4, 2 * sizeof(int));
 
-		sendBuffer(5);
+    sendBuffer(5);
 
-		call(param);
+    call(param);
 
-		if (async::Config::mode() == async::MPI) {
-			// Set the params on non-executors
-			execInit(param);
-			_exec(param, false);
-		}
+    if (async::Config::mode() == async::MPI) {
+      // Set the params on non-executors
+      execInit(param);
+      _exec(param, false);
+    }
 
-		wait();
+    wait();
 
-		finalize();
-	}
+    finalize();
+  }
 
-	void execInit(const Param &param)
-	{
-		m_initBufferSize = bufferSize(0);
-	}
+  void execInit(const Param& param) { m_initBufferSize = bufferSize(0); }
 
-	void exec(const async::ExecInfo &info, const Param &param)
-	{
-		_exec(param);
-	}
+  void exec(const async::ExecInfo& info, const Param& param) { _exec(param); }
 
-	void setUp()
-	{
-		setExecutor(*this);
-	}
+  void setUp() { setExecutor(*this); }
 
-	void tearDown()
-	{
-	}
+  void tearDown() {}
 
-private:
-	void _exec(const Param &param, bool isExecutor = true)
-	{
-		m_bufferSize = bufferSize(1);
-		for (unsigned int i = 0; i < m_bufferSize/sizeof(int); i++) {
-			TS_ASSERT_EQUALS(42, *(static_cast<const int*>(buffer(1))+i));
-		}
-		m_cloneBufferSize = bufferSize(2);
-		m_cloneSyncBufferSize = bufferSize(3);
+  private:
+  void _exec(const Param& param, bool isExecutor = true) {
+    m_bufferSize = bufferSize(1);
+    for (unsigned int i = 0; i < m_bufferSize / sizeof(int); i++) {
+      TS_ASSERT_EQUALS(42, *(static_cast<const int*>(buffer(1)) + i));
+    }
+    m_cloneBufferSize = bufferSize(2);
+    m_cloneSyncBufferSize = bufferSize(3);
 
-		unsigned int bufferSize2 = bufferSize(5);
-		TS_ASSERT_EQUALS(bufferSize2, m_bufferSize);
-		for (unsigned int i = 0; i < bufferSize2/sizeof(int); i++) {
-			TS_ASSERT_EQUALS(43, *(static_cast<const int*>(buffer(5))+i));
-		}
+    unsigned int bufferSize2 = bufferSize(5);
+    TS_ASSERT_EQUALS(bufferSize2, m_bufferSize);
+    for (unsigned int i = 0; i < bufferSize2 / sizeof(int); i++) {
+      TS_ASSERT_EQUALS(43, *(static_cast<const int*>(buffer(5)) + i));
+    }
 
-		if (isExecutor) {
-			unsigned int managedBufferSize = bufferSize(4);
-			for (unsigned int i = 0; i < managedBufferSize/sizeof(int); i++) {
-				TS_ASSERT_EQUALS(*(static_cast<const int*>(buffer(4))+i), 5);
-			}
-		}
-	}
+    if (isExecutor) {
+      unsigned int managedBufferSize = bufferSize(4);
+      for (unsigned int i = 0; i < managedBufferSize / sizeof(int); i++) {
+        TS_ASSERT_EQUALS(*(static_cast<const int*>(buffer(4)) + i), 5);
+      }
+    }
+  }
 };
 
+class ResizeBufferModule : private async::Module<ResizeBufferModule, Param, Param> {
+  public:
+  unsigned int m_buffer0Size[2];
+  unsigned int m_buffer1Size[2];
 
+  public:
+  ResizeBufferModule() {}
 
-class ResizeBufferModule : private async::Module<ResizeBufferModule, Param, Param>
-{
-public:
-	unsigned int m_buffer0Size[2];
-	unsigned int m_buffer1Size[2];
+  void run() {
+    init();
 
-public:
-	ResizeBufferModule()
-	{
-	}
+    int buffer0 = 42;
+    addBuffer(&buffer0, sizeof(int));
 
-	void run()
-	{
-		init();
+    int buffer1[2] = {1, 2};
+    addBuffer(buffer1, 2 * sizeof(int), true);
 
-		int buffer0 = 42;
-		addBuffer(&buffer0, sizeof(int));
+    Param param;
+    callInit(param);
 
-		int buffer1[2] = {1, 2};
-		addBuffer(buffer1, 2*sizeof(int), true);
+    wait();
 
-		Param param;
-		callInit(param);
+    sendBuffer(0, sizeof(int));
+    sendBuffer(1, 2 * sizeof(int));
 
-		wait();
+    param.step = 0;
+    call(param);
 
-		sendBuffer(0, sizeof(int));
-		sendBuffer(1, 2*sizeof(int));
+    if (async::Config::mode() == async::MPI) {
+      // Set the params on non-executors
+      _exec(param, false);
+    }
 
-		param.step = 0;
-		call(param);
+    wait();
 
-		if (async::Config::mode() == async::MPI) {
-			// Set the params on non-executors
-			_exec(param, false);
-		}
+    int buffer2[2] = {4, 3};
+    resizeBuffer(0, buffer2, 2 * sizeof(int));
 
-		wait();
-		
-		int buffer2[2] = {4, 3};
-		resizeBuffer(0, buffer2, 2*sizeof(int));
-		
-		resizeBuffer(1, buffer1, sizeof(int));
-		
-		sendBuffer(0);
-		sendBuffer(1);
-		
-		param.step = 1;
-		call(param);
+    resizeBuffer(1, buffer1, sizeof(int));
 
-		if (async::Config::mode() == async::MPI) {
-			// Set the params on non-executors
-			_exec(param, false);
-		}
-		
-		wait();
+    sendBuffer(0);
+    sendBuffer(1);
 
-		finalize();
-	}
+    param.step = 1;
+    call(param);
 
-	void execInit(const Param &param)
-	{
-	}
+    if (async::Config::mode() == async::MPI) {
+      // Set the params on non-executors
+      _exec(param, false);
+    }
 
-	void exec(const async::ExecInfo &info, const Param &param)
-	{
-		_exec(param);
-	}
+    wait();
 
-	void setUp()
-	{
-		setExecutor(*this);
-	}
+    finalize();
+  }
 
-	void tearDown()
-	{
-	}
+  void execInit(const Param& param) {}
 
-private:
-	void _exec(const Param &param, bool isExecutor = true)
-	{
-		m_buffer0Size[param.step] = bufferSize(0);
-		m_buffer1Size[param.step] = bufferSize(1);
-		switch (param.step) {
-		case 0:
-			TS_ASSERT_EQUALS(*static_cast<const int*>(buffer(0)), 42);
-			TS_ASSERT_EQUALS(*static_cast<const int*>(buffer(1)), 1);
-			TS_ASSERT_EQUALS(*(static_cast<const int*>(buffer(1))+1), 2);
-			break;
-		case 1:
-			TS_ASSERT_EQUALS(*static_cast<const int*>(buffer(0)), 4);
-			TS_ASSERT_EQUALS(*(static_cast<const int*>(buffer(0))+1), 3);
-			TS_ASSERT_EQUALS(*static_cast<const int*>(buffer(1)), 1);
-			break;
-		}
-	}
+  void exec(const async::ExecInfo& info, const Param& param) { _exec(param); }
+
+  void setUp() { setExecutor(*this); }
+
+  void tearDown() {}
+
+  private:
+  void _exec(const Param& param, bool isExecutor = true) {
+    m_buffer0Size[param.step] = bufferSize(0);
+    m_buffer1Size[param.step] = bufferSize(1);
+    switch (param.step) {
+    case 0:
+      TS_ASSERT_EQUALS(*static_cast<const int*>(buffer(0)), 42);
+      TS_ASSERT_EQUALS(*static_cast<const int*>(buffer(1)), 1);
+      TS_ASSERT_EQUALS(*(static_cast<const int*>(buffer(1)) + 1), 2);
+      break;
+    case 1:
+      TS_ASSERT_EQUALS(*static_cast<const int*>(buffer(0)), 4);
+      TS_ASSERT_EQUALS(*(static_cast<const int*>(buffer(0)) + 1), 3);
+      TS_ASSERT_EQUALS(*static_cast<const int*>(buffer(1)), 1);
+      break;
+    }
+  }
 };
 
-class RemoveBufferModule : private async::Module<RemoveBufferModule, Param, Param>
-{
-public:
-	unsigned int m_buffer0Size;
-	unsigned int m_buffer1Size;
-	unsigned int m_managedBufferSize;
+class RemoveBufferModule : private async::Module<RemoveBufferModule, Param, Param> {
+  public:
+  unsigned int m_buffer0Size;
+  unsigned int m_buffer1Size;
+  unsigned int m_managedBufferSize;
 
-public:
-	RemoveBufferModule()
-		: m_buffer0Size(42),
-		  m_buffer1Size(42)
-	{
-	}
+  public:
+  RemoveBufferModule() : m_buffer0Size(42), m_buffer1Size(42) {}
 
-	void run()
-	{
-		init();
+  void run() {
+    init();
 
-		int buffer0 = 3;
-		addBuffer(&buffer0, sizeof(int));
+    int buffer0 = 3;
+    addBuffer(&buffer0, sizeof(int));
 
-		int buffer1 = 42;
-		addBuffer(&buffer1, sizeof(int));
+    int buffer1 = 42;
+    addBuffer(&buffer1, sizeof(int));
 
-		addBuffer(0L, sizeof(int));
+    addBuffer(0L, sizeof(int));
 
-		Param param;
-		callInit(param);
+    Param param;
+    callInit(param);
 
-		wait();
+    wait();
 
-		removeBuffer(0);
-		removeBuffer(2);
-		sendBuffer(1, sizeof(int));
+    removeBuffer(0);
+    removeBuffer(2);
+    sendBuffer(1, sizeof(int));
 
-		call(param);
+    call(param);
 
-		if (async::Config::mode() == async::MPI) {
-			// Set the params on non-executors
-			execInit(param);
-			exec(param);
-		}
+    if (async::Config::mode() == async::MPI) {
+      // Set the params on non-executors
+      execInit(param);
+      exec(param);
+    }
 
-		wait();
+    wait();
 
-		finalize();
-	}
+    finalize();
+  }
 
-	void execInit(const Param &param)
-	{
-	}
+  void execInit(const Param& param) {}
 
-	void exec(const Param &param)
-	{
-		m_buffer0Size = bufferSize(0);
-		m_buffer1Size = bufferSize(1);
-		m_managedBufferSize = bufferSize(2);
-	}
+  void exec(const Param& param) {
+    m_buffer0Size = bufferSize(0);
+    m_buffer1Size = bufferSize(1);
+    m_managedBufferSize = bufferSize(2);
+  }
 
-	void setUp()
-	{
-		setExecutor(*this);
-	}
+  void setUp() { setExecutor(*this); }
 
-	void tearDown()
-	{
-	}
+  void tearDown() {}
 };
 
 /**
  * Test for {@link Dispatcher} and {@link Module} since
  * they work closely together.
  */
-class TestModule : public CxxTest::TestSuite
-{
-	int m_rank;
-	int m_size;
+class TestModule : public CxxTest::TestSuite {
+  int m_rank;
+  int m_size;
 
-public:
-	void setUp()
-	{
+  public:
+  void setUp() {
 #ifdef USE_MPI
-		MPI_Comm_rank(MPI_COMM_WORLD, &m_rank);
-		MPI_Comm_size(MPI_COMM_WORLD, &m_size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &m_rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &m_size);
 #endif // USE_MPI
-	}
+  }
 
-	void testModuleDispatcher()
-	{
-		async::Dispatcher dispatcher;
+  void testModuleDispatcher() {
+    async::Dispatcher dispatcher;
 #ifdef USE_MPI
-		dispatcher.setCommunicator(MPI_COMM_WORLD);
+    dispatcher.setCommunicator(MPI_COMM_WORLD);
 #endif // USE_MPI
 
-		unsigned int groupSize = dispatcher.groupSize();
-		if (async::Config::mode() == async::MPI) {
-			TS_ASSERT_EQUALS(groupSize, 64); // the default
-		} else {
-			TS_ASSERT_EQUALS(groupSize, 1);
-		}
+    unsigned int groupSize = dispatcher.groupSize();
+    if (async::Config::mode() == async::MPI) {
+      TS_ASSERT_EQUALS(groupSize, 64); // the default
+    } else {
+      TS_ASSERT_EQUALS(groupSize, 1);
+    }
 
-		Module module;
+    Module module;
 
-		dispatcher.init();
+    dispatcher.init();
 
-		if (dispatcher.dispatch()) {
-			TS_ASSERT(!dispatcher.isExecutor());
+    if (dispatcher.dispatch()) {
+      TS_ASSERT(!dispatcher.isExecutor());
 
-			module.run();
-		} else {
-			TS_ASSERT(dispatcher.isExecutor());
+      module.run();
+    } else {
+      TS_ASSERT(dispatcher.isExecutor());
 
-			if (async::Config::mode() == async::MPI) {
-				TS_ASSERT_EQUALS(m_rank+1, m_size);
-			} else {
-				TS_FAIL("No executors in SYNC and THREAD mode!");
-			}
-		}
+      if (async::Config::mode() == async::MPI) {
+        TS_ASSERT_EQUALS(m_rank + 1, m_size);
+      } else {
+        TS_FAIL("No executors in SYNC and THREAD mode!");
+      }
+    }
 
-		dispatcher.finalize();
+    dispatcher.finalize();
 
-		TS_ASSERT(module.m_setUp);
-		if (dispatcher.isExecutor()) {
-			TS_ASSERT(module.m_execInit);
-			TS_ASSERT(module.m_exec);
-		}
-		TS_ASSERT(module.m_tearDown);
+    TS_ASSERT(module.m_setUp);
+    if (dispatcher.isExecutor()) {
+      TS_ASSERT(module.m_execInit);
+      TS_ASSERT(module.m_exec);
+    }
+    TS_ASSERT(module.m_tearDown);
 
-		if (async::Config::mode() == async::THREAD) {
-			TS_ASSERT_EQUALS(module.m_cpu, get_nprocs()-1);
-		}
-	}
+    if (async::Config::mode() == async::THREAD) {
+      TS_ASSERT_EQUALS(module.m_cpu, get_nprocs() - 1);
+    }
+  }
 
-	void testBuffer()
-	{
-		async::Dispatcher dispatcher;
+  void testBuffer() {
+    async::Dispatcher dispatcher;
 
-		BufferModule module;
+    BufferModule module;
 
-		dispatcher.init();
+    dispatcher.init();
 
-		if (dispatcher.dispatch())
-			module.run();
+    if (dispatcher.dispatch())
+      module.run();
 
-		unsigned int initBufferSize = 2*sizeof(int);
-		unsigned int bufferSize = sizeof(int);
-		unsigned int cloneBufferSize = sizeof(int);
-		unsigned int cloneSyncBufferSize = sizeof(long);
+    unsigned int initBufferSize = 2 * sizeof(int);
+    unsigned int bufferSize = sizeof(int);
+    unsigned int cloneBufferSize = sizeof(int);
+    unsigned int cloneSyncBufferSize = sizeof(long);
 
-		if (dispatcher.isExecutor() && async::Config::mode() == async::MPI) {
-			initBufferSize *= m_size-1;
-			bufferSize *= m_size-1;
-		}
+    if (dispatcher.isExecutor() && async::Config::mode() == async::MPI) {
+      initBufferSize *= m_size - 1;
+      bufferSize *= m_size - 1;
+    }
 
-		dispatcher.finalize();
+    dispatcher.finalize();
 
-		TS_ASSERT_EQUALS(module.m_initBufferSize, initBufferSize);
-		TS_ASSERT_EQUALS(module.m_bufferSize, bufferSize);
-		TS_ASSERT_EQUALS(module.m_cloneBufferSize, cloneBufferSize);
-		TS_ASSERT_EQUALS(module.m_cloneSyncBufferSize, cloneSyncBufferSize);
-	}
+    TS_ASSERT_EQUALS(module.m_initBufferSize, initBufferSize);
+    TS_ASSERT_EQUALS(module.m_bufferSize, bufferSize);
+    TS_ASSERT_EQUALS(module.m_cloneBufferSize, cloneBufferSize);
+    TS_ASSERT_EQUALS(module.m_cloneSyncBufferSize, cloneSyncBufferSize);
+  }
 
-	void testResizeBuffer()
-	{
-		async::Dispatcher dispatcher;
+  void testResizeBuffer() {
+    async::Dispatcher dispatcher;
 
-		ResizeBufferModule module;
+    ResizeBufferModule module;
 
-		dispatcher.init();
+    dispatcher.init();
 
-		if (dispatcher.dispatch())
-			module.run();
+    if (dispatcher.dispatch())
+      module.run();
 
-		unsigned int bufferSize = sizeof(int);
+    unsigned int bufferSize = sizeof(int);
 
-		if (dispatcher.isExecutor() && async::Config::mode() == async::MPI) {
-			bufferSize *= m_size-1;
-		}
+    if (dispatcher.isExecutor() && async::Config::mode() == async::MPI) {
+      bufferSize *= m_size - 1;
+    }
 
-		dispatcher.finalize();
+    dispatcher.finalize();
 
-		TS_ASSERT_EQUALS(module.m_buffer0Size[0], bufferSize);
-		TS_ASSERT_EQUALS(module.m_buffer0Size[1], 2*bufferSize);
-		TS_ASSERT_EQUALS(module.m_buffer1Size[0], 2*sizeof(int));
-		TS_ASSERT_EQUALS(module.m_buffer1Size[1], sizeof(int));
-	}
+    TS_ASSERT_EQUALS(module.m_buffer0Size[0], bufferSize);
+    TS_ASSERT_EQUALS(module.m_buffer0Size[1], 2 * bufferSize);
+    TS_ASSERT_EQUALS(module.m_buffer1Size[0], 2 * sizeof(int));
+    TS_ASSERT_EQUALS(module.m_buffer1Size[1], sizeof(int));
+  }
 
-	void testRemoveBuffer()
-	{
-		async::Dispatcher dispatcher;
+  void testRemoveBuffer() {
+    async::Dispatcher dispatcher;
 
-		RemoveBufferModule module;
+    RemoveBufferModule module;
 
-		dispatcher.init();
+    dispatcher.init();
 
-		if (dispatcher.dispatch())
-			module.run();
+    if (dispatcher.dispatch())
+      module.run();
 
-		unsigned int buffer1Size = sizeof(int);
+    unsigned int buffer1Size = sizeof(int);
 
-		if (dispatcher.isExecutor() && async::Config::mode() == async::MPI) {
-			buffer1Size *= m_size-1;
-		}
+    if (dispatcher.isExecutor() && async::Config::mode() == async::MPI) {
+      buffer1Size *= m_size - 1;
+    }
 
-		dispatcher.finalize();
+    dispatcher.finalize();
 
-		TS_ASSERT_EQUALS(module.m_buffer0Size, 0);
-		TS_ASSERT_EQUALS(module.m_buffer1Size, buffer1Size);
-		TS_ASSERT_EQUALS(module.m_managedBufferSize, 0);
-	}
+    TS_ASSERT_EQUALS(module.m_buffer0Size, 0);
+    TS_ASSERT_EQUALS(module.m_buffer1Size, buffer1Size);
+    TS_ASSERT_EQUALS(module.m_managedBufferSize, 0);
+  }
 
-	void testModulesActiveDisabled()
-	{
-		async::Dispatcher dispatcher;
+  void testModulesActiveDisabled() {
+    async::Dispatcher dispatcher;
 
-		unsigned int groupSize = dispatcher.groupSize();
-		if (async::Config::mode() == async::MPI) {
-			TS_ASSERT_EQUALS(groupSize, 64); // the default
-		} else {
-			TS_ASSERT_EQUALS(groupSize, 1);
-		}
+    unsigned int groupSize = dispatcher.groupSize();
+    if (async::Config::mode() == async::MPI) {
+      TS_ASSERT_EQUALS(groupSize, 64); // the default
+    } else {
+      TS_ASSERT_EQUALS(groupSize, 1);
+    }
 
-		Module module0;
-		Module module1;
+    Module module0;
+    Module module1;
 
-		dispatcher.init();
+    dispatcher.init();
 
-		if (dispatcher.dispatch()) {
-			// Run only one module
-			module0.run();
-		}
+    if (dispatcher.dispatch()) {
+      // Run only one module
+      module0.run();
+    }
 
-		dispatcher.finalize();
-	}
+    dispatcher.finalize();
+  }
 };
