@@ -113,24 +113,24 @@ class Scheduled {
   /**
    * @param sync True if the buffer is send sychronized
    */
-  virtual void _addBuffer(bool sync) = 0;
+  virtual void addBufferInternal(bool sync) = 0;
 
-  virtual void _resizeBuffer(unsigned int id) = 0;
+  virtual void resizeBufferInternal(unsigned int id) = 0;
 
-  virtual void _removeBuffer(unsigned int id) = 0;
+  virtual void removeBufferInternal(unsigned int id) = 0;
 
-  virtual void _execInit(const void* parameter) = 0;
+  virtual void execInitInternal(const void* parameter) = 0;
 
   virtual void* getBufferPos(unsigned int id, int rank, int size) = 0;
 
-  virtual void _exec(const void* parameter) = 0;
+  virtual void execInternal(const void* parameter) = 0;
 
   /**
    * Wait on the executor for the call to finish
    */
-  virtual void _wait() = 0;
+  virtual void waitInternal() = 0;
 
-  virtual void _finalize() = 0;
+  virtual void finalizeInternal() = 0;
 };
 
 /**
@@ -272,7 +272,7 @@ class MPIScheduler {
           // Stop everything immediately (probably some finalizes were missing)
           for (auto& call : m_asyncCalls) {
             if (call) {
-              call->_finalize();
+              call->finalizeInternal();
               call = 0;
             }
           }
@@ -358,37 +358,37 @@ class MPIScheduler {
       switch (tag) {
       case ADD_TAG:
         MPI_Barrier(m_privateGroupComm);
-        m_asyncCalls[id]->_addBuffer(sync);
+        m_asyncCalls[id]->addBufferInternal(sync);
         break;
       case RESIZE_TAG:
         MPI_Barrier(m_privateGroupComm);
-        m_asyncCalls[id]->_resizeBuffer(bufferId);
+        m_asyncCalls[id]->resizeBufferInternal(bufferId);
         break;
       case REMOVE_TAG:
         MPI_Barrier(m_privateGroupComm);
-        m_asyncCalls[id]->_removeBuffer(bufferId);
+        m_asyncCalls[id]->removeBufferInternal(bufferId);
         break;
       case INIT_TAG:
         MPI_Barrier(m_privateGroupComm);
-        m_asyncCalls[id]->_execInit(m_asyncCalls[id]->paramBuffer());
+        m_asyncCalls[id]->execInitInternal(m_asyncCalls[id]->paramBuffer());
         break;
       case PARAM_TAG:
         if (!m_asyncCalls[id]->useAsyncCopy()) {
           MPI_Barrier(m_privateGroupComm);
         }
-        m_asyncCalls[id]->_exec(m_asyncCalls[id]->paramBuffer());
+        m_asyncCalls[id]->execInternal(m_asyncCalls[id]->paramBuffer());
         break;
       case WAIT_TAG:
         MPI_Barrier(m_privateGroupComm);
-        m_asyncCalls[id]->_wait();
-        // This barrier can probably be called before _wait()
+        m_asyncCalls[id]->waitInternal();
+        // This barrier can probably be called before waitInternal()
         // Just leave it here to be 100% sure that everything is done
         // when the wait returns
         MPI_Barrier(m_privateGroupComm);
         break;
       case FINALIZE_TAG:
         // Forget the async call
-        m_asyncCalls[id]->_finalize();
+        m_asyncCalls[id]->finalizeInternal();
         m_asyncCalls[id] = 0L;
         finalized++;
         break;

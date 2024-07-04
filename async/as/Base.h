@@ -97,7 +97,7 @@ class Base : public async::ExecInfo {
   Base() : m_executor(0L), m_finalized(false), m_alignment(async::Config::alignment()) {}
 
   public:
-  virtual ~Base() { _finalize(); }
+  virtual ~Base() { finalizeInternal(); }
 
   /**
    * Only required in asynchronous MPI mode
@@ -154,7 +154,7 @@ class Base : public async::ExecInfo {
     m_buffer[id].origin = 0L;
     free(m_buffer[id].buffer);
     m_buffer[id].buffer = 0L;
-    async::ExecInfo::_removeBuffer(id);
+    async::ExecInfo::removeBufferInternal(id);
   }
 
   /**
@@ -165,8 +165,8 @@ class Base : public async::ExecInfo {
    */
   virtual void* managedBuffer(unsigned int id) {
     if (origin(id) == 0L) {
-      assert(_buffer(id) != nullptr || async::ExecInfo::bufferSize(id) == 0);
-      return _buffer(id);
+      assert(bufferInternal(id) != nullptr || async::ExecInfo::bufferSize(id) == 0);
+      return bufferInternal(id);
     }
 
     return 0L;
@@ -178,20 +178,20 @@ class Base : public async::ExecInfo {
   virtual void sendBuffer(unsigned int id, size_t size) = 0;
 
   virtual void callInit(const InitParameter& parameters) {
-    _callInit<Executor, InitParameter>(parameters);
+    callInitInternal<Executor, InitParameter>(parameters);
   }
 
-  virtual void call(const Parameter& parameters) { _call<Executor, Parameter>(parameters); }
+  virtual void call(const Parameter& parameters) { callInternal<Executor, Parameter>(parameters); }
 
-  virtual void wait() { _callWait<Executor, Parameter>(); }
+  virtual void wait() { callWaitInternal<Executor, Parameter>(); }
 
-  virtual void finalize() { _finalize(); }
+  virtual void finalize() { finalizeInternal(); }
 
   protected:
   Executor& executor() { return *m_executor; }
 
-  unsigned int _addBuffer(const void* origin, size_t size, bool allocate = true) {
-    async::ExecInfo::_addBuffer(size);
+  unsigned int addBufferInternal(const void* origin, size_t size, bool allocate = true) {
+    async::ExecInfo::addBufferInternal(size);
 
     BufInfo buffer;
     buffer.origin = origin;
@@ -215,7 +215,7 @@ class Base : public async::ExecInfo {
     return m_buffer.size() - 1;
   }
 
-  void _resizeBuffer(unsigned int id, const void* origin, size_t size) {
+  void resizeBufferInternal(unsigned int id, const void* origin, size_t size) {
     assert(id < numBuffers());
     if (origin && m_buffer[id].origin) {
       m_buffer[id].origin = origin;
@@ -225,7 +225,7 @@ class Base : public async::ExecInfo {
       return;
     }
 
-    async::ExecInfo::_resizeBuffer(id, size);
+    async::ExecInfo::resizeBufferInternal(id, size);
 
     if (size && m_buffer[id].buffer) {
       if (m_alignment > 0) {
@@ -248,7 +248,7 @@ class Base : public async::ExecInfo {
     return static_cast<const uint8_t*>(m_buffer[id].origin);
   }
 
-  const void* _buffer(unsigned int id) const {
+  const void* bufferInternal(unsigned int id) const {
     assert(id < numBuffers());
     return m_buffer[id].buffer;
   }
@@ -256,7 +256,7 @@ class Base : public async::ExecInfo {
   /**
    * Return u_int8_t to allow arithmetic on the pointer
    */
-  uint8_t* _buffer(unsigned int id) {
+  uint8_t* bufferInternal(unsigned int id) {
     assert(id < numBuffers());
     return static_cast<uint8_t*>(m_buffer[id].buffer);
   }
@@ -266,7 +266,7 @@ class Base : public async::ExecInfo {
    *
    * @return False if the class was already finalized
    */
-  bool _finalize() {
+  bool finalizeInternal() {
     if (m_finalized)
       return false;
 
@@ -274,7 +274,7 @@ class Base : public async::ExecInfo {
       m_buffer[i].origin = 0L;
       free(m_buffer[i].buffer);
       m_buffer[i].buffer = 0L;
-      async::ExecInfo::_removeBuffer(i);
+      async::ExecInfo::removeBufferInternal(i);
     }
 
     m_finalized = true;
@@ -295,36 +295,36 @@ class Base : public async::ExecInfo {
 
   private:
   template <typename E, typename P>
-  typename std::enable_if_t<execInitHasExec<E, P>::value> _callInit(const P& parameters) {
+  typename std::enable_if_t<execInitHasExec<E, P>::value> callInitInternal(const P& parameters) {
     const ExecInfo& info = *this;
     m_executor->execInit(info, parameters);
   }
 
   template <typename E, typename P>
-  typename std::enable_if_t<!execInitHasExec<E, P>::value> _callInit(const P& parameters) {
+  typename std::enable_if_t<!execInitHasExec<E, P>::value> callInitInternal(const P& parameters) {
     m_executor->execInit(parameters);
   }
 
   template <typename E, typename P>
-  typename std::enable_if_t<execHasExec<E, P>::value> _call(const P& parameters) {
+  typename std::enable_if_t<execHasExec<E, P>::value> callInternal(const P& parameters) {
     const ExecInfo& info = *this;
     m_executor->exec(info, parameters);
   }
 
   template <typename E, typename P>
-  typename std::enable_if_t<!execHasExec<E, P>::value> _call(const P& parameters) {
+  typename std::enable_if_t<!execHasExec<E, P>::value> callInternal(const P& parameters) {
     m_executor->exec(parameters);
   }
 
   template <typename E, typename P>
-  typename std::enable_if_t<execWaitHasExec<E, P>::value> _callWait() {
+  typename std::enable_if_t<execWaitHasExec<E, P>::value> callWaitInternal() {
     const ExecInfo& info = *this;
     m_executor->execWait(info);
   }
 
   template <typename E, typename P>
   typename std::enable_if_t<!execWaitHasNoExec<E, P>::value && !execWaitHasExec<E, P>::value>
-      _callWait() {}
+      callWaitInternal() {}
 };
 
 } // namespace as

@@ -85,17 +85,17 @@ class ExecInfo {
   virtual const void* buffer(unsigned int id) const = 0;
 
   protected:
-  void _addBuffer(size_t size) {
+  void addBufferInternal(size_t size) {
     m_bufferSize.push_back(size);
     m_bufferOrigin.push_back(hostBuffer);
   }
 
-  void _resizeBuffer(unsigned int id, size_t size) {
+  void resizeBufferInternal(unsigned int id, size_t size) {
     assert(id < numBuffers());
     m_bufferSize[id] = size;
   }
 
-  void _removeBuffer(unsigned int id) {
+  void removeBufferInternal(unsigned int id) {
     assert(id < numBuffers());
     m_bufferSize[id] = 0;
   }

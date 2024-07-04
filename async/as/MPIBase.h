@@ -186,7 +186,7 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   }
 
   void finalize() {
-    if (!Base<Executor, InitParameter, Parameter>::_finalize())
+    if (!Base<Executor, InitParameter, Parameter>::finalizeInternal())
       return;
 
     if (m_id >= 0 && !m_scheduler->isExecutor())
@@ -208,7 +208,7 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
 
     m_scheduler->addBuffer(m_id, Base<Executor, InitParameter, Parameter>::numBuffers());
 
-    return _addBuffer(buffer, size, clone, sync);
+    return addBufferInternal(buffer, size, clone, sync);
   }
 
   void resizeBuffer(unsigned int id, const void* buffer, size_t size) {
@@ -216,11 +216,11 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
     assert(!m_scheduler->isExecutor());
 
     // Resize the buffer on the compute node
-    Base<Executor, InitParameter, Parameter>::_resizeBuffer(id, buffer, size);
+    Base<Executor, InitParameter, Parameter>::resizeBufferInternal(id, buffer, size);
 
     m_scheduler->resizeBuffer(m_id, id);
 
-    _resizeBuffer(id, buffer, size);
+    resizeBufferInternal(id, buffer, size);
   }
 
   bool isClone(unsigned int id) const { return m_buffer[id].clone; }
@@ -259,10 +259,12 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
 
   unsigned int numBufferChunks() const override { return m_numBufferChunks; }
 
-  void _addBuffer(bool sync) override { _addBuffer(0L, 0, false, sync); }
+  void addBufferInternal(bool sync) override { addBufferInternal(0L, 0, false, sync); }
 
-  unsigned int
-      _addBuffer(const void* origin, unsigned long size, bool clone = false, bool sync = true) {
+  unsigned int addBufferInternal(const void* origin,
+                                 unsigned long size,
+                                 bool clone = false,
+                                 bool sync = true) {
     // If this buffer is a clone, only the first rank will send it
     if (clone && m_scheduler->groupRank() != 0)
       size = 0;
@@ -332,9 +334,9 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
     return Base<Executor, InitParameter, Parameter>::numBuffers() - 1;
   }
 
-  void _resizeBuffer(unsigned int id) override { _resizeBuffer(id, 0L, 0); }
+  void resizeBufferInternal(unsigned int id) override { resizeBufferInternal(id, 0L, 0); }
 
-  void _resizeBuffer(unsigned int id, const void* buffer, size_t size) {
+  void resizeBufferInternal(unsigned int id, const void* buffer, size_t size) {
     if (!m_scheduler->isExecutor()) {
       if (m_buffer[id].clone && m_scheduler->groupRank() != 0)
         size = 0;
@@ -387,7 +389,7 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
     }
   }
 
-  void _removeBuffer(unsigned int id) override {
+  void removeBufferInternal(unsigned int id) override {
     assert(id < m_executorBuffer.size());
 
     m_numBufferChunks -= m_executorBuffer[id].bufferChunks;
@@ -406,30 +408,31 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
     assert(bufferOffset(id, rank) + size <=
            (Base<Executor, InitParameter, Parameter>::bufferSize(id)));
 
-    void* buf = Base<Executor, InitParameter, Parameter>::_buffer(id) + bufferOffset(id, rank);
+    void* buf =
+        Base<Executor, InitParameter, Parameter>::bufferInternal(id) + bufferOffset(id, rank);
     m_executorBuffer[id].positions[rank] += size;
     return buf;
   }
 
-  void _execInit(const void* paramBuffer) override {
+  void execInitInternal(const void* paramBuffer) override {
     const InitParameter* param = reinterpret_cast<const InitParameter*>(paramBuffer);
     Base<Executor, InitParameter, Parameter>::callInit(*param);
 
     resetBufferPositionOnExecutor();
   }
 
-  void _exec(const void* paramBuffer) override {
+  void execInternal(const void* paramBuffer) override {
     const Parameter* param = reinterpret_cast<const Parameter*>(paramBuffer);
     ThreadBase<Executor, InitParameter, Parameter>::call(*param);
   }
 
-  void _wait() override {
+  void waitInternal() override {
     ThreadBase<Executor, InitParameter, Parameter>::wait();
 
     resetBufferPositionOnExecutor();
   }
 
-  void _finalize() override {
+  void finalizeInternal() override {
     for (auto& execBuffer : m_executorBuffer) {
       delete[] execBuffer.offsets;
       execBuffer.offsets = 0L;

@@ -165,7 +165,7 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
   void setAffinityIfNecessary(const CpuMask& cpuSet) override { setAffinity(cpuSet); }
 
   unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) override {
-    unsigned int id = Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size);
+    unsigned int id = Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size);
 
     // Now, initialize the buffer on the executor thread with zeros
     if (m_phase == EXEC_PHASE) {
@@ -185,7 +185,7 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
   }
 
   void resizeBuffer(unsigned int id, const void* buffer, size_t size) override {
-    Base<Executor, InitParameter, Parameter>::_resizeBuffer(id, buffer, size);
+    Base<Executor, InitParameter, Parameter>::resizeBufferInternal(id, buffer, size);
 
     assert(m_phase != EXEC_PHASE);
 
@@ -200,7 +200,7 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
   }
 
   const void* buffer(unsigned int id) const {
-    return Base<Executor, InitParameter, Parameter>::_buffer(id);
+    return Base<Executor, InitParameter, Parameter>::bufferInternal(id);
   }
 
   /**
@@ -227,7 +227,7 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
   }
 
   void finalize() override {
-    if (!Base<Executor, InitParameter, Parameter>::_finalize())
+    if (!Base<Executor, InitParameter, Parameter>::finalizeInternal())
       return;
 
     // Shutdown the thread
@@ -237,12 +237,12 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
   }
 
   private:
-  void _wait() { Base<Executor, InitParameter, Parameter>::wait(); }
+  void waitInternal() { Base<Executor, InitParameter, Parameter>::wait(); }
 
   /**
    * Wrapper for the parent class because parent class function cannot be called directly
    */
-  void _call(const Parameter& parameters) {
+  void callInternal(const Parameter& parameters) {
     Base<Executor, InitParameter, Parameter>::call(parameters);
   }
 
@@ -260,18 +260,18 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
         break;
 
       if (async->m_waiting) {
-        async->_wait();
+        async->waitInternal();
         async->m_waiting = false;
       } else if (async->m_initBuffer >= 0) {
         // Touch the memory on this thread
         unsigned int id = async->m_initBuffer;
-        memset(async->_buffer(id), 0, async->bufferSize(id));
+        memset(async->bufferInternal(id), 0, async->bufferSize(id));
         async->m_initBuffer = -1;
 
         // Done
         unlock_spinlock(&async->m_initBufferLock);
       } else
-        async->_call(async->m_nextParams);
+        async->callInternal(async->m_nextParams);
 
       unlock_spinlock(&async->m_writerLock);
     }

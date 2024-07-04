@@ -60,7 +60,7 @@ class MPI : public MPIBase<Executor, InitParameter, Parameter> {
 
   unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false) override {
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone);
-    return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
+    return Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, false);
   }
 
   unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) override {
@@ -68,7 +68,7 @@ class MPI : public MPIBase<Executor, InitParameter, Parameter> {
       MPIBase<Executor, InitParameter, Parameter>::scheduler().addManagedBuffer(size);
 
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone);
-    return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
+    return Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, false);
   }
 
   void resizeBuffer(unsigned int id, const void* buffer, size_t size) override {

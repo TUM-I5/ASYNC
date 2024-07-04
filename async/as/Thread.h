@@ -118,7 +118,8 @@ class Thread : public ThreadBase<Executor, InitParameter, Parameter> {
   }
 
   unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false) override {
-    unsigned int id = Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
+    unsigned int id =
+        Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, false);
     BufInfo bufInfo;
     bufInfo.init = true;
     bufInfo.position = 0;
@@ -157,14 +158,14 @@ class Thread : public ThreadBase<Executor, InitParameter, Parameter> {
       return;
     }
 
-    assert((Base<Executor, InitParameter, Parameter>::_buffer(id)));
+    assert((Base<Executor, InitParameter, Parameter>::bufferInternal(id)));
 
     if (Base<Executor, InitParameter, Parameter>::origin(id)) {
       assert(m_buffer[id].position + size <=
              (Base<Executor, InitParameter, Parameter>::bufferSize(id)));
 
       async::ExecInfo::bufferOrigin(id).copyFrom(
-          Base<Executor, InitParameter, Parameter>::_buffer(id) + m_buffer[id].position,
+          Base<Executor, InitParameter, Parameter>::bufferInternal(id) + m_buffer[id].position,
           Base<Executor, InitParameter, Parameter>::origin(id) + m_buffer[id].position,
           size);
     }

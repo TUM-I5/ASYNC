@@ -55,15 +55,15 @@ class Sync : public Base<Executor, InitParameter, Parameter> {
   ~Sync() = default;
 
   unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false) override {
-    return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
+    return Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, false);
   }
 
   unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) override {
-    return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, buffer == 0L);
+    return Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, buffer == 0L);
   }
 
   void resizeBuffer(unsigned int id, const void* buffer, size_t size) override {
-    Base<Executor, InitParameter, Parameter>::_resizeBuffer(id, buffer, size);
+    Base<Executor, InitParameter, Parameter>::resizeBufferInternal(id, buffer, size);
   }
 
   const void* buffer(unsigned int id) const override {
@@ -72,14 +72,14 @@ class Sync : public Base<Executor, InitParameter, Parameter> {
       return Base<Executor, InitParameter, Parameter>::origin(id);
     }
 
-    return Base<Executor, InitParameter, Parameter>::_buffer(id);
+    return Base<Executor, InitParameter, Parameter>::bufferInternal(id);
   }
 
   void sendBuffer(unsigned int id, size_t size) override {
     if (Base<Executor, InitParameter, Parameter>::origin(id) &&
         !async::ExecInfo::bufferOrigin(id).transparentHost()) {
       async::ExecInfo::bufferOrigin(id).copyFrom(
-          Base<Executor, InitParameter, Parameter>::_buffer(id),
+          Base<Executor, InitParameter, Parameter>::bufferInternal(id),
           Base<Executor, InitParameter, Parameter>::origin(id),
           async::ExecInfo::bufferSize(id));
     }

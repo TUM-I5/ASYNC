@@ -89,7 +89,8 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
 
   unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false) {
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone);
-    unsigned int id = Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
+    unsigned int id =
+        Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, false);
 
     // We directly send sync buffers
     BufInfo bufInfo;
@@ -107,7 +108,7 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
    */
   unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) override {
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone, false);
-    unsigned int id = Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size);
+    unsigned int id = Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size);
 
     // Initialize the requests
     unsigned int requests = 0;
@@ -163,7 +164,7 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
       return MPIBase<Executor, InitParameter, Parameter>::buffer(id);
     }
 
-    return Base<Executor, InitParameter, Parameter>::_buffer(id);
+    return Base<Executor, InitParameter, Parameter>::bufferInternal(id);
   }
 
   /**
@@ -197,7 +198,7 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
 
     if (Base<Executor, InitParameter, Parameter>::origin(id)) {
       async::ExecInfo::bufferOrigin(id).copyFrom(
-          Base<Executor, InitParameter, Parameter>::_buffer(id) +
+          Base<Executor, InitParameter, Parameter>::bufferInternal(id) +
               MPIBase<Executor, InitParameter, Parameter>::bufferPos(id),
           Base<Executor, InitParameter, Parameter>::origin(id) +
               MPIBase<Executor, InitParameter, Parameter>::bufferPos(id),
@@ -247,7 +248,7 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
         MPIRequest2 requests = MPIBase<Executor, InitParameter, Parameter>::scheduler().iSendBuffer(
             MPIBase<Executor, InitParameter, Parameter>::id(),
             i,
-            Base<Executor, InitParameter, Parameter>::_buffer(i) + done,
+            Base<Executor, InitParameter, Parameter>::bufferInternal(i) + done,
             send);
         done += send;
 

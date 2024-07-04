@@ -156,7 +156,7 @@ class BufferModule : private async::Module<BufferModule, Param, Param> {
     if (async::Config::mode() == async::MPI) {
       // Set the params on non-executors
       execInit(param);
-      _exec(param, false);
+      execInternal(param, false);
     }
 
     wait();
@@ -166,14 +166,14 @@ class BufferModule : private async::Module<BufferModule, Param, Param> {
 
   void execInit(const Param& param) { m_initBufferSize = bufferSize(0); }
 
-  void exec(const async::ExecInfo& info, const Param& param) { _exec(param); }
+  void exec(const async::ExecInfo& info, const Param& param) { execInternal(param); }
 
   void setUp() { setExecutor(*this); }
 
   void tearDown() {}
 
   private:
-  void _exec(const Param& param, bool isExecutor = true) {
+  void execInternal(const Param& param, bool isExecutor = true) {
     m_bufferSize = bufferSize(1);
     for (unsigned int i = 0; i < m_bufferSize / sizeof(int); i++) {
       TS_ASSERT_EQUALS(42, *(static_cast<const int*>(buffer(1)) + i));
@@ -226,7 +226,7 @@ class ResizeBufferModule : private async::Module<ResizeBufferModule, Param, Para
 
     if (async::Config::mode() == async::MPI) {
       // Set the params on non-executors
-      _exec(param, false);
+      execInternal(param, false);
     }
 
     wait();
@@ -244,7 +244,7 @@ class ResizeBufferModule : private async::Module<ResizeBufferModule, Param, Para
 
     if (async::Config::mode() == async::MPI) {
       // Set the params on non-executors
-      _exec(param, false);
+      execInternal(param, false);
     }
 
     wait();
@@ -254,14 +254,14 @@ class ResizeBufferModule : private async::Module<ResizeBufferModule, Param, Para
 
   void execInit(const Param& param) {}
 
-  void exec(const async::ExecInfo& info, const Param& param) { _exec(param); }
+  void exec(const async::ExecInfo& info, const Param& param) { execInternal(param); }
 
   void setUp() { setExecutor(*this); }
 
   void tearDown() {}
 
   private:
-  void _exec(const Param& param, bool isExecutor = true) {
+  void execInternal(const Param& param, bool isExecutor = true) {
     m_buffer0Size[param.step] = bufferSize(0);
     m_buffer1Size[param.step] = bufferSize(1);
     switch (param.step) {
