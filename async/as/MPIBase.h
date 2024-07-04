@@ -249,7 +249,8 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
     return std::max(sizeof(InitParameter), sizeof(Parameter));
   }
 
-  bool useAsyncCopy() const override {}
+  // (we require an explicit forward declaration here, to prevent errors due to overloading)
+  bool useAsyncCopy() const override = 0;
 
   bool useAsyncCopy(unsigned int id) const override {
     assert(id < m_executorBuffer.size());
