@@ -71,14 +71,6 @@ namespace as {
     static bool const value = sizeof(chk<T>(0)) == sizeof(yes);                                    \
   }
 
-template <bool C, typename T = void>
-struct enable_if {
-  typedef T type;
-};
-
-template <typename T>
-struct enable_if<false, T> {};
-
 } // namespace as
 
 } // namespace async

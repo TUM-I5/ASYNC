@@ -295,35 +295,35 @@ class Base : public async::ExecInfo {
 
   private:
   template <typename E, typename P>
-  typename enable_if<execInitHasExec<E, P>::value>::type _callInit(const P& parameters) {
+  typename std::enable_if_t<execInitHasExec<E, P>::value> _callInit(const P& parameters) {
     const ExecInfo& info = *this;
     m_executor->execInit(info, parameters);
   }
 
   template <typename E, typename P>
-  typename enable_if<!execInitHasExec<E, P>::value>::type _callInit(const P& parameters) {
+  typename std::enable_if_t<!execInitHasExec<E, P>::value> _callInit(const P& parameters) {
     m_executor->execInit(parameters);
   }
 
   template <typename E, typename P>
-  typename enable_if<execHasExec<E, P>::value>::type _call(const P& parameters) {
+  typename std::enable_if_t<execHasExec<E, P>::value> _call(const P& parameters) {
     const ExecInfo& info = *this;
     m_executor->exec(info, parameters);
   }
 
   template <typename E, typename P>
-  typename enable_if<!execHasExec<E, P>::value>::type _call(const P& parameters) {
+  typename std::enable_if_t<!execHasExec<E, P>::value> _call(const P& parameters) {
     m_executor->exec(parameters);
   }
 
   template <typename E, typename P>
-  typename enable_if<execWaitHasExec<E, P>::value>::type _callWait() {
+  typename std::enable_if_t<execWaitHasExec<E, P>::value> _callWait() {
     const ExecInfo& info = *this;
     m_executor->execWait(info);
   }
 
   template <typename E, typename P>
-  typename enable_if<!execWaitHasNoExec<E, P>::value && !execWaitHasExec<E, P>::value>::type
+  typename std::enable_if_t<!execWaitHasNoExec<E, P>::value && !execWaitHasExec<E, P>::value>
       _callWait() {}
 };
 
