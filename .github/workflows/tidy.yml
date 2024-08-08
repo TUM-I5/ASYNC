@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2024 Technical University of Munich
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 name: clang-tidy
 on:
   - push
@@ -34,6 +38,6 @@ jobs:
           which clang-tidy-18
           git submodule update --init
           mkdir -p build && cd build
-          CMAKE_PREFIX_PATH=/opt/dependencies cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DTESTING=ON -DUSE_MPI=ON
           sed -i 's/-fprofile-abs-path //g' compile_commands.json
           run-clang-tidy ../ ./ -clang-tidy-binary=$(which clang-tidy-18) -quiet -j $(nproc)

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2016-2024 Technical University of Munich
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 # Copyright (c) 2016-2024, Technische Universitaet Muenchen
 # All rights reserved.
 #

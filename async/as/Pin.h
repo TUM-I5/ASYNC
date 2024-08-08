@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2016-2024 Technical University of Munich
+//
+// SPDX-License-Identifier: BSD-3-Clause
+
 #ifndef ASYNC_AS_PIN_H
 #define ASYNC_AS_PIN_H
 
