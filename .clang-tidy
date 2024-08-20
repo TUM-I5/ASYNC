@@ -195,8 +195,8 @@ CheckOptions:
 #    value:           CamelCase
 #  - key:             readability-identifier-naming.PrivateMemberCase
 #    value:           CamelCase
-#  - key:             readability-identifier-naming.PrivateMemberPrefix
-#    value:           CamelCase
+  - key:             readability-identifier-naming.PrivateMemberPrefix
+    value:           "m_"
 #  - key:             readability-identifier-naming.PrivateMemberSuffix
 #    value:           CamelCase
 #  - key:             readability-identifier-naming.PrivateMethodCase

@@ -29,7 +29,7 @@ jobs:
           cd build-nompi
           cmake .. -GNinja -DUSE_MPI=OFF -DTESTING=ON
           ninja
-          ninja test
+          ctest --rerun-failed --output-on-failure
           cd ..
 
       - name: build-mpi
@@ -38,5 +38,5 @@ jobs:
           cd build-mpi
           cmake .. -GNinja -DUSE_MPI=ON -DTESTING=ON
           ninja
-          ninja test
+          ctest --rerun-failed --output-on-failure
           cd ..
