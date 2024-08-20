@@ -69,7 +69,8 @@ class Module : private async::Module<Module, Param, Param> {
   void run() {
     init();
 
-    const Param param;
+    const auto param = Param{0};
+
     callInit(param);
 
     wait();
@@ -141,7 +142,8 @@ class BufferModule : private async::Module<BufferModule, Param, Param> {
     int* managedBuffer = async::Module<BufferModule, Param, Param>::managedBuffer<int*>(4);
     TS_ASSERT_DIFFERS(managedBuffer, static_cast<int*>(0L));
 
-    const Param param;
+    const auto param = Param{0};
+
     callInit(param);
 
     wait();
@@ -217,7 +219,8 @@ class ResizeBufferModule : private async::Module<ResizeBufferModule, Param, Para
     int buffer1[2] = {1, 2};
     addBuffer(buffer1, 2 * sizeof(int), true);
 
-    Param param;
+    auto param = Param{0};
+
     callInit(param);
 
     wait();
@@ -303,7 +306,8 @@ class RemoveBufferModule : private async::Module<RemoveBufferModule, Param, Para
 
     addBuffer(0L, sizeof(int));
 
-    const Param param;
+    const auto param = Param{0};
+
     callInit(param);
 
     wait();

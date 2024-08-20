@@ -64,7 +64,9 @@ function( add_mpi_cxx_test target source ranks )
     add_executable(${target} ${CPP_FULL_NAME})
     set_target_properties(${target} PROPERTIES COMPILE_FLAGS "-Wno-effc++")
     target_link_libraries( ${target} PRIVATE ASYNC )
-    add_test( NAME ${target} COMMAND ${MPIEXEC} ${MPIEXEC_PREFLAGS}
+
+    # TODO: make --oversubscribe optional here
+    add_test( NAME ${target} COMMAND ${MPIEXEC} ${MPIEXEC_PREFLAGS} --oversubscribe
         ${MPIEXEC_NUMPROC_FLAG} ${ranks} ${CMAKE_CURRENT_BINARY_DIR}/${target} )
     set_tests_properties( ${target} PROPERTIES TIMEOUT ${test_timeout} ) # Detect deadlocks
 endfunction( add_mpi_cxx_test )
