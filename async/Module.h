@@ -54,8 +54,8 @@
 #include "async/as/MPIAsync.h"
 #endif // USE_MPI
 #include "async/as/Pin.h"
-#include "async/as/Thread.h"
 #include "async/as/Sync.h"
+#include "async/as/Thread.h"
 
 #include "Config.h"
 #include "ModuleBase.h"

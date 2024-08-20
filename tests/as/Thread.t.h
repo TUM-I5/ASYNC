@@ -40,13 +40,13 @@
 
 #include <cxxtest/TestSuite.h>
 
-#include <pthread.h>
 #include <cstdlib>
 #include <ctime>
+#include <pthread.h>
 #include <sys/sysinfo.h>
 
-#include "async/as/Thread.h"
 #include "Executor.h"
+#include "async/as/Thread.h"
 
 class TestThread : public CxxTest::TestSuite {
   private:
@@ -62,7 +62,7 @@ class TestThread : public CxxTest::TestSuite {
     pthread_spin_unlock(&m_lock);
   }
 
-  void setUp() {
+  void setUp() override {
     pthread_spin_init(&m_lock, PTHREAD_PROCESS_PRIVATE);
     m_value = 0;
   }
@@ -129,7 +129,7 @@ class TestThread : public CxxTest::TestSuite {
 
     // Set affinity (choose a random CPU)
     srand(time(0L));
-    int cpu = rand() % get_nprocs();
+    const int cpu = rand() % get_nprocs();
     async::as::CpuMask mask;
 #ifndef __APPLE__
     CPU_ZERO(&mask.set);
@@ -138,7 +138,7 @@ class TestThread : public CxxTest::TestSuite {
     async.setAffinity(mask);
 
     async.wait();
-    Parameter parameter;
+    const Parameter parameter;
     async.call(parameter);
 
     async.wait();
@@ -253,7 +253,7 @@ class TestThread : public CxxTest::TestSuite {
 
     async.sendBuffer(0, sizeof(int));
 
-    Parameter parameter;
+    const Parameter parameter;
     async.callInit(parameter);
 
     async.wait();

@@ -40,8 +40,8 @@
 
 #include <cxxtest/TestSuite.h>
 
-#include "async/as/Sync.h"
 #include "Executor.h"
+#include "async/as/Sync.h"
 
 class Param;
 class TestSync : public CxxTest::TestSuite {

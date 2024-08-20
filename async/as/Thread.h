@@ -48,8 +48,8 @@
 #include <sys/sysinfo.h>
 #endif // __APPLE__
 
-#include "async/Config.h"
 #include "ThreadBase.h"
+#include "async/Config.h"
 
 namespace async {
 
@@ -79,9 +79,9 @@ class Thread : public ThreadBase<Executor, InitParameter, Parameter> {
   public:
   Thread() = default;
 
-  ~Thread() = default;
+  ~Thread() override = default;
 
-  void setExecutor(Executor& executor) {
+  void setExecutor(Executor& executor) override {
     ThreadBase<Executor, InitParameter, Parameter>::setExecutor(executor);
 #ifndef __APPLE__
 
@@ -122,7 +122,7 @@ class Thread : public ThreadBase<Executor, InitParameter, Parameter> {
   }
 
   unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false) override {
-    unsigned int id =
+    const unsigned int id =
         Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, false);
     BufInfo bufInfo;
     bufInfo.init = true;
@@ -135,7 +135,7 @@ class Thread : public ThreadBase<Executor, InitParameter, Parameter> {
   }
 
   unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) override {
-    unsigned int id = ThreadBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size);
+    const unsigned int id = ThreadBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size);
     BufInfo bufInfo;
     bufInfo.init = false;
     bufInfo.position = 0;
@@ -149,13 +149,14 @@ class Thread : public ThreadBase<Executor, InitParameter, Parameter> {
   const void* buffer(unsigned int id) const override {
     assert(id < m_buffer.size());
 
-    if (m_buffer[id].init)
+    if (m_buffer[id].init) {
       return Base<Executor, InitParameter, Parameter>::origin(id);
+    }
 
     return ThreadBase<Executor, InitParameter, Parameter>::buffer(id);
   }
 
-  void sendBuffer(unsigned int id, size_t size) {
+  void sendBuffer(unsigned int id, size_t size) override {
     assert(id < (Base<Executor, InitParameter, Parameter>::numBuffers()));
 
     if (m_buffer[id].init || size == 0) {
@@ -176,19 +177,19 @@ class Thread : public ThreadBase<Executor, InitParameter, Parameter> {
     m_buffer[id].position += size;
   }
 
-  void wait() {
+  void wait() override {
     ThreadBase<Executor, InitParameter, Parameter>::wait();
 
     resetBufferPosition();
   }
 
-  void callInit(const InitParameter& parameters) {
+  void callInit(const InitParameter& parameters) override {
     Base<Executor, InitParameter, Parameter>::callInit(parameters);
 
     resetBufferPosition();
   }
 
-  void call(const Parameter& parameters) {
+  void call(const Parameter& parameters) override {
     ThreadBase<Executor, InitParameter, Parameter>::call(parameters);
   }
 

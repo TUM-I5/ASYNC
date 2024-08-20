@@ -41,9 +41,7 @@
 #ifndef ASYNC_AS_MAGIC_H
 #define ASYNC_AS_MAGIC_H
 
-namespace async {
-
-namespace as {
+namespace async::as {
 
 /**
  * @class      : ASYNC_HAS_MEM_FUNC
@@ -75,8 +73,6 @@ namespace as {
     static bool const value = sizeof(chk<T>(0)) == sizeof(yes);                                    \
   }
 
-} // namespace as
-
-} // namespace async
+} // namespace async::as
 
 #endif // ASYNC_AS_MAGIC_H

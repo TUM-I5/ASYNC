@@ -60,7 +60,7 @@ class MPI : public MPIBase<Executor, InitParameter, Parameter> {
   public:
   MPI() = default;
 
-  ~MPI() = default;
+  ~MPI() override = default;
 
   unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false) override {
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone);
@@ -68,15 +68,16 @@ class MPI : public MPIBase<Executor, InitParameter, Parameter> {
   }
 
   unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) override {
-    if (buffer == 0L)
+    if (buffer == nullptr) {
       MPIBase<Executor, InitParameter, Parameter>::scheduler().addManagedBuffer(size);
+    }
 
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone);
     return Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, false);
   }
 
   void resizeBuffer(unsigned int id, const void* buffer, size_t size) override {
-    if (!Base<Executor, InitParameter, Parameter>::origin(id)) {
+    if (Base<Executor, InitParameter, Parameter>::origin(id) == nullptr) {
       // Resize the managed buffer
       MPIBase<Executor, InitParameter, Parameter>::scheduler().resizeManagedBuffer(
           Base<Executor, InitParameter, Parameter>::bufferSize(id), size);
@@ -86,23 +87,26 @@ class MPI : public MPIBase<Executor, InitParameter, Parameter> {
   }
 
   void removeBuffer(unsigned int id) override {
-    if (!Base<Executor, InitParameter, Parameter>::origin(id))
+    if (Base<Executor, InitParameter, Parameter>::origin(id) == nullptr) {
       MPIBase<Executor, InitParameter, Parameter>::scheduler().removeManagedBuffer(
           Base<Executor, InitParameter, Parameter>::bufferSize(id));
+    }
 
     MPIBase<Executor, InitParameter, Parameter>::removeBuffer(id);
   }
 
   void* managedBuffer(unsigned int id) override {
-    if (!Base<Executor, InitParameter, Parameter>::origin(id))
+    if (Base<Executor, InitParameter, Parameter>::origin(id) == nullptr) {
       return MPIBase<Executor, InitParameter, Parameter>::scheduler().managedBuffer();
+    }
 
-    return 0L;
+    return nullptr;
   }
 
   const void* buffer(unsigned int id) const override {
-    if (MPIBase<Executor, InitParameter, Parameter>::scheduler().isExecutor())
+    if (MPIBase<Executor, InitParameter, Parameter>::scheduler().isExecutor()) {
       return MPIBase<Executor, InitParameter, Parameter>::buffer(id);
+    }
 
     return Base<Executor, InitParameter, Parameter>::origin(id);
   }
@@ -116,7 +120,7 @@ class MPI : public MPIBase<Executor, InitParameter, Parameter> {
   }
 
   private:
-  bool useAsyncCopy() const { return false; }
+  bool useAsyncCopy() const override { return false; }
 };
 
 } // namespace as

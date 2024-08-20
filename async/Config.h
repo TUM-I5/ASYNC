@@ -114,8 +114,9 @@ class Config {
     std::string strMode(mode);
     utils::StringUtils::toUpper(strMode);
 
-    if (strMode == "THREAD")
+    if (strMode == "THREAD") {
       return THREAD;
+    }
     if (strMode == "MPI") {
 #ifdef USE_MPI
       return MPI;
@@ -123,8 +124,10 @@ class Config {
       logError() << "Asynchronous MPI is not supported without MPI";
 #endif // USE_MPI
     }
-    if (strMode != "SYNC")
-      logWarning() << "Unknown mode" << utils::nospace << strMode << ". Using synchronous mode.";
+    if (strMode != "SYNC") {
+      logWarning() << "Unknown mode" << utils::nospace << strMode
+                   << "for ASYNC output. Using synchronous mode.";
+    }
     return SYNC;
   }
 };

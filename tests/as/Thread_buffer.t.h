@@ -42,8 +42,8 @@
 
 #include <cmath>
 
-#include "async/as/Thread.h"
 #include "Executor.h"
+#include "async/as/Thread.h"
 
 class TestThread : public CxxTest::TestSuite {
   private:
@@ -71,7 +71,7 @@ class TestThread : public CxxTest::TestSuite {
     async.wait();
     async.sendBuffer(0, sizeof(int));
     TS_ASSERT_EQUALS(*reinterpret_cast<const int*>(async.buffer(0)), 42);
-    uintptr_t p = reinterpret_cast<uintptr_t>(async.buffer(0));
+    const uintptr_t p = reinterpret_cast<uintptr_t>(async.buffer(0));
     TS_ASSERT_EQUALS(p % 65536, 0);
   }
 };

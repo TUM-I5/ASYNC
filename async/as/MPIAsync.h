@@ -89,11 +89,11 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
     m_asyncRequests.push_back(MPI_REQUEST_NULL);
   }
 
-  ~MPIAsync() = default;
+  ~MPIAsync() override = default;
 
-  unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false) {
+  unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false) override {
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone);
-    unsigned int id =
+    const unsigned int id =
         Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, false);
 
     // We directly send sync buffers
@@ -112,7 +112,8 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
    */
   unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) override {
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone, false);
-    unsigned int id = Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size);
+    const unsigned int id =
+        Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size);
 
     // Initialize the requests
     unsigned int requests = 0;
@@ -186,8 +187,9 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
    * @param id The id of the buffer
    */
   void sendBuffer(unsigned int id, size_t size) override {
-    if (size == 0)
+    if (size == 0) {
       return;
+    }
 
     assert(id < (Base<Executor, InitParameter, Parameter>::numBuffers()));
 
@@ -233,7 +235,7 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
   }
 
   private:
-  bool useAsyncCopy() const { return true; }
+  bool useAsyncCopy() const override { return true; }
 
   /**
    * Sends all buffers asynchronously
@@ -247,13 +249,15 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
     for (unsigned int i = 0; i < Base<Executor, InitParameter, Parameter>::numBuffers(); i++) {
       size_t done = 0;
       for (unsigned int j = 0; j < m_buffer[i].requests; j++) {
-        size_t send = std::min(MPIBase<Executor, InitParameter, Parameter>::maxSend(),
-                               MPIBase<Executor, InitParameter, Parameter>::bufferPos(i) - done);
-        MPIRequest2 requests = MPIBase<Executor, InitParameter, Parameter>::scheduler().iSendBuffer(
-            MPIBase<Executor, InitParameter, Parameter>::id(),
-            i,
-            Base<Executor, InitParameter, Parameter>::bufferInternal(i) + done,
-            send);
+        const size_t send =
+            std::min(MPIBase<Executor, InitParameter, Parameter>::maxSend(),
+                     MPIBase<Executor, InitParameter, Parameter>::bufferPos(i) - done);
+        const MPIRequest2 requests =
+            MPIBase<Executor, InitParameter, Parameter>::scheduler().iSendBuffer(
+                MPIBase<Executor, InitParameter, Parameter>::id(),
+                i,
+                Base<Executor, InitParameter, Parameter>::bufferInternal(i) + done,
+                send);
         done += send;
 
         m_asyncRequests[nextRequest] = requests.r[0];

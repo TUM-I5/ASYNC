@@ -62,7 +62,7 @@ class ModuleBase {
   ModuleBase() { modules().push_back(this); }
 
   public:
-  virtual ~ModuleBase() {}
+  virtual ~ModuleBase() = default;
 
   /**
    * Called at initialization. Is also called by the {@link Dispatcher}

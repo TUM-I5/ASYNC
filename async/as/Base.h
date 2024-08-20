@@ -49,15 +49,13 @@
 #include "Pin.h"
 #include "utils/logger.h"
 
-#include "async/as/Pin.h"
+#include "Magic.h"
 #include "async/Config.h"
 #include "async/ExecInfo.h"
 #include "async/NoParam.h"
-#include "Magic.h"
+#include "async/as/Pin.h"
 
-namespace async {
-
-namespace as {
+namespace async::as {
 
 class MPIScheduler;
 
@@ -93,15 +91,15 @@ class Base : public async::ExecInfo {
   bool m_finalized;
 
   /** Aligment of buffers (might be requested for I/O back-ends) */
-  const size_t m_alignment;
+  const size_t mAlignment;
 
   Parameter m_lastParameters;
 
   protected:
-  Base() : m_executor(0L), m_finalized(false), m_alignment(async::Config::alignment()) {}
+  Base() : m_executor(0L), m_finalized(false), mAlignment(async::Config::alignment()) {}
 
   public:
-  virtual ~Base() { finalizeInternal(); }
+  ~Base() override { finalizeInternal(); }
 
   /**
    * Only required in asynchronous MPI mode
@@ -201,9 +199,9 @@ class Base : public async::ExecInfo {
     buffer.origin = origin;
 
     if (size && allocate) {
-      if (m_alignment > 0) {
+      if (mAlignment > 0) {
         const size_t allocBufferSize = allocSize(size);
-        int ret = posix_memalign(&buffer.buffer, m_alignment, allocBufferSize);
+        const int ret = posix_memalign(&buffer.buffer, mAlignment, allocBufferSize);
         if (ret)
           logError() << "Could not allocate buffer" << ret;
       } else {
@@ -232,10 +230,10 @@ class Base : public async::ExecInfo {
     async::ExecInfo::resizeBufferInternal(id, size);
 
     if (size && m_buffer[id].buffer) {
-      if (m_alignment > 0) {
+      if (mAlignment > 0) {
         const size_t allocBufferSize = allocSize(size);
         free(m_buffer[id].buffer);
-        int ret = posix_memalign(&m_buffer[id].buffer, m_alignment, allocBufferSize);
+        const int ret = posix_memalign(&m_buffer[id].buffer, mAlignment, allocBufferSize);
         if (ret)
           logError() << "Could not allocate buffer" << ret;
       } else {
@@ -291,8 +289,8 @@ class Base : public async::ExecInfo {
    */
   size_t allocSize(size_t size) {
     // Make the allocated buffer size a multiple of m_alignment
-    size_t allocBufferSize = (size + m_alignment - 1) / m_alignment;
-    allocBufferSize *= m_alignment;
+    size_t allocBufferSize = (size + mAlignment - 1) / mAlignment;
+    allocBufferSize *= mAlignment;
 
     return allocBufferSize;
   }
@@ -331,8 +329,6 @@ class Base : public async::ExecInfo {
       callWaitInternal() {}
 };
 
-} // namespace as
-
-} // namespace async
+} // namespace async::as
 
 #endif // ASYNC_AS_BASE_H

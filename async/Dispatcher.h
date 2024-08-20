@@ -90,8 +90,9 @@ class Dispatcher {
    * @deprecated Use {@link Config::setGroupSize}
    */
   void setGroupSize(unsigned int groupSize) {
-    if (Config::mode() == MPI)
+    if (Config::mode() == MPI) {
       m_groupSize = groupSize;
+    }
   }
 
   /**
@@ -102,14 +103,16 @@ class Dispatcher {
    */
   void init() {
 #ifdef USE_MPI
-    const std::vector<ModuleBase*>& modules = ModuleBase::modules();
+    const auto& modules = ModuleBase::modules();
     // Set the scheduler for all modules
-    for (std::vector<ModuleBase*>::const_iterator i = modules.begin(); i != modules.end(); ++i)
-      (*i)->setScheduler(m_scheduler);
+    for (const auto& module : modules) {
+      module->setScheduler(m_scheduler);
+    }
 
-    if (Config::mode() == MPI)
+    if (Config::mode() == MPI) {
       // Initialize the scheduler
       m_scheduler.setCommunicator(m_comm, m_groupSize);
+    }
 #endif // USE_MPI
   }
 
@@ -146,17 +149,19 @@ class Dispatcher {
   bool dispatch() {
 #ifdef USE_MPI
     if (m_scheduler.isExecutor()) {
-      const std::vector<ModuleBase*>& modules = ModuleBase::modules();
+      const auto& modules = ModuleBase::modules();
       // Initialize the executor modules
-      for (std::vector<ModuleBase*>::const_iterator i = modules.begin(); i != modules.end(); ++i)
-        (*i)->setUp();
+      for (const auto& module : modules) {
+        module->setUp();
+      }
 
       // Run the executor loop
       m_scheduler.loop();
 
       // Finalize the executor modules
-      for (std::vector<ModuleBase*>::const_iterator i = modules.begin(); i != modules.end(); ++i)
-        (*i)->tearDown();
+      for (const auto& module : modules) {
+        module->tearDown();
+      }
       return false;
     }
 #endif // USE_MPI

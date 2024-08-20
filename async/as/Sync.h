@@ -56,7 +56,7 @@ class Sync : public Base<Executor, InitParameter, Parameter> {
   public:
   Sync() = default;
 
-  ~Sync() = default;
+  ~Sync() override = default;
 
   unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false) override {
     return Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, false);

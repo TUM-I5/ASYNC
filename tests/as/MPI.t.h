@@ -42,8 +42,8 @@
 
 #include <vector>
 
-#include <cxxtest/TestSuite.h>
 #include <cxxtest/GlobalFixture.h>
+#include <cxxtest/TestSuite.h>
 
 #include "utils/env.h"
 
@@ -73,7 +73,7 @@ class LargeBuffer : public CxxTest::GlobalFixture {
   size_t m_size;
 
   public:
-  bool setUpWorld() {
+  bool setUpWorld() override {
     m_size = 1.5 * async::Config::maxSend();
     return true;
   }
@@ -97,7 +97,7 @@ class TestMPI : public CxxTest::TestSuite {
   bool m_largeBufferTest;
 
   public:
-  void setUp() {
+  void setUp() override {
     MPI_Comm_rank(MPI_COMM_WORLD, &m_rank);
 
     m_values.clear();
@@ -111,7 +111,7 @@ class TestMPI : public CxxTest::TestSuite {
     m_scheduler->setCommunicator(MPI_COMM_WORLD, 2);
   }
 
-  void tearDown() {
+  void tearDown() override {
     // MPI_Barrier(MPI_COMM_WORLD);
     delete m_scheduler;
 
@@ -125,7 +125,7 @@ class TestMPI : public CxxTest::TestSuite {
 
     if (m_largeBufferTest) {
       // Group size without the communicator
-      int groupSize = m_async->bufferSize(0) / largeBuffer.size();
+      const int groupSize = m_async->bufferSize(0) / largeBuffer.size();
       TS_ASSERT_LESS_THAN_EQUALS(1, groupSize);
       TS_ASSERT_LESS_THAN_EQUALS(groupSize, 2);
 
@@ -140,7 +140,7 @@ class TestMPI : public CxxTest::TestSuite {
       }
     } else if (m_async) {
       for (unsigned int i = 0; i < m_async->numBuffers(); i++) {
-        size_t size = m_async->bufferSize(i) / sizeof(int);
+        const size_t size = m_async->bufferSize(i) / sizeof(int);
         const int* buf = reinterpret_cast<const int*>(m_async->buffer(i));
 
         for (size_t j = 0; j < size; j++)
@@ -247,7 +247,7 @@ class TestMPI : public CxxTest::TestSuite {
 
       async.sendBuffer(0, sizeof(int));
 
-      Parameter parameter;
+      const Parameter parameter;
       async.call(parameter);
 
       async.wait();
@@ -271,7 +271,7 @@ class TestMPI : public CxxTest::TestSuite {
 
       async.wait();
 
-      Parameter parameter;
+      const Parameter parameter;
       async.call(parameter); // Should not timeout ...
 
       async.wait();
@@ -301,7 +301,7 @@ class TestMPI : public CxxTest::TestSuite {
 
       async.sendBuffer(0, sizeof(int));
 
-      Parameter parameter;
+      const Parameter parameter;
       async.callInit(parameter);
 
       async.wait();
@@ -330,7 +330,7 @@ class TestMPI : public CxxTest::TestSuite {
 
       async.sendBuffer(0, sizeof(int));
 
-      Parameter parameter;
+      const Parameter parameter;
       async.callInit(parameter);
 
       async.wait();
@@ -358,7 +358,7 @@ class TestMPI : public CxxTest::TestSuite {
 
       async.sendBuffer(0, sizeof(int));
 
-      Parameter parameter;
+      const Parameter parameter;
       async.callInit(parameter);
 
       async.wait();
@@ -386,7 +386,7 @@ class TestMPI : public CxxTest::TestSuite {
 
       async.sendBuffer(0, sizeof(int));
 
-      Parameter parameter;
+      const Parameter parameter;
       async.callInit(parameter);
 
       async.wait();
@@ -425,7 +425,7 @@ class TestMPI : public CxxTest::TestSuite {
 
       async.sendBuffer(1, sizeof(int));
 
-      Parameter parameter;
+      const Parameter parameter;
       async.call(parameter);
 
       async.wait();
@@ -460,7 +460,7 @@ class TestMPI : public CxxTest::TestSuite {
       async.sendBuffer(0, sizeof(int));
       async.sendBuffer(1, sizeof(int));
 
-      Parameter parameter;
+      const Parameter parameter;
       async.callInit(parameter);
 
       async.wait();
@@ -575,7 +575,7 @@ class TestMPI : public CxxTest::TestSuite {
       async.sendBuffer(1, 3 * sizeof(int));
       async.sendBuffer(2, sizeof(int));
 
-      Parameter parameter;
+      const Parameter parameter;
       async.callInit(parameter);
 
       async.wait();
@@ -630,7 +630,7 @@ class TestMPI : public CxxTest::TestSuite {
       async.sendBuffer(0, sizeof(int));
       async.sendBuffer(1, sizeof(int));
 
-      Parameter parameter;
+      const Parameter parameter;
       async.callInit(parameter);
 
       async.wait();
@@ -677,7 +677,7 @@ class TestMPI : public CxxTest::TestSuite {
       *static_cast<int*>(async.managedBuffer(0)) = 43;
       async.sendBuffer(0, sizeof(int));
 
-      Parameter parameter;
+      const Parameter parameter;
       async.call(parameter);
 
       async.wait();
@@ -704,7 +704,7 @@ class TestMPI : public CxxTest::TestSuite {
       async.sendBuffer(0, 200 * sizeof(int));
       async.sendBuffer(1, sizeof(int));
 
-      Parameter parameter;
+      const Parameter parameter;
       async.call(parameter);
 
       async.wait();
@@ -775,7 +775,7 @@ class TestMPI : public CxxTest::TestSuite {
       buffer[largeBuffer.size() - 1] = 'Z';
       async.sendBuffer(0, largeBuffer.size());
 
-      Parameter parameter;
+      const Parameter parameter;
       async.call(parameter);
 
       async.wait();

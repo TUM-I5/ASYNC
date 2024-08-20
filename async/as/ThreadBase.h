@@ -81,9 +81,9 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
    */
   enum Phase {
     /** We are between call() and wait() */
-    EXEC_PHASE,
+    ExecPhase,
     /** We are between wait() and call() */
-    SEND_PHASE
+    SendPhase
   };
 
   /** Async thread */
@@ -114,7 +114,7 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
 
   protected:
   ThreadBase()
-      : m_asyncThread(pthread_self()), m_initBuffer(-1), m_phase(EXEC_PHASE), m_shutdown(false),
+      : m_asyncThread(pthread_self()), m_initBuffer(-1), m_phase(ExecPhase), m_shutdown(false),
         m_waiting(false) {
 #ifndef __APPLE__
     pthread_spin_init(&m_writerLock, PTHREAD_PROCESS_PRIVATE);
@@ -169,10 +169,11 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
   void setAffinityIfNecessary(const CpuMask& cpuSet) override { setAffinity(cpuSet); }
 
   unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) override {
-    unsigned int id = Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size);
+    const unsigned int id =
+        Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size);
 
     // Now, initialize the buffer on the executor thread with zeros
-    if (m_phase == EXEC_PHASE) {
+    if (m_phase == ExecPhase) {
       lock_spinlock(&m_writerLock);
     }
 
@@ -182,7 +183,7 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
     // Wait for the initialization to finish
     lock_spinlock(&m_initBufferLock);
 
-    if (m_phase != EXEC_PHASE) { // SEND_PHASE
+    if (m_phase != ExecPhase) { // SEND_PHASE
       lock_spinlock(&m_writerLock);
     }
     return id;
@@ -191,7 +192,7 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
   void resizeBuffer(unsigned int id, const void* buffer, size_t size) override {
     Base<Executor, InitParameter, Parameter>::resizeBufferInternal(id, buffer, size);
 
-    assert(m_phase != EXEC_PHASE);
+    assert(m_phase != ExecPhase);
 
     // Initialize the buffer on the executor thread with zeros
     m_initBuffer = id;                   // Mark for buffer fill
@@ -203,7 +204,7 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
     lock_spinlock(&m_writerLock);
   }
 
-  const void* buffer(unsigned int id) const {
+  const void* buffer(unsigned int id) const override {
     return Base<Executor, InitParameter, Parameter>::bufferInternal(id);
   }
 
@@ -220,19 +221,20 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
 
     // wait for the wait to finish
     lock_spinlock(&m_writerLock);
-    m_phase = SEND_PHASE;
+    m_phase = SendPhase;
   }
 
   void call(const Parameter& parameters) override {
     memcpy(&m_nextParams, &parameters, sizeof(Parameter));
 
-    m_phase = EXEC_PHASE;
+    m_phase = ExecPhase;
     pthread_mutex_unlock(&m_readerLock);
   }
 
   void finalize() override {
-    if (!Base<Executor, InitParameter, Parameter>::finalizeInternal())
+    if (!Base<Executor, InitParameter, Parameter>::finalizeInternal()) {
       return;
+    }
 
     // Shutdown the thread
     m_shutdown = true;
@@ -268,7 +270,7 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
         async->m_waiting = false;
       } else if (async->m_initBuffer >= 0) {
         // Touch the memory on this thread
-        unsigned int id = async->m_initBuffer;
+        const unsigned int id = async->m_initBuffer;
         memset(async->bufferInternal(id), 0, async->bufferSize(id));
         async->m_initBuffer = -1;
 

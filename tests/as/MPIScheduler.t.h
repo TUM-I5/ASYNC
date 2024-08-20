@@ -48,7 +48,7 @@ class TestMPIScheduler : public CxxTest::TestSuite {
   int m_rank;
 
   public:
-  void setUp() { MPI_Comm_rank(MPI_COMM_WORLD, &m_rank); }
+  void setUp() override { MPI_Comm_rank(MPI_COMM_WORLD, &m_rank); }
 
   void testIsExecutor() {
     async::as::MPIScheduler scheduler;

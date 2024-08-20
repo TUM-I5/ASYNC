@@ -47,9 +47,9 @@
 #include <cstring>
 #include <vector>
 
-#include "async/Config.h"
-#include "ThreadBase.h"
 #include "MPIScheduler.h"
+#include "ThreadBase.h"
+#include "async/Config.h"
 
 namespace async {
 
@@ -93,7 +93,7 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
 
   private:
   /** The max amount that should be transfered in a single MPI send operation */
-  const size_t m_maxSend;
+  const size_t mMaxSend;
 
   /** The scheduler */
   MPIScheduler* m_scheduler;
@@ -111,12 +111,11 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   std::vector<ExecutorBufInfo> m_executorBuffer;
 
   public:
-  MPIBase()
-      : m_maxSend(async::Config::maxSend()), m_scheduler(0L), m_id(-1), m_numBufferChunks(0) {}
+  MPIBase() : mMaxSend(async::Config::maxSend()), m_scheduler(0L), m_id(-1), m_numBufferChunks(0) {}
 
   ~MPIBase() override { finalize(); }
 
-  void setScheduler(MPIScheduler& scheduler) {
+  void setScheduler(MPIScheduler& scheduler) override {
     m_scheduler = &scheduler;
 
     // Add this to the scheduler
@@ -126,7 +125,7 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   /**
    * @param executor
    */
-  void setExecutor(Executor& executor) {
+  void setExecutor(Executor& executor) override {
     // Initialization on the executor
     if (m_scheduler->isExecutor())
       ThreadBase<Executor, InitParameter, Parameter>::setExecutor(executor);
@@ -138,7 +137,7 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
     Base<Executor, InitParameter, Parameter>::removeBuffer(id);
   }
 
-  const void* buffer(unsigned int id) const {
+  const void* buffer(unsigned int id) const override {
     if (m_scheduler->isExecutor())
       return ThreadBase<Executor, InitParameter, Parameter>::buffer(id);
 
@@ -148,7 +147,7 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   /**
    * @param id The id of the buffer
    */
-  void sendBuffer(unsigned int id, size_t size) {
+  void sendBuffer(unsigned int id, size_t size) override {
     if (size == 0)
       return;
 
@@ -158,12 +157,13 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
       return;
 
     const uint8_t* buffer = Base<Executor, InitParameter, Parameter>::origin(id);
-    if (!buffer)
+    if (buffer == nullptr) {
       buffer = m_scheduler->managedBuffer();
+    }
 
     // We need to send the buffer in 1 GB chunks
     for (size_t done = 0; done < size; done += maxSend()) {
-      size_t send = std::min(maxSend(), size - done);
+      const size_t send = std::min(maxSend(), size - done);
 
       m_scheduler->sendBuffer(m_id, id, buffer + bufferPos(id), send);
       incBufferPos(id, send);
@@ -173,7 +173,7 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   /**
    * Wait for an asynchronous call to finish
    */
-  void wait() {
+  void wait() override {
     // Wait for the call to finish
     m_scheduler->wait(m_id);
 
@@ -183,22 +183,24 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   /**
    * @warning Only the parameter from one task will be considered
    */
-  void callInit(const InitParameter& parameters) {
+  void callInit(const InitParameter& parameters) override {
     m_scheduler->sendInitParam(m_id, parameters);
 
     resetBufferPosition();
   }
 
-  void finalize() {
-    if (!Base<Executor, InitParameter, Parameter>::finalizeInternal())
+  void finalize() override {
+    if (!Base<Executor, InitParameter, Parameter>::finalizeInternal()) {
       return;
+    }
 
-    if (m_id >= 0 && !m_scheduler->isExecutor())
+    if (m_id >= 0 && !m_scheduler->isExecutor()) {
       m_scheduler->sendFinalize(m_id);
+    }
   }
 
   protected:
-  size_t maxSend() const { return m_maxSend; }
+  size_t maxSend() const { return mMaxSend; }
 
   int id() const { return m_id; }
 
@@ -215,7 +217,7 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
     return addBufferInternal(buffer, size, clone, sync);
   }
 
-  void resizeBuffer(unsigned int id, const void* buffer, size_t size) {
+  void resizeBuffer(unsigned int id, const void* buffer, size_t size) override {
     assert(m_scheduler);
     assert(!m_scheduler->isExecutor());
 
@@ -274,7 +276,7 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
     if (clone && m_scheduler->groupRank() != 0)
       size = 0;
 
-    int executorRank = m_scheduler->groupSize() - 1;
+    const int executorRank = m_scheduler->groupSize() - 1;
 
     // Compute buffer size and offsets
     unsigned long* bufferOffsets = 0L;
@@ -300,16 +302,17 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
       unsigned int bufferChunks = 0;
       for (int i = 0; i < m_scheduler->groupSize() - 1; i++) {
         // Compute offsets from the size
-        unsigned long bufSize = bufferOffsets[i];
+        const unsigned long bufSize = bufferOffsets[i];
         bufferOffsets[i] = size;
 
         if (bufSize > 0) {
           // Increment the total buffer size
           size += bufSize;
 
-          if (!sync)
+          if (!sync) {
             // Increment the number of buffer chunks
-            bufferChunks += (bufSize + m_maxSend - 1) / m_maxSend;
+            bufferChunks += (bufSize + mMaxSend - 1) / mMaxSend;
+          }
         }
       }
 
@@ -343,11 +346,12 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
 
   void resizeBufferInternal(unsigned int id, const void* buffer, size_t size) {
     if (!m_scheduler->isExecutor()) {
-      if (m_buffer[id].clone && m_scheduler->groupRank() != 0)
+      if (m_buffer[id].clone && m_scheduler->groupRank() != 0) {
         size = 0;
+      }
     }
 
-    int executorRank = m_scheduler->groupSize() - 1;
+    const int executorRank = m_scheduler->groupSize() - 1;
 
     // Compute buffer size and offsets
     unsigned long* bufferOffsets = 0L;
@@ -372,16 +376,17 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
       unsigned int bufferChunks = 0;
       for (int i = 0; i < m_scheduler->groupSize() - 1; i++) {
         // Compute offsets from the size
-        unsigned long bufSize = bufferOffsets[i];
+        const unsigned long bufSize = bufferOffsets[i];
         bufferOffsets[i] = size;
 
         if (bufSize > 0) {
           // Increment the total buffer size
           size += bufSize;
 
-          if (!m_executorBuffer[id].sync)
+          if (!m_executorBuffer[id].sync) {
             // Increment the number of buffer chunks
-            bufferChunks += (bufSize + m_maxSend - 1) / m_maxSend;
+            bufferChunks += (bufSize + mMaxSend - 1) / mMaxSend;
+          }
         }
       }
 

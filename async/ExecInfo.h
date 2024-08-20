@@ -57,10 +57,10 @@ class ExecInfo {
 
   std::vector<BufferOrigin*> m_bufferOrigin;
 
-  HostBufferOrigin* hostBuffer;
+  HostBufferOrigin* m_hostBuffer;
 
   public:
-  ExecInfo() { hostBuffer = new HostBufferOrigin(); }
+  ExecInfo() { m_hostBuffer = new HostBufferOrigin(); }
 
   virtual ~ExecInfo() = default;
 
@@ -91,7 +91,7 @@ class ExecInfo {
   protected:
   void addBufferInternal(size_t size) {
     m_bufferSize.push_back(size);
-    m_bufferOrigin.push_back(hostBuffer);
+    m_bufferOrigin.push_back(m_hostBuffer);
   }
 
   void resizeBufferInternal(unsigned int id, size_t size) {
