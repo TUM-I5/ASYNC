@@ -64,6 +64,14 @@ class ModuleBase {
   public:
   virtual ~ModuleBase() = default;
 
+  // avoid copy and move operations, due to the constructor above
+
+  ModuleBase(const ModuleBase&) = delete;
+  ModuleBase(ModuleBase&&) = delete;
+
+  ModuleBase operator=(const ModuleBase&) = delete;
+  ModuleBase& operator=(ModuleBase&&) = delete;
+
   /**
    * Called at initialization. Is also called by the {@link Dispatcher}
    * on MPI executors.
