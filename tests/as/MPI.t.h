@@ -45,8 +45,6 @@
 #include <cxxtest/GlobalFixture.h>
 #include <cxxtest/TestSuite.h>
 
-#include "utils/env.h"
-
 #ifdef ASYNC_MPI_COPY
 #include "async/as/MPIAsync.h"
 #else // ASYNC_MPI_COPY
@@ -57,12 +55,12 @@
 #ifdef ASYNC_MPI_COPY
 template <class Executor, typename InitParameter, typename Parameter>
 struct MPITest {
-  typedef async::as::MPIAsync<Executor, InitParameter, Parameter> type;
+  using Type = async::as::MPIAsync<Executor, InitParameter, Parameter>;
 };
 #else  // ASYNC_MPI_COPY
 template <class Executor, typename InitParameter, typename Parameter>
 struct MPITest {
-  typedef async::as::MPI<Executor, InitParameter, Parameter> type;
+  using Type = async::as::MPI<Executor, InitParameter, Parameter>;
 };
 #endif // ASYNC_MPI_COPY
 
@@ -70,31 +68,31 @@ struct MPITest {
  * Setup for large buffer testing
  */
 class LargeBuffer : public CxxTest::GlobalFixture {
-  size_t m_size;
+  size_t m_size{};
 
   public:
-  bool setUpWorld() override {
-    m_size = 1.5 * async::Config::maxSend();
+  auto setUpWorld() -> bool override {
+    m_size = (3 * async::Config::maxSend()) / 2 + 2;
     return true;
   }
 
-  size_t size() const { return m_size; }
+  [[nodiscard]] auto size() const -> size_t { return m_size; }
 };
 
 static LargeBuffer largeBuffer;
 
 class TestMPI : public CxxTest::TestSuite {
-  async::as::MPIScheduler* m_scheduler;
+  async::as::MPIScheduler* m_scheduler{};
 
-  int m_rank;
+  int m_rank{};
 
   std::vector<int> m_values;
-  pthread_spinlock_t m_valueLock;
+  pthread_spinlock_t m_valueLock{};
 
-  MPITest<Executor<TestMPI>, Parameter, Parameter>::type* m_async;
+  MPITest<Executor<TestMPI>, Parameter, Parameter>::Type* m_async{};
   std::vector<int> m_buffers;
 
-  bool m_largeBufferTest;
+  bool m_largeBufferTest{};
 
   public:
   void setUp() override {
@@ -103,7 +101,7 @@ class TestMPI : public CxxTest::TestSuite {
     m_values.clear();
     pthread_spin_init(&m_valueLock, PTHREAD_PROCESS_PRIVATE);
 
-    m_async = 0L;
+    m_async = nullptr;
     m_buffers.clear();
     m_largeBufferTest = false;
 
@@ -125,7 +123,7 @@ class TestMPI : public CxxTest::TestSuite {
 
     if (m_largeBufferTest) {
       // Group size without the communicator
-      const int groupSize = m_async->bufferSize(0) / largeBuffer.size();
+      const int groupSize = static_cast<int>(m_async->bufferSize(0) / largeBuffer.size());
       TS_ASSERT_LESS_THAN_EQUALS(1, groupSize);
       TS_ASSERT_LESS_THAN_EQUALS(groupSize, 2);
 
@@ -138,13 +136,14 @@ class TestMPI : public CxxTest::TestSuite {
 
         buf += largeBuffer.size();
       }
-    } else if (m_async) {
+    } else if (m_async != nullptr) {
       for (unsigned int i = 0; i < m_async->numBuffers(); i++) {
         const size_t size = m_async->bufferSize(i) / sizeof(int);
         const int* buf = reinterpret_cast<const int*>(m_async->buffer(i));
 
-        for (size_t j = 0; j < size; j++)
+        for (size_t j = 0; j < size; j++) {
           m_buffers.push_back(buf[j]);
+        }
       }
     }
   }
@@ -152,21 +151,22 @@ class TestMPI : public CxxTest::TestSuite {
   void testInit() {
     Executor<TestMPI> executor(this);
 
-    MPITest<Executor<TestMPI>, Parameter, Parameter>::type async;
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async;
     async.setScheduler(*m_scheduler);
 
     async.setExecutor(executor);
 
-    if (m_scheduler->isExecutor())
+    if (m_scheduler->isExecutor()) {
       m_scheduler->loop();
-    else
+    } else {
       async.wait();
+    }
   }
 
   void testInitCall() {
     Executor<TestMPI> executor(this);
 
-    MPITest<Executor<TestMPI>, Parameter, Parameter>::type async;
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async;
     async.setScheduler(*m_scheduler);
 
     async.setExecutor(executor);
@@ -188,7 +188,7 @@ class TestMPI : public CxxTest::TestSuite {
   void testCall() {
     Executor<TestMPI> executor(this);
 
-    MPITest<Executor<TestMPI>, Parameter, Parameter>::type async;
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async;
     async.setScheduler(*m_scheduler);
 
     async.setExecutor(executor);
@@ -224,7 +224,7 @@ class TestMPI : public CxxTest::TestSuite {
   void testBuffer() {
     Executor<TestMPI> executor(this);
 
-    MPITest<Executor<TestMPI>, Parameter, Parameter>::type async;
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async;
     async.setScheduler(*m_scheduler);
 
     async.setExecutor(executor);
@@ -233,15 +233,16 @@ class TestMPI : public CxxTest::TestSuite {
     if (m_scheduler->isExecutor()) {
       m_scheduler->loop();
 
-      for (std::vector<int>::const_iterator i = m_buffers.begin(); i != m_buffers.end(); i++)
-        TS_ASSERT_EQUALS(*i, 43);
+      for (const auto& i : m_buffers) {
+        TS_ASSERT_EQUALS(i, 43);
+      }
     } else {
       int buffer = 43;
       TS_ASSERT_EQUALS(async.addBuffer(&buffer, sizeof(int)), 0);
 
       TS_ASSERT_EQUALS(async.numBuffers(), 1);
 
-      TS_ASSERT_EQUALS(async.managedBuffer(0), static_cast<void*>(0L));
+      TS_ASSERT_EQUALS(async.managedBuffer(0), static_cast<void*>(nullptr));
 
       async.wait();
 
@@ -257,7 +258,7 @@ class TestMPI : public CxxTest::TestSuite {
   void testEmptyBuffer() {
     Executor<TestMPI> executor(this);
 
-    MPITest<Executor<TestMPI>, Parameter, Parameter>::type async;
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async;
     async.setScheduler(*m_scheduler);
 
     async.setExecutor(executor);
@@ -266,7 +267,7 @@ class TestMPI : public CxxTest::TestSuite {
     if (m_scheduler->isExecutor()) {
       m_scheduler->loop();
     } else {
-      int buffer;
+      int buffer = 0;
       async.addBuffer(&buffer, sizeof(int));
 
       async.wait();
@@ -284,7 +285,7 @@ class TestMPI : public CxxTest::TestSuite {
   void testInitBuffer() {
     Executor<TestMPI> executor(this);
 
-    MPITest<Executor<TestMPI>, Parameter, Parameter>::type async;
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async;
     async.setScheduler(*m_scheduler);
 
     async.setExecutor(executor);
@@ -293,8 +294,8 @@ class TestMPI : public CxxTest::TestSuite {
     if (m_scheduler->isExecutor()) {
       m_scheduler->loop();
 
-      for (std::vector<int>::const_iterator i = m_buffers.begin(); i != m_buffers.end(); i++)
-        TS_ASSERT_EQUALS(*i, 43);
+      for (auto i = m_buffers.begin(); i != m_buffers.end(); i++)
+        TS_ASSERT_EQUALS(i, 43);
     } else {
       int buffer = 43;
       async.addBuffer(&buffer, sizeof(int));
@@ -311,7 +312,7 @@ class TestMPI : public CxxTest::TestSuite {
   void testSyncBuffer() {
     Executor<TestMPI> executor(this);
 
-    MPITest<Executor<TestMPI>, Parameter, Parameter>::type async;
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async;
     async.setScheduler(*m_scheduler);
 
     async.setExecutor(executor);
@@ -322,8 +323,8 @@ class TestMPI : public CxxTest::TestSuite {
 
       TS_ASSERT_LESS_THAN_EQUALS(1, m_buffers.size());
       TS_ASSERT_LESS_THAN_EQUALS(m_buffers.size(), 2);
-      for (std::vector<int>::const_iterator i = m_buffers.begin(); i != m_buffers.end(); i++)
-        TS_ASSERT_EQUALS(*i, 3);
+      for (auto i = m_buffers.begin(); i != m_buffers.end(); i++)
+        TS_ASSERT_EQUALS(i, 3);
     } else {
       int buffer = 3;
       async.addSyncBuffer(&buffer, sizeof(int));
@@ -340,7 +341,7 @@ class TestMPI : public CxxTest::TestSuite {
   void testSyncCloneBuffer() {
     Executor<TestMPI> executor(this);
 
-    MPITest<Executor<TestMPI>, Parameter, Parameter>::type async;
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async;
     async.setScheduler(*m_scheduler);
 
     async.setExecutor(executor);
@@ -350,8 +351,8 @@ class TestMPI : public CxxTest::TestSuite {
       m_scheduler->loop();
 
       TS_ASSERT_EQUALS(m_buffers.size(), 1);
-      for (std::vector<int>::const_iterator i = m_buffers.begin(); i != m_buffers.end(); i++)
-        TS_ASSERT_EQUALS(*i, 3);
+      for (auto i = m_buffers.begin(); i != m_buffers.end(); i++)
+        TS_ASSERT_EQUALS(i, 3);
     } else {
       int buffer = 3;
       async.addSyncBuffer(&buffer, sizeof(int), true);
@@ -368,7 +369,7 @@ class TestMPI : public CxxTest::TestSuite {
   void testCloneBuffer() {
     Executor<TestMPI> executor(this);
 
-    MPITest<Executor<TestMPI>, Parameter, Parameter>::type async;
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async;
     async.setScheduler(*m_scheduler);
 
     async.setExecutor(executor);
@@ -378,8 +379,8 @@ class TestMPI : public CxxTest::TestSuite {
       m_scheduler->loop();
 
       TS_ASSERT_EQUALS(m_buffers.size(), 1);
-      for (std::vector<int>::const_iterator i = m_buffers.begin(); i != m_buffers.end(); i++)
-        TS_ASSERT_EQUALS(*i, 3);
+      for (auto i = m_buffers.begin(); i != m_buffers.end(); i++)
+        TS_ASSERT_EQUALS(i, 3);
     } else {
       int buffer = 3;
       async.addBuffer(&buffer, sizeof(int), true);
@@ -396,7 +397,7 @@ class TestMPI : public CxxTest::TestSuite {
   void testBuffer2() {
     Executor<TestMPI> executor(this);
 
-    MPITest<Executor<TestMPI>, Parameter, Parameter>::type async;
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async;
     async.setScheduler(*m_scheduler);
 
     async.setExecutor(executor);
@@ -435,7 +436,7 @@ class TestMPI : public CxxTest::TestSuite {
   void testMixedBuffer() {
     Executor<TestMPI> executor(this);
 
-    MPITest<Executor<TestMPI>, Parameter, Parameter>::type async;
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async;
     async.setScheduler(*m_scheduler);
 
     async.setExecutor(executor);
@@ -446,9 +447,9 @@ class TestMPI : public CxxTest::TestSuite {
 
       TS_ASSERT_LESS_THAN_EQUALS(4, m_buffers.size());
       TS_ASSERT_LESS_THAN_EQUALS(m_buffers.size(), 8);
-      for (std::vector<int>::const_iterator i = m_buffers.begin(); i != m_buffers.end(); ++i) {
-        TS_ASSERT_LESS_THAN_EQUALS(3, *i);
-        TS_ASSERT_LESS_THAN_EQUALS(*i, 4);
+      for (const auto& i : m_buffers) {
+        TS_ASSERT_LESS_THAN_EQUALS(3, i);
+        TS_ASSERT_LESS_THAN_EQUALS(i, 4);
       }
     } else {
       int buffer0 = 3;
@@ -476,7 +477,7 @@ class TestMPI : public CxxTest::TestSuite {
   void testResizeBuffer() {
     Executor<TestMPI> executor(this);
 
-    MPITest<Executor<TestMPI>, Parameter, Parameter>::type async;
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async;
     async.setScheduler(*m_scheduler);
 
     async.setExecutor(executor);
@@ -565,8 +566,8 @@ class TestMPI : public CxxTest::TestSuite {
       int buffer0 = 3;
       async.addSyncBuffer(&buffer0, sizeof(int));
 
-      int buffer1[3] = {4, 5, 6};
-      async.addBuffer(buffer1, 3 * sizeof(int));
+      const auto buffer1 = std::array<int, 3>{4, 5, 6};
+      async.addBuffer(buffer1.data(), 3 * sizeof(int));
 
       int buffer2 = 9;
       async.addBuffer(&buffer2, sizeof(int));
@@ -580,8 +581,8 @@ class TestMPI : public CxxTest::TestSuite {
 
       async.wait();
 
-      int buffer3[2] = {4, 5};
-      async.resizeBuffer(0, buffer3, 2 * sizeof(int));
+      const auto buffer3 = std::array<int, 2>{4, 5};
+      async.resizeBuffer(0, buffer3.data(), 2 * sizeof(int));
 
       async.sendBuffer(0, 2 * sizeof(int));
 
@@ -598,8 +599,8 @@ class TestMPI : public CxxTest::TestSuite {
 
       async.wait();
 
-      int buffer5[2] = {20, 21};
-      async.resizeBuffer(2, buffer5, 2 * sizeof(int));
+      const auto buffer5 = std::array<int, 2>{4, 5};
+      async.resizeBuffer(2, buffer5.data(), 2 * sizeof(int));
 
       async.sendBuffer(2, 2 * sizeof(int));
 
@@ -612,7 +613,7 @@ class TestMPI : public CxxTest::TestSuite {
   void testRemoveBuffer() {
     Executor<TestMPI> executor(this);
 
-    MPITest<Executor<TestMPI>, Parameter, Parameter>::type async;
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async;
     async.setScheduler(*m_scheduler);
 
     async.setExecutor(executor);
@@ -636,7 +637,7 @@ class TestMPI : public CxxTest::TestSuite {
       async.wait();
 
       async.removeBuffer(0);
-      TS_ASSERT_EQUALS(async.buffer(0), static_cast<const void*>(0L));
+      TS_ASSERT_EQUALS(async.buffer(0), static_cast<const void*>(nullptr));
 
       async.sendBuffer(1, sizeof(int));
 
@@ -645,7 +646,7 @@ class TestMPI : public CxxTest::TestSuite {
       async.wait();
 
       async.removeBuffer(1);
-      TS_ASSERT_EQUALS(async.buffer(1), static_cast<const void*>(0L));
+      TS_ASSERT_EQUALS(async.buffer(1), static_cast<const void*>(nullptr));
 
       async.call(parameter);
 
@@ -656,7 +657,7 @@ class TestMPI : public CxxTest::TestSuite {
   void testManagedBuffer() {
     Executor<TestMPI> executor(this);
 
-    MPITest<Executor<TestMPI>, Parameter, Parameter>::type async;
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async;
     async.setScheduler(*m_scheduler);
 
     async.setExecutor(executor);
@@ -665,12 +666,12 @@ class TestMPI : public CxxTest::TestSuite {
     if (m_scheduler->isExecutor()) {
       m_scheduler->loop();
 
-      for (std::vector<int>::const_iterator i = m_buffers.begin(); i != m_buffers.end(); i++)
-        TS_ASSERT_EQUALS(*i, 43);
+      for (auto i = m_buffers.begin(); i != m_buffers.end(); i++)
+        TS_ASSERT_EQUALS(i, 43);
     } else {
-      async.addBuffer(0L, sizeof(int));
+      async.addBuffer(nullptr, sizeof(int));
 
-      TS_ASSERT_DIFFERS(async.managedBuffer(0), static_cast<void*>(0L));
+      TS_ASSERT_DIFFERS(async.managedBuffer(0), static_cast<void*>(nullptr));
 
       async.wait();
 
@@ -687,7 +688,7 @@ class TestMPI : public CxxTest::TestSuite {
   void testRemoveManagedBuffer() {
     Executor<TestMPI> executor(this);
 
-    MPITest<Executor<TestMPI>, Parameter, Parameter>::type async;
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async;
     async.setScheduler(*m_scheduler);
 
     async.setExecutor(executor);
@@ -696,8 +697,8 @@ class TestMPI : public CxxTest::TestSuite {
     if (m_scheduler->isExecutor()) {
       m_scheduler->loop();
     } else {
-      async.addBuffer(0L, 200 * sizeof(int));
-      async.addBuffer(0L, sizeof(int));
+      async.addBuffer(nullptr, 200 * sizeof(int));
+      async.addBuffer(nullptr, sizeof(int));
 
       async.wait();
 
@@ -710,7 +711,7 @@ class TestMPI : public CxxTest::TestSuite {
       async.wait();
 
       async.removeBuffer(1);
-      TS_ASSERT_DIFFERS(async.managedBuffer(0), static_cast<const void*>(0L));
+      TS_ASSERT_DIFFERS(async.managedBuffer(0), static_cast<const void*>(nullptr));
 
       static_cast<int*>(async.managedBuffer(0))[199] = 1;
       async.sendBuffer(0, 2 * sizeof(int));
@@ -724,11 +725,11 @@ class TestMPI : public CxxTest::TestSuite {
   void testMultiple() {
     Executor<TestMPI> executor(this);
 
-    MPITest<Executor<TestMPI>, Parameter, Parameter>::type async1;
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async1;
     async1.setScheduler(*m_scheduler);
     async1.setExecutor(executor);
 
-    MPITest<Executor<TestMPI>, Parameter, Parameter>::type async2;
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async2;
     async2.setScheduler(*m_scheduler);
     async2.setExecutor(executor);
 
@@ -756,7 +757,7 @@ class TestMPI : public CxxTest::TestSuite {
   void testLargeBuffer() {
     Executor<TestMPI> executor(this);
 
-    MPITest<Executor<TestMPI>, Parameter, Parameter>::type async;
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async;
     async.setScheduler(*m_scheduler);
 
     async.setExecutor(executor);
@@ -787,7 +788,7 @@ class TestMPI : public CxxTest::TestSuite {
   void testPartialInit() {
     Executor<TestMPI> executor(this);
 
-    MPITest<Executor<TestMPI>, Parameter, Parameter>::type async;
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async;
     async.setScheduler(*m_scheduler);
 
     if (m_scheduler->isExecutor()) {

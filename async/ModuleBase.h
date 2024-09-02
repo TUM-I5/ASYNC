@@ -69,8 +69,8 @@ class ModuleBase {
   ModuleBase(const ModuleBase&) = delete;
   ModuleBase(ModuleBase&&) = delete;
 
-  ModuleBase operator=(const ModuleBase&) = delete;
-  ModuleBase& operator=(ModuleBase&&) = delete;
+  auto operator=(const ModuleBase&) -> ModuleBase& = delete;
+  auto operator=(ModuleBase&&) -> ModuleBase& = delete;
 
   /**
    * Called at initialization. Is also called by the {@link Dispatcher}
@@ -90,7 +90,7 @@ class ModuleBase {
   /**
    * List of all I/O modules (required by the dispatcher)
    */
-  static std::vector<ModuleBase*>& modules() {
+  static auto modules() -> std::vector<ModuleBase*>& {
     // Use a function here to avoid an additional .cpp file
     static std::vector<ModuleBase*> moduleList;
     return moduleList;

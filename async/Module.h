@@ -47,8 +47,6 @@
 #include <mpi.h>
 #endif // USE_MPI
 
-#include "utils/env.h"
-
 #ifdef USE_MPI
 #include "async/as/MPI.h"
 #include "async/as/MPIAsync.h"
@@ -78,10 +76,11 @@ class Module : public ModuleBase {
       break;
     case MPI:
 #ifdef USE_MPI
-      if (Config::useAsyncCopy())
+      if (Config::useAsyncCopy()) {
         m_async = std::make_unique<async::as::MPIAsync<Executor, InitParameter, Parameter>>();
-      else
+      } else {
         m_async = std::make_unique<async::as::MPI<Executor, InitParameter, Parameter>>();
+      }
 #else  // USE_MPI
       logError() << "Asynchronous MPI is not supported.";
 #endif // USE_MPI
@@ -91,7 +90,7 @@ class Module : public ModuleBase {
 
   void setExecutor(Executor& executor) { m_async->setExecutor(executor); }
 
-  bool isAffinityNecessary() { return m_async->isAffinityNecessary(); }
+  auto isAffinityNecessary() -> bool { return m_async->isAffinityNecessary(); }
 
   void setAffinityIfNecessary(const as::CpuMask& cpuMask) {
     m_async->setAffinityIfNecessary(cpuMask);
@@ -99,11 +98,11 @@ class Module : public ModuleBase {
 
   void init() { setUp(); }
 
-  unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false) {
+  auto addSyncBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned int {
     return m_async->addSyncBuffer(buffer, size, clone);
   }
 
-  unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) {
+  auto addBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned int {
     return m_async->addBuffer(buffer, size, clone);
   }
 
@@ -113,18 +112,20 @@ class Module : public ModuleBase {
 
   void removeBuffer(unsigned int id) { m_async->removeBuffer(id); }
 
-  unsigned int numBuffers() const { return m_async->numBuffers(); }
+  [[nodiscard]] auto numBuffers() const -> unsigned int { return m_async->numBuffers(); }
 
-  size_t bufferSize(unsigned int id) const { return m_async->bufferSize(id); }
+  [[nodiscard]] auto bufferSize(unsigned int id) const -> size_t { return m_async->bufferSize(id); }
 
-  BufferOrigin& bufferOrigin(unsigned int id) const { return m_async->bufferOrigin(id); }
+  [[nodiscard]] auto bufferOrigin(unsigned int id) const -> BufferOrigin& {
+    return m_async->bufferOrigin(id);
+  }
 
   template <typename T>
-  T managedBuffer(unsigned int id) {
+  auto managedBuffer(unsigned int id) -> T {
     return static_cast<T>(m_async->managedBuffer(id));
   }
 
-  const void* buffer(unsigned int id) const { return m_async->buffer(id); }
+  [[nodiscard]] auto buffer(unsigned int id) const -> const void* { return m_async->buffer(id); }
 
   /**
    * Sends the complete buffer

@@ -79,6 +79,11 @@ class Dispatcher {
     ModuleBase::modules().clear();
   }
 
+  auto operator=(Dispatcher&&) -> Dispatcher& = delete;
+  auto operator=(const Dispatcher&) -> Dispatcher& = delete;
+  Dispatcher(const Dispatcher&) = delete;
+  Dispatcher(Dispatcher&&) = delete;
+
 #ifdef USE_MPI
   void setCommunicator(MPI_Comm comm) { m_comm = comm; }
 #endif
@@ -119,18 +124,18 @@ class Dispatcher {
   /**
    * @return The groups size (or 1 for synchronous and asynchnchronous thread mode)
    */
-  unsigned int groupSize() const { return m_groupSize; }
+  [[nodiscard]] auto groupSize() const -> unsigned int { return m_groupSize; }
 
 #ifdef USE_MPI
-  MPI_Comm groupComm() const { return m_scheduler.groupComm(); }
+  [[nodiscard]] auto groupComm() const -> MPI_Comm { return m_scheduler.groupComm(); }
 
-  MPI_Comm commWorld() const { return m_scheduler.commWorld(); }
+  [[nodiscard]] auto commWorld() const -> MPI_Comm { return m_scheduler.commWorld(); }
 #endif // USE_MPI
 
   /**
    * @return True if the process is an MPI executor
    */
-  bool isExecutor() const {
+  [[nodiscard]] auto isExecutor() const -> bool {
 #ifdef USE_MPI
     return m_scheduler.isExecutor();
 #else  // USE_MPI
@@ -146,7 +151,7 @@ class Dispatcher {
    * @return False if this rank is an MPI executor that does not contribute to the
    *  computation.
    */
-  bool dispatch() {
+  auto dispatch() -> bool {
 #ifdef USE_MPI
     if (m_scheduler.isExecutor()) {
       const auto& modules = ModuleBase::modules();

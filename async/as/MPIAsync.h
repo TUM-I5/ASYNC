@@ -48,9 +48,7 @@
 
 #include "MPIBase.h"
 
-namespace async {
-
-namespace as {
+namespace async::as {
 
 /**
  * Asynchronous call via MPI
@@ -73,7 +71,6 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
     unsigned int requests;
   };
 
-  private:
   /** Buffer for the parameter */
   Parameter m_paramBuffer;
 
@@ -91,13 +88,13 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
 
   ~MPIAsync() override = default;
 
-  unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false) override {
+  auto addSyncBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned override {
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone);
     const unsigned int id =
         Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, false);
 
     // We directly send sync buffers
-    BufInfo bufInfo;
+    BufInfo bufInfo{};
     bufInfo.sync = true;
     bufInfo.requests = 0;
     m_buffer.push_back(bufInfo);
@@ -110,7 +107,7 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
   /**
    * @param bufferSize Should be 0 on the executor
    */
-  unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) override {
+  auto addBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned override {
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone, false);
     const unsigned int id =
         Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size);
@@ -124,7 +121,7 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
       m_asyncRequests.insert(m_asyncRequests.end(), requests * 2, MPI_REQUEST_NULL);
     }
 
-    BufInfo bufInfo;
+    BufInfo bufInfo{};
     bufInfo.sync = false;
     bufInfo.requests = requests;
     m_buffer.push_back(bufInfo);
@@ -164,7 +161,7 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
     MPIBase<Executor, InitParameter, Parameter>::removeBuffer(id);
   }
 
-  const void* buffer(unsigned int id) const override {
+  [[nodiscard]] auto buffer(unsigned int id) const -> const void* override {
     if (MPIBase<Executor, InitParameter, Parameter>::scheduler().isExecutor()) {
       return MPIBase<Executor, InitParameter, Parameter>::buffer(id);
     }
@@ -177,7 +174,7 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
    */
   void wait() override {
     // Wait for all requests first
-    MPI_Waitall(m_asyncRequests.size(), &m_asyncRequests[0], MPI_STATUSES_IGNORE);
+    MPI_Waitall(m_asyncRequests.size(), m_asyncRequests.data(), MPI_STATUSES_IGNORE);
 
     // Wait for the call to finish
     MPIBase<Executor, InitParameter, Parameter>::wait();
@@ -235,7 +232,7 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
   }
 
   private:
-  bool useAsyncCopy() const override { return true; }
+  [[nodiscard]] auto useAsyncCopy() const -> bool override { return true; }
 
   /**
    * Sends all buffers asynchronously
@@ -270,8 +267,6 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
   }
 };
 
-} // namespace as
-
-} // namespace async
+} // namespace async::as
 
 #endif // ASYNC_AS_MPIASYNC_H

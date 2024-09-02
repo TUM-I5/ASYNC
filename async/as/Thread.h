@@ -51,9 +51,7 @@
 #include "ThreadBase.h"
 #include "async/Config.h"
 
-namespace async {
-
-namespace as {
+namespace async::as {
 
 /**
  * Asynchronous call via pthreads
@@ -72,7 +70,6 @@ class Thread : public ThreadBase<Executor, InitParameter, Parameter> {
     size_t position;
   };
 
-  private:
   /** Buffer information */
   std::vector<BufInfo> m_buffer;
 
@@ -85,13 +82,14 @@ class Thread : public ThreadBase<Executor, InitParameter, Parameter> {
     ThreadBase<Executor, InitParameter, Parameter>::setExecutor(executor);
 #ifndef __APPLE__
 
-    CpuMask oldCpuMask;
+    CpuMask oldCpuMask{};
     ThreadBase<Executor, InitParameter, Parameter>::getAffinity(oldCpuMask);
     const int numCores = CPU_COUNT(&(oldCpuMask.set)); // Number of cores we have available
 
     int core = async::Config::getPinCore();
-    if (core < 0)
+    if (core < 0) {
       core = numCores + core;
+    }
 
     if (core < 0 || core >= numCores) {
       logWarning() << "Skipping async thread pining, invalid core" << core
@@ -104,11 +102,13 @@ class Thread : public ThreadBase<Executor, InitParameter, Parameter> {
     int realCore = -1;
     while (core >= 0) {
       realCore++;
-      if (CPU_ISSET(realCore, &(oldCpuMask.set)))
+      if (CPU_ISSET(realCore, &(oldCpuMask.set))) {
         core--;
+      }
 
-      if (realCore >= totalCores)
+      if (realCore >= totalCores) {
         logError() << "Pinning failed. Not enough cores available.";
+      }
     }
 
     logDebug() << "Pinning executor to core" << realCore;
@@ -121,10 +121,10 @@ class Thread : public ThreadBase<Executor, InitParameter, Parameter> {
 #endif // __APPLE__
   }
 
-  unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false) override {
+  auto addSyncBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned int override {
     const unsigned int id =
         Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, false);
-    BufInfo bufInfo;
+    BufInfo bufInfo{};
     bufInfo.init = true;
     bufInfo.position = 0;
     m_buffer.push_back(bufInfo);
@@ -134,9 +134,9 @@ class Thread : public ThreadBase<Executor, InitParameter, Parameter> {
     return id;
   }
 
-  unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) override {
+  auto addBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned int override {
     const unsigned int id = ThreadBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size);
-    BufInfo bufInfo;
+    BufInfo bufInfo{};
     bufInfo.init = false;
     bufInfo.position = 0;
     m_buffer.push_back(bufInfo);
@@ -146,7 +146,7 @@ class Thread : public ThreadBase<Executor, InitParameter, Parameter> {
     return id;
   }
 
-  const void* buffer(unsigned int id) const override {
+  [[nodiscard]] auto buffer(unsigned int id) const -> const void* override {
     assert(id < m_buffer.size());
 
     if (m_buffer[id].init) {
@@ -201,8 +201,6 @@ class Thread : public ThreadBase<Executor, InitParameter, Parameter> {
   }
 };
 
-} // namespace as
-
-} // namespace async
+} // namespace async::as
 
 #endif // ASYNC_AS_THREAD_H

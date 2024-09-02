@@ -45,12 +45,12 @@
 #include "async/as/MPIScheduler.h"
 
 class TestMPIScheduler : public CxxTest::TestSuite {
-  int m_rank;
+  int m_rank{};
 
   public:
   void setUp() override { MPI_Comm_rank(MPI_COMM_WORLD, &m_rank); }
 
-  void testIsExecutor() {
+  void testIsExecutor() const {
     async::as::MPIScheduler scheduler;
     scheduler.setCommunicator(MPI_COMM_WORLD, 2);
 
@@ -64,11 +64,11 @@ class TestMPIScheduler : public CxxTest::TestSuite {
     }
   }
 
-  void testCommWorld() {
+  void testCommWorld() const {
     async::as::MPIScheduler scheduler;
     scheduler.setCommunicator(MPI_COMM_WORLD, 2);
 
-    int size;
+    int size = 0;
     MPI_Comm_size(scheduler.commWorld(), &size);
 
     switch (m_rank) {
@@ -81,13 +81,13 @@ class TestMPIScheduler : public CxxTest::TestSuite {
     }
   }
 
-  void testGroupComm() {
+  void testGroupComm() const {
     async::as::MPIScheduler scheduler;
     scheduler.setCommunicator(MPI_COMM_WORLD, 2);
 
     TS_ASSERT_EQUALS(scheduler.groupRank(), m_rank % 3);
 
-    int size;
+    int size = 0;
 
     switch (m_rank) {
     case 2:

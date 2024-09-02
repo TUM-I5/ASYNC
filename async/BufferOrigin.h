@@ -44,7 +44,6 @@
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
-#include <vector>
 
 namespace async {
 
@@ -53,8 +52,9 @@ namespace async {
  */
 class BufferOrigin {
   public:
+  virtual ~BufferOrigin() = default;
   // allocates memory in the buffer allocation zone
-  virtual void* malloc(size_t size) = 0;
+  virtual auto malloc(size_t size) -> void* = 0;
 
   // frees memory in the buffer allocation zone
   virtual void free(void* ptr) = 0;
@@ -72,15 +72,16 @@ class BufferOrigin {
   virtual void touch(void* ptr, size_t size) = 0;
 
   // memory can be accessed on host
-  virtual bool transparentHost() = 0;
+  virtual auto transparentHost() -> bool = 0;
 
   // memory can be directly passed to MPI
-  virtual bool transparentMPI() = 0;
+  virtual auto transparentMPI() -> bool = 0;
 };
 
 class HostBufferOrigin : public BufferOrigin {
   public:
-  void* malloc(size_t size) override { return std::malloc(size); }
+  ~HostBufferOrigin() override = default;
+  auto malloc(size_t size) -> void* override { return std::malloc(size); }
   void free(void* ptr) override { std::free(ptr); }
   void copyTo(void* dest, const void* source, size_t size) override {
     std::memcpy(dest, source, size);
@@ -92,8 +93,8 @@ class HostBufferOrigin : public BufferOrigin {
     std::memcpy(dest, source, size);
   }
   void touch(void* ptr, size_t size) override { std::memset(ptr, 0, size); }
-  bool transparentHost() override { return true; }
-  bool transparentMPI() override { return true; }
+  auto transparentHost() -> bool override { return true; }
+  auto transparentMPI() -> bool override { return true; }
 };
 
 } // namespace async

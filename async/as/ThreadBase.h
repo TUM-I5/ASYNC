@@ -42,6 +42,7 @@
 #define ASYNC_AS_THREADBASE_H
 
 #include <cstring>
+#include <optional>
 #include <pthread.h>
 #include <sched.h>
 
@@ -50,19 +51,17 @@
 #include "Base.h"
 #include "Pin.h"
 
-namespace async {
-
-namespace as {
+namespace async::as {
 
 #ifndef __APPLE__
-using spinlock_t = pthread_spinlock_t;
-inline void lock_spinlock(spinlock_t* lock) { pthread_spin_lock(lock); }
-inline void unlock_spinlock(spinlock_t* lock) { pthread_spin_unlock(lock); }
+using SpinlockT = pthread_spinlock_t;
+inline void lock_spinlock(SpinlockT* lock) { pthread_spin_lock(lock); }
+inline void unlock_spinlock(SpinlockT* lock) { pthread_spin_unlock(lock); }
 #else
 // Spinlock is a LINUX-only feature
-using spinlock_t = pthread_mutex_t;
-inline void lock_spinlock(spinlock_t* lock) { pthread_mutex_lock(lock); }
-inline void unlock_spinlock(spinlock_t* lock) { pthread_mutex_unlock(lock); }
+using SpinlockT = pthread_mutex_t;
+inline void lock_spinlock(SpinlockT* lock) { pthread_mutex_lock(lock); }
+inline void unlock_spinlock(SpinlockT* lock) { pthread_mutex_unlock(lock); }
 #endif // __APPLE__
 
 /**
@@ -90,32 +89,30 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
   pthread_t m_asyncThread;
 
   /** Mutex locked by the writer (caller) */
-  spinlock_t m_writerLock;
+  SpinlockT m_writerLock{};
 
   /** Mutex locked by the reader (callee) */
-  pthread_mutex_t m_readerLock;
+  pthread_mutex_t m_readerLock{};
 
   /** Parameters for the next call */
   Parameter m_nextParams;
 
   /** The buffer we need to initialize */
-  int m_initBuffer;
+  std::optional<unsigned> m_initBuffer;
 
   /** The current phase */
   Phase m_phase;
 
   /** Mutex to wait for the buffer initialization to finish */
-  spinlock_t m_initBufferLock;
+  SpinlockT m_initBufferLock{};
 
   /** Shutdown the thread */
-  bool m_shutdown;
+  bool m_shutdown{false};
 
-  bool m_waiting;
+  bool m_waiting{false};
 
   protected:
-  ThreadBase()
-      : m_asyncThread(pthread_self()), m_initBuffer(-1), m_phase(ExecPhase), m_shutdown(false),
-        m_waiting(false) {
+  ThreadBase() : m_asyncThread(pthread_self()), m_phase(ExecPhase) {
 #ifndef __APPLE__
     pthread_spin_init(&m_writerLock, PTHREAD_PROCESS_PRIVATE);
     pthread_spin_init(&m_initBufferLock, PTHREAD_PROCESS_PRIVATE);
@@ -127,7 +124,7 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
     pthread_mutex_init(&m_initBufferLock, &attr);
 
 #endif // __APPLE__
-    pthread_mutex_init(&m_readerLock, 0L);
+    pthread_mutex_init(&m_readerLock, nullptr);
   }
 
   public:
@@ -144,6 +141,11 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
     pthread_mutex_destroy(&m_readerLock);
   }
 
+  auto operator=(ThreadBase&&) -> ThreadBase& = delete;
+  auto operator=(const ThreadBase&) -> ThreadBase& = delete;
+  ThreadBase(const ThreadBase&) = delete;
+  ThreadBase(ThreadBase&&) = delete;
+
   void setExecutor(Executor& executor) override {
     Base<Executor, InitParameter, Parameter>::setExecutor(executor);
 
@@ -155,7 +157,7 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
     // initBuffer is only unlocked when the buffer initialization is done
     lock_spinlock(&m_initBufferLock);
 
-    if (pthread_create(&m_asyncThread, 0L, asyncThread, this) != 0) {
+    if (pthread_create(&m_asyncThread, nullptr, asyncThread, this) != 0) {
       logError() << "ASYNC: Failed to start asynchronous thread";
     }
   }
@@ -164,11 +166,11 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
 
   void setAffinity(const CpuMask& cpuMask) { cpuMask.setaffinity_np(m_asyncThread); }
 
-  bool isAffinityNecessary() override { return true; }
+  auto isAffinityNecessary() -> bool override { return true; }
 
   void setAffinityIfNecessary(const CpuMask& cpuSet) override { setAffinity(cpuSet); }
 
-  unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) override {
+  auto addBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned int override {
     const unsigned int id =
         Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size);
 
@@ -204,7 +206,7 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
     lock_spinlock(&m_writerLock);
   }
 
-  const void* buffer(unsigned int id) const override {
+  [[nodiscard]] auto buffer(unsigned int id) const -> const void* override {
     return Base<Executor, InitParameter, Parameter>::bufferInternal(id);
   }
 
@@ -239,7 +241,7 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
     // Shutdown the thread
     m_shutdown = true;
     pthread_mutex_unlock(&m_readerLock);
-    pthread_join(m_asyncThread, 0L);
+    pthread_join(m_asyncThread, nullptr);
   }
 
   private:
@@ -252,9 +254,8 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
     Base<Executor, InitParameter, Parameter>::call(parameters);
   }
 
-  private:
-  static void* asyncThread(void* c) {
-    ThreadBase* async = reinterpret_cast<ThreadBase*>(c);
+  static auto asyncThread(void* c) -> void* {
+    auto* async = reinterpret_cast<ThreadBase*>(c);
 
     // Tell everyone that we are read to go
     unlock_spinlock(&async->m_writerLock);
@@ -262,32 +263,32 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
     while (true) {
       // We assume that this lock happens before any unlock from the main thread
       pthread_mutex_lock(&async->m_readerLock);
-      if (async->m_shutdown)
+      if (async->m_shutdown) {
         break;
+      }
 
       if (async->m_waiting) {
         async->waitInternal();
         async->m_waiting = false;
-      } else if (async->m_initBuffer >= 0) {
+      } else if (async->m_initBuffer.has_value()) {
         // Touch the memory on this thread
-        const unsigned int id = async->m_initBuffer;
+        const unsigned int id = async->m_initBuffer.value();
         memset(async->bufferInternal(id), 0, async->bufferSize(id));
-        async->m_initBuffer = -1;
+        async->m_initBuffer = {};
 
         // Done
         unlock_spinlock(&async->m_initBufferLock);
-      } else
+      } else {
         async->callInternal(async->m_nextParams);
+      }
 
       unlock_spinlock(&async->m_writerLock);
     }
 
-    return 0L;
+    return nullptr;
   }
 };
 
-} // namespace as
-
-} // namespace async
+} // namespace async::as
 
 #endif // ASYNC_AS_THREADBASE_H

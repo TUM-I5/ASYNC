@@ -46,7 +46,7 @@
 class Param;
 class TestSync : public CxxTest::TestSuite {
   private:
-  int m_value;
+  int m_value{};
 
   public:
   void setValue(int value) { m_value = value; }
@@ -114,9 +114,9 @@ class TestSync : public CxxTest::TestSuite {
 
     async.wait();
 
-    int buffer2[2] = {2, 3};
+    const auto buffer2 = std::array<int, 2>{2, 3};
 
-    async.resizeBuffer(0, buffer2, 2 * sizeof(int));
+    async.resizeBuffer(0, buffer2.data(), 2 * sizeof(int));
     TS_ASSERT_EQUALS(async.bufferSize(0), 2 * sizeof(int));
     TS_ASSERT_EQUALS(*static_cast<const int*>(async.buffer(0)), 2);
   }
@@ -133,7 +133,7 @@ class TestSync : public CxxTest::TestSuite {
     async.wait();
 
     async.removeBuffer(0);
-    TS_ASSERT_EQUALS(static_cast<const void*>(0L), async.buffer(0));
+    TS_ASSERT_EQUALS(static_cast<const void*>(nullptr), async.buffer(0));
   }
 
   void testManagedBuffer() {
@@ -142,7 +142,7 @@ class TestSync : public CxxTest::TestSuite {
     async::as::Sync<Executor<TestSync>, Parameter, Parameter> async;
     async.setExecutor(executor);
 
-    async.addBuffer(0L, sizeof(int));
+    async.addBuffer(nullptr, sizeof(int));
 
     *static_cast<int*>(async.managedBuffer(0)) = 2;
 

@@ -44,9 +44,9 @@
 #include <sched.h>
 
 struct Parameter {
-  Parameter() : value(0) {}
+  Parameter() = default;
 
-  int value;
+  int value{0};
 };
 
 template <class Test>
@@ -54,7 +54,7 @@ class Executor {
   private:
   Test& m_test;
 
-  int m_schedCpu;
+  int m_schedCpu{};
 
   public:
   Executor(Test* test) : m_test(*test) {}
@@ -71,7 +71,7 @@ class Executor {
   /**
    * @return CPU id of the last execution
    */
-  int cpu() const { return m_schedCpu; }
+  [[nodiscard]] auto cpu() const -> int { return m_schedCpu; }
 };
 
 #endif // EXECUTOR_H

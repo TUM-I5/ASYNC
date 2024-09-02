@@ -43,25 +43,22 @@
 
 #include <mpi.h>
 
+#include <array>
 #include <cassert>
+#include <cstdint>
 #include <cstring>
 #include <map>
-#include <stdint.h>
 #include <vector>
 
 #include "utils/logger.h"
 
-#include "async/Config.h"
-
-namespace async {
-
-namespace as {
+namespace async::as {
 
 /**
  * A pair of MPI requests
  */
 struct MPIRequest2 {
-  MPI_Request r[2];
+  std::array<MPI_Request, 2> r;
 };
 
 template <class Executor, typename InitParameter, typename Parameter>
@@ -76,35 +73,35 @@ class Scheduled {
   friend class MPIScheduler;
 
   private:
-  char* m_paramBuffer;
+  std::vector<char> m_paramBuffer;
 
   protected:
-  Scheduled() : m_paramBuffer(0L) {}
+  Scheduled() = default;
 
-  virtual ~Scheduled() { delete[] m_paramBuffer; }
+  ~Scheduled() = default;
 
   private:
-  void allocParamBuffer() { m_paramBuffer = new char[paramSize()]; }
+  void allocParamBuffer() { m_paramBuffer.resize(paramSize()); }
 
-  void* paramBuffer() { return m_paramBuffer; }
+  auto paramBuffer() -> void* { return m_paramBuffer.data(); }
 
-  const void* paramBuffer() const { return m_paramBuffer; }
+  [[nodiscard]] auto paramBuffer() const -> const void* { return m_paramBuffer.data(); }
 
   /**
    * @return The maximum buffer size required to store init parameter
    *  or parameter
    */
-  virtual unsigned int paramSize() const = 0;
+  [[nodiscard]] virtual auto paramSize() const -> unsigned int = 0;
 
   /**
    * @return True if this class uses async copying
    */
-  virtual bool useAsyncCopy() const = 0;
+  [[nodiscard]] virtual auto useAsyncCopy() const -> bool = 0;
 
   /**
    * @return True if this class uses async copying for a specific buffer
    */
-  virtual bool useAsyncCopy(unsigned int id) const = 0;
+  [[nodiscard]] virtual auto useAsyncCopy(unsigned int id) const -> bool = 0;
 
   /**
    * Returns the number of buffer chunks send to the executor
@@ -112,7 +109,7 @@ class Scheduled {
    * This might differ from the number of buffers since large buffers
    * have the be send in multiple iterations.
    */
-  virtual unsigned int numBufferChunks() const = 0;
+  [[nodiscard]] virtual auto numBufferChunks() const -> unsigned int = 0;
 
   /**
    * @param sync True if the buffer is send sychronized
@@ -125,7 +122,7 @@ class Scheduled {
 
   virtual void execInitInternal(const void* parameter) = 0;
 
-  virtual void* getBufferPos(unsigned int id, int rank, int size) = 0;
+  virtual auto getBufferPos(unsigned int id, int rank, int size) -> void* = 0;
 
   virtual void execInternal(const void* parameter) = 0;
 
@@ -158,16 +155,16 @@ class MPIScheduler {
   MPI_Comm m_groupComm;
 
   /** The rank of in the executor group */
-  int m_groupRank;
+  int m_groupRank{0};
 
   /** The size of the executor group (incl. the executor) */
-  int m_groupSize;
+  int m_groupSize{0};
 
   /** True of this task is an executor */
-  bool m_isExecutor;
+  bool m_isExecutor{false};
 
   /** True of this task is a compute rank */
-  bool m_isCompute;
+  bool m_isCompute{};
 
   /** The "COMM_WORLD" communicator (communicator without executors) */
   MPI_Comm m_commWorld;
@@ -191,16 +188,19 @@ class MPIScheduler {
   std::vector<unsigned int> m_heapBufferIds;
 
   /** Class is finalized? */
-  bool m_finalized;
+  bool m_finalized{false};
 
   public:
   MPIScheduler()
-      : m_privateGroupComm(MPI_COMM_NULL), m_groupComm(MPI_COMM_SELF), // Default for non MPI mode
-        m_groupRank(0), m_groupSize(0), m_isExecutor(false),
-        m_commWorld(MPI_COMM_WORLD), // Default for non MPI mode
-        m_finalized(false) {}
+      : m_privateGroupComm(MPI_COMM_NULL), m_groupComm(MPI_COMM_SELF), m_commWorld(MPI_COMM_WORLD) {
+  }
 
   ~MPIScheduler() { finalize(); }
+
+  auto operator=(MPIScheduler&&) -> MPIScheduler& = delete;
+  auto operator=(const MPIScheduler&) -> MPIScheduler& = delete;
+  MPIScheduler(const MPIScheduler&) = delete;
+  MPIScheduler(MPIScheduler&&) = delete;
 
   /**
    * Set the MPI configuration.
@@ -211,13 +211,13 @@ class MPIScheduler {
    * @param groupSize Number of ranks per group (excluding the executor)
    */
   void setCommunicator(MPI_Comm comm, unsigned int groupSize) {
-    int rank;
+    int rank = 0;
     MPI_Comm_rank(comm, &rank);
 
-    MPI_Comm groupComm;
+    MPI_Comm groupComm = nullptr;
 
     // Create group communicator
-    MPI_Comm_split(comm, rank / (groupSize + 1), 0, &groupComm);
+    MPI_Comm_split(comm, static_cast<int>(rank / (groupSize + 1)), 0, &groupComm);
 
     MPI_Comm_rank(groupComm, &m_groupRank);
     MPI_Comm_size(groupComm, &m_groupSize);
@@ -267,20 +267,21 @@ class MPIScheduler {
     }
   }
 
-  int groupRank() const { return m_groupRank; }
+  [[nodiscard]] auto groupRank() const -> int { return m_groupRank; }
 
-  bool isExecutor() const { return m_isExecutor; }
+  [[nodiscard]] auto isExecutor() const -> bool { return m_isExecutor; }
 
-  MPI_Comm commWorld() const { return m_commWorld; }
+  [[nodiscard]] auto commWorld() const -> MPI_Comm { return m_commWorld; }
 
-  MPI_Comm groupComm() const { return m_groupComm; }
+  [[nodiscard]] auto groupComm() const -> MPI_Comm { return m_groupComm; }
 
   /**
    * Should be called on the executor to start the execution loop
    */
   void loop() {
-    if (!m_isExecutor)
+    if (!m_isExecutor) {
       return;
+    }
 
     // Save ready tasks for each call
     std::vector<unsigned int> readyTasks(m_asyncCalls.size());
@@ -294,59 +295,60 @@ class MPIScheduler {
 
     while (finalized < m_asyncCalls.size()) {
       MPI_Status status;
-      int id, tag;
+      int id = 0;
+      int tag = 0;
 
-      int sync;              // Required for add tag
-      unsigned int bufferId; // Required for remove tag and buffer tag
+      int sync = 0;              // Required for add tag
+      unsigned int bufferId = 0; // Required for remove tag and buffer tag
 
       do {
-        MPI_Message message;
+        MPI_Message message = nullptr;
         MPI_Mprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, m_privateGroupComm, &message, &status);
 
-        if (status.MPI_TAG == killTag) {
+        if (status.MPI_TAG == KillTag) {
           // Dummy recv
           assert(status.MPI_SOURCE == 0);
-          MPI_Mrecv(0L, 0, MPI_CHAR, &message, MPI_STATUS_IGNORE);
+          MPI_Mrecv(nullptr, 0, MPI_CHAR, &message, MPI_STATUS_IGNORE);
 
           // Stop everything immediately (probably some finalizes were missing)
           for (auto& call : m_asyncCalls) {
-            if (call) {
+            if (call != nullptr) {
               call->finalizeInternal();
-              call = 0;
+              call = nullptr;
             }
           }
           return;
         }
 
-        tag = status.MPI_TAG - numStaticTags;
-        id = tag / numTags;
-        tag = tag % numTags;
+        tag = status.MPI_TAG - NumStaticTags;
+        id = tag / NumTags;
+        tag = tag % NumTags;
 
-        if (id > static_cast<int>(m_asyncCalls.size()) || m_asyncCalls[id] == 0L) {
+        if (id > static_cast<int>(m_asyncCalls.size()) || m_asyncCalls[id] == nullptr) {
           logError() << "ASYNC: Invalid id" << id << "received";
         }
 
-        int size;
-        void* buf;
+        int size = 0;
+        void* buf = nullptr;
 
         switch (tag) {
-        case addTag:
+        case AddTag:
           MPI_Mrecv(&sync, 1, MPI_INT, &message, MPI_STATUS_IGNORE);
 
           readyTasks[id]++;
           break;
-        case resizeTag:
+        case ResizeTag:
           MPI_Mrecv(&bufferId, 1, MPI_UNSIGNED, &message, MPI_STATUS_IGNORE);
 
           readyTasks[id]++;
           break;
-        case removeTag:
+        case RemoveTag:
           MPI_Mrecv(&bufferId, 1, MPI_UNSIGNED, &message, MPI_STATUS_IGNORE);
 
           readyTasks[id]++;
           break;
-        case initTag:
-        case paramTag:
+        case InitTag:
+        case ParamTag:
           MPI_Get_count(&status, MPI_CHAR, &size);
           MPI_Mrecv(m_asyncCalls[id]->paramBuffer(), size, MPI_CHAR, &message, MPI_STATUS_IGNORE);
 
@@ -357,7 +359,7 @@ class MPIScheduler {
             readyTasks[id]++;
           }
           break;
-        case bufferTag:
+        case BufferTag:
           // Select a buffer
           MPI_Mrecv(&bufferId, 1, MPI_UNSIGNED, &message, MPI_STATUS_IGNORE);
 
@@ -375,9 +377,9 @@ class MPIScheduler {
             asyncReadyTasks[id]++;
           }
           break;
-        case waitTag:
-        case finalizeTag:
-          MPI_Mrecv(0L, 0, MPI_CHAR, &message, MPI_STATUS_IGNORE);
+        case WaitTag:
+        case FinalizeTag:
+          MPI_Mrecv(nullptr, 0, MPI_CHAR, &message, MPI_STATUS_IGNORE);
 
           readyTasks[id]++;
           break;
@@ -388,36 +390,36 @@ class MPIScheduler {
       } while ((static_cast<int>(readyTasks[id]) < m_groupSize - 1) &&
                (asyncReadyTasks[id] < m_groupSize - 1 + m_asyncCalls[id]->numBufferChunks()));
 
-      if (tag == bufferTag) {
-        assert(lastTag[id] == initTag || lastTag[id] == paramTag);
+      if (tag == BufferTag) {
+        assert(lastTag[id] == InitTag || lastTag[id] == ParamTag);
 
         tag = lastTag[id];
       }
 
       switch (tag) {
-      case addTag:
+      case AddTag:
         MPI_Barrier(m_privateGroupComm);
-        m_asyncCalls[id]->addBufferInternal(sync);
+        m_asyncCalls[id]->addBufferInternal(sync != 0);
         break;
-      case resizeTag:
+      case ResizeTag:
         MPI_Barrier(m_privateGroupComm);
         m_asyncCalls[id]->resizeBufferInternal(bufferId);
         break;
-      case removeTag:
+      case RemoveTag:
         MPI_Barrier(m_privateGroupComm);
         m_asyncCalls[id]->removeBufferInternal(bufferId);
         break;
-      case initTag:
+      case InitTag:
         MPI_Barrier(m_privateGroupComm);
         m_asyncCalls[id]->execInitInternal(m_asyncCalls[id]->paramBuffer());
         break;
-      case paramTag:
+      case ParamTag:
         if (!m_asyncCalls[id]->useAsyncCopy()) {
           MPI_Barrier(m_privateGroupComm);
         }
         m_asyncCalls[id]->execInternal(m_asyncCalls[id]->paramBuffer());
         break;
-      case waitTag:
+      case WaitTag:
         MPI_Barrier(m_privateGroupComm);
         m_asyncCalls[id]->waitInternal();
         // This barrier can probably be called before waitInternal()
@@ -425,49 +427,54 @@ class MPIScheduler {
         // when the wait returns
         MPI_Barrier(m_privateGroupComm);
         break;
-      case finalizeTag:
+      case FinalizeTag:
         // Forget the async call
         m_asyncCalls[id]->finalizeInternal();
-        m_asyncCalls[id] = 0L;
+        m_asyncCalls[id] = nullptr;
         finalized++;
         break;
       default:
         logError() << "ASYNC: Unknown tag" << tag;
       }
 
-      if (static_cast<int>(readyTasks[id]) >= m_groupSize - 1)
+      if (static_cast<int>(readyTasks[id]) >= m_groupSize - 1) {
         readyTasks[id] = 0;
-      else
+      } else {
         asyncReadyTasks[id] = 0;
+      }
     }
   }
 
   void finalize() {
-    if (m_finalized)
+    if (m_finalized) {
       return;
-
-    if (m_asyncCalls.size() > 0 && m_groupRank == 0) {
-      // Some async calls are left, -> send the kill switch
-      MPI_Ssend(0L, 0, MPI_CHAR, m_groupSize - 1, killTag, m_privateGroupComm);
     }
 
-    if (m_privateGroupComm != MPI_COMM_NULL)
+    if (!m_asyncCalls.empty() && m_groupRank == 0) {
+      // Some async calls are left, -> send the kill switch
+      MPI_Ssend(nullptr, 0, MPI_CHAR, m_groupSize - 1, KillTag, m_privateGroupComm);
+    }
+
+    if (m_privateGroupComm != MPI_COMM_NULL) {
       MPI_Comm_free(&m_privateGroupComm);
-    if (m_groupComm != MPI_COMM_NULL && m_groupComm != MPI_COMM_SELF)
+    }
+    if (m_groupComm != MPI_COMM_NULL && m_groupComm != MPI_COMM_SELF) {
       MPI_Comm_free(&m_groupComm);
-    if (m_commWorld != MPI_COMM_WORLD)
+    }
+    if (m_commWorld != MPI_COMM_WORLD) {
       MPI_Comm_free(&m_commWorld);
+    }
 
     m_finalized = true;
   }
 
   private:
-  MPI_Comm privateGroupComm() const { return m_privateGroupComm; }
+  [[nodiscard]] auto privateGroupComm() const -> MPI_Comm { return m_privateGroupComm; }
 
-  int groupSize() const { return m_groupSize; }
+  [[nodiscard]] auto groupSize() const -> int { return m_groupSize; }
 
-  int addScheduled(Scheduled* scheduled) {
-    const int id = m_asyncCalls.size();
+  auto addScheduled(Scheduled* scheduled) -> int {
+    const int id = static_cast<int>(m_asyncCalls.size());
     m_asyncCalls.push_back(scheduled);
 
     scheduled->allocParamBuffer();
@@ -484,12 +491,12 @@ class MPIScheduler {
       m_heapBufferIds.push_back(bufferId);
     }
 
-    int syncInt = sync;
+    int syncInt = static_cast<int>(sync);
     MPI_Send(&syncInt,
              1,
              MPI_INT,
              m_groupSize - 1,
-             id * numTags + addTag + numStaticTags,
+             id * NumTags + AddTag + NumStaticTags,
              m_privateGroupComm);
 
     MPI_Barrier(m_privateGroupComm);
@@ -502,7 +509,7 @@ class MPIScheduler {
              1,
              MPI_UNSIGNED,
              m_groupSize - 1,
-             id * numTags + resizeTag + numStaticTags,
+             id * NumTags + ResizeTag + NumStaticTags,
              m_privateGroupComm);
 
     MPI_Barrier(m_privateGroupComm);
@@ -515,7 +522,7 @@ class MPIScheduler {
              1,
              MPI_UNSIGNED,
              m_groupSize - 1,
-             id * numTags + removeTag + numStaticTags,
+             id * NumTags + RemoveTag + NumStaticTags,
              m_privateGroupComm);
 
     MPI_Barrier(m_privateGroupComm);
@@ -529,38 +536,38 @@ class MPIScheduler {
              1,
              MPI_UNSIGNED,
              m_groupSize - 1,
-             id * numTags + bufferTag + numStaticTags,
+             id * NumTags + BufferTag + NumStaticTags,
              m_privateGroupComm);
 
     // Send the buffer (synchronous to avoid overtaking of other messages)
-    MPI_Ssend(const_cast<void*>(buffer),
+    MPI_Ssend(buffer,
               size,
               MPI_CHAR,
               m_groupSize - 1,
-              id * numTags + bufferTag + numStaticTags,
+              id * NumTags + BufferTag + NumStaticTags,
               m_privateGroupComm);
   }
 
-  MPIRequest2 iSendBuffer(int id, unsigned int bufferId, const void* buffer, int size) {
+  auto iSendBuffer(int id, unsigned int bufferId, const void* buffer, int size) -> MPIRequest2 {
     assert(id >= 0);
 
-    MPIRequest2 requests;
+    MPIRequest2 requests{};
 
     // Select the buffer
     MPI_Isend(&m_heapBufferIds[bufferId],
               1,
               MPI_UNSIGNED,
               m_groupSize - 1,
-              id * numTags + bufferTag + numStaticTags,
+              id * NumTags + BufferTag + NumStaticTags,
               m_privateGroupComm,
-              &requests.r[0]);
+              requests.r.data());
 
     // Send the buffer
-    MPI_Isend(const_cast<void*>(buffer),
+    MPI_Isend(buffer,
               size,
               MPI_CHAR,
               m_groupSize - 1,
-              id * numTags + bufferTag + numStaticTags,
+              id * NumTags + BufferTag + NumStaticTags,
               m_privateGroupComm,
               &requests.r[1]);
 
@@ -577,7 +584,7 @@ class MPIScheduler {
              sizeof(Parameter),
              MPI_CHAR,
              m_groupSize - 1,
-             id * numTags + initTag + numStaticTags,
+             id * NumTags + InitTag + NumStaticTags,
              m_privateGroupComm);
 
     MPI_Barrier(m_privateGroupComm);
@@ -596,7 +603,7 @@ class MPIScheduler {
              sizeof(Parameter),
              MPI_CHAR,
              m_groupSize - 1,
-             id * numTags + paramTag + numStaticTags,
+             id * NumTags + ParamTag + NumStaticTags,
              m_privateGroupComm);
 
     MPI_Barrier(m_privateGroupComm);
@@ -606,16 +613,16 @@ class MPIScheduler {
    * Send message asynchronous to the executor task
    */
   template <typename Parameter>
-  MPI_Request iSendParam(int id, const Parameter& param) {
+  auto iSendParam(int id, const Parameter& param) -> MPI_Request {
     assert(id >= 0);
 
-    MPI_Request request;
+    MPI_Request request = nullptr;
 
     MPI_Isend(const_cast<Parameter*>(&param),
               sizeof(Parameter),
               MPI_CHAR,
               m_groupSize - 1,
-              id * numTags + paramTag + numStaticTags,
+              id * NumTags + ParamTag + NumStaticTags,
               m_privateGroupComm,
               &request);
 
@@ -625,11 +632,11 @@ class MPIScheduler {
   void wait(int id) {
     assert(id >= 0);
 
-    MPI_Send(0L,
+    MPI_Send(nullptr,
              0,
              MPI_CHAR,
              m_groupSize - 1,
-             id * numTags + waitTag + numStaticTags,
+             id * NumTags + WaitTag + NumStaticTags,
              m_privateGroupComm);
 
     // Wait for the return of the async call
@@ -639,16 +646,17 @@ class MPIScheduler {
   void sendFinalize(int id) {
     assert(id >= 0);
 
-    if (m_privateGroupComm == MPI_COMM_NULL)
+    if (m_privateGroupComm == MPI_COMM_NULL) {
       // Can happen if the dispatcher was already finalized
       // We can ignore this here because, we have the kill switch
       return;
+    }
 
-    MPI_Send(0L,
+    MPI_Send(nullptr,
              0,
              MPI_CHAR,
              m_groupSize - 1,
-             id * numTags + finalizeTag + numStaticTags,
+             id * NumTags + FinalizeTag + NumStaticTags,
              m_privateGroupComm);
 
     // Remove one async call from the list (it does not matter which one,
@@ -658,8 +666,9 @@ class MPIScheduler {
 
   void addManagedBuffer(size_t size) {
     m_managedBufferCounter[size]++;
-    if (m_managedBuffer.size() < size)
+    if (m_managedBuffer.size() < size) {
       m_managedBuffer.resize(size);
+    }
   }
 
   void resizeManagedBuffer(size_t oldSize, size_t newSize) {
@@ -667,14 +676,14 @@ class MPIScheduler {
 
     m_managedBufferCounter[newSize]++;
     m_managedBufferCounter.at(oldSize)--;
-    if (m_managedBufferCounter.at(oldSize) == 0)
+    if (m_managedBufferCounter.at(oldSize) == 0) {
       m_managedBufferCounter.erase(oldSize);
+    }
     if (m_managedBuffer.size() == oldSize) {
-      if (newSize > oldSize)
+      if (newSize > oldSize) {
         m_managedBuffer.resize(newSize);
-      else {
-        const std::map<size_t, unsigned int>::const_reverse_iterator it =
-            m_managedBufferCounter.rbegin();
+      } else {
+        const auto it = m_managedBufferCounter.rbegin();
         assert(it != m_managedBufferCounter.rend());
         m_managedBuffer.resize(it->first);
       }
@@ -687,12 +696,12 @@ class MPIScheduler {
       m_managedBufferCounter.erase(size);
       if (m_managedBuffer.size() == size) {
         // Last element removed that required this size
-        const std::map<size_t, unsigned int>::const_reverse_iterator it =
-            m_managedBufferCounter.rbegin();
-        if (it == m_managedBufferCounter.rend())
+        const auto it = m_managedBufferCounter.rbegin();
+        if (it == m_managedBufferCounter.rend()) {
           m_managedBuffer.clear();
-        else
+        } else {
           m_managedBuffer.resize(it->first);
+        }
       }
     }
   }
@@ -700,26 +709,23 @@ class MPIScheduler {
   /**
    * @return Current pointer to the managed buffer
    */
-  uint8_t* managedBuffer() { return &m_managedBuffer[0]; }
+  auto managedBuffer() -> uint8_t* { return m_managedBuffer.data(); }
 
-  private:
-  static const int killTag = 0;
-  static const int numStaticTags = killTag + 1;
+  static const int KillTag = 0;
+  static const int NumStaticTags = KillTag + 1;
 
-  static const int addTag = 0;
-  static const int resizeTag = 1;
-  static const int removeTag = 2;
-  static const int initTag = 3;
-  static const int bufferTag = 4;
-  static const int paramTag = 5;
-  static const int waitTag = 6;
-  static const int finalizeTag = 7;
+  static const int AddTag = 0;
+  static const int ResizeTag = 1;
+  static const int RemoveTag = 2;
+  static const int InitTag = 3;
+  static const int BufferTag = 4;
+  static const int ParamTag = 5;
+  static const int WaitTag = 6;
+  static const int FinalizeTag = 7;
   /** The number of tags required for each async module */
-  static const int numTags = finalizeTag + 1;
+  static const int NumTags = FinalizeTag + 1;
 };
 
-} // namespace as
-
-} // namespace async
+} // namespace async::as
 
 #endif // ASYNC_AS_MPISCHEDULER_H

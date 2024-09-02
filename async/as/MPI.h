@@ -44,13 +44,10 @@
 #include <mpi.h>
 
 #include <cassert>
-#include <vector>
 
 #include "MPIBase.h"
 
-namespace async {
-
-namespace as {
+namespace async::as {
 
 /**
  * Asynchronous call via MPI
@@ -62,12 +59,12 @@ class MPI : public MPIBase<Executor, InitParameter, Parameter> {
 
   ~MPI() override = default;
 
-  unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false) override {
+  auto addSyncBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned override {
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone);
     return Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, false);
   }
 
-  unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) override {
+  auto addBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned override {
     if (buffer == nullptr) {
       MPIBase<Executor, InitParameter, Parameter>::scheduler().addManagedBuffer(size);
     }
@@ -95,7 +92,7 @@ class MPI : public MPIBase<Executor, InitParameter, Parameter> {
     MPIBase<Executor, InitParameter, Parameter>::removeBuffer(id);
   }
 
-  void* managedBuffer(unsigned int id) override {
+  auto managedBuffer(unsigned int id) -> void* override {
     if (Base<Executor, InitParameter, Parameter>::origin(id) == nullptr) {
       return MPIBase<Executor, InitParameter, Parameter>::scheduler().managedBuffer();
     }
@@ -103,7 +100,7 @@ class MPI : public MPIBase<Executor, InitParameter, Parameter> {
     return nullptr;
   }
 
-  const void* buffer(unsigned int id) const override {
+  [[nodiscard]] auto buffer(unsigned int id) const -> const void* override {
     if (MPIBase<Executor, InitParameter, Parameter>::scheduler().isExecutor()) {
       return MPIBase<Executor, InitParameter, Parameter>::buffer(id);
     }
@@ -120,11 +117,9 @@ class MPI : public MPIBase<Executor, InitParameter, Parameter> {
   }
 
   private:
-  bool useAsyncCopy() const override { return false; }
+  [[nodiscard]] auto useAsyncCopy() const -> bool override { return false; }
 };
 
-} // namespace as
-
-} // namespace async
+} // namespace async::as
 
 #endif // ASYNC_AS_MPI_H

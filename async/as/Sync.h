@@ -44,9 +44,7 @@
 #include "Base.h"
 #include "async/ExecInfo.h"
 
-namespace async {
-
-namespace as {
+namespace async::as {
 
 /**
  * Asynchronous call via pthreads
@@ -58,19 +56,20 @@ class Sync : public Base<Executor, InitParameter, Parameter> {
 
   ~Sync() override = default;
 
-  unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false) override {
+  auto addSyncBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned int override {
     return Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, false);
   }
 
-  unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) override {
-    return Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, buffer == 0L);
+  auto addBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned int override {
+    return Base<Executor, InitParameter, Parameter>::addBufferInternal(
+        buffer, size, buffer == nullptr);
   }
 
   void resizeBuffer(unsigned int id, const void* buffer, size_t size) override {
     Base<Executor, InitParameter, Parameter>::resizeBufferInternal(id, buffer, size);
   }
 
-  const void* buffer(unsigned int id) const override {
+  [[nodiscard]] auto buffer(unsigned int id) const -> const void* override {
     if (Base<Executor, InitParameter, Parameter>::origin(id) &&
         async::ExecInfo::bufferOrigin(id).transparentHost()) {
       return Base<Executor, InitParameter, Parameter>::origin(id);
@@ -99,8 +98,6 @@ class Sync : public Base<Executor, InitParameter, Parameter> {
   }
 };
 
-} // namespace as
-
-} // namespace async
+} // namespace async::as
 
 #endif // ASYNC_AS_SYNC_H

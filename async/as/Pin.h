@@ -13,13 +13,13 @@ struct CpuMask {
   cpu_set_t set;
 #endif // __APPLE__
 
-  inline void getaffinity_np([[maybe_unused]] pthread_t thread) {
+  void getaffinity_np([[maybe_unused]] pthread_t thread) {
 #ifndef __APPLE__
     pthread_getaffinity_np(thread, sizeof(cpu_set_t), &set);
 #endif
   }
 
-  inline void setaffinity_np([[maybe_unused]] pthread_t thread) const {
+  void setaffinity_np([[maybe_unused]] pthread_t thread) const {
 #ifndef __APPLE__
     pthread_setaffinity_np(thread, sizeof(cpu_set_t), &set);
 #endif

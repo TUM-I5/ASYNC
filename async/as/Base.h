@@ -42,8 +42,8 @@
 #define ASYNC_AS_BASE_H
 
 #include <cassert>
+#include <cstdint>
 #include <cstdlib>
-#include <stdint.h>
 #include <vector>
 
 #include "Pin.h"
@@ -80,7 +80,6 @@ class Base : public async::ExecInfo {
     void* buffer;
   };
 
-  private:
   /** The executor for the asynchronous call */
   Executor* m_executor;
 
@@ -88,7 +87,7 @@ class Base : public async::ExecInfo {
   std::vector<BufInfo> m_buffer;
 
   /** Already cleanup everything? */
-  bool m_finalized;
+  bool m_finalized{false};
 
   /** Aligment of buffers (might be requested for I/O back-ends) */
   const size_t mAlignment;
@@ -96,10 +95,15 @@ class Base : public async::ExecInfo {
   Parameter m_lastParameters;
 
   protected:
-  Base() : m_executor(0L), m_finalized(false), mAlignment(async::Config::alignment()) {}
+  Base() : m_executor(nullptr), mAlignment(async::Config::alignment()) {}
 
   public:
   ~Base() override { finalizeInternal(); }
+
+  auto operator=(Base&&) -> Base& = delete;
+  auto operator=(const Base&) -> Base& = delete;
+  Base(const Base&) = delete;
+  Base(Base&&) = delete;
 
   /**
    * Only required in asynchronous MPI mode
@@ -108,7 +112,7 @@ class Base : public async::ExecInfo {
 
   virtual void setExecutor(Executor& executor) { m_executor = &executor; }
 
-  virtual bool isAffinityNecessary() { return false; }
+  virtual auto isAffinityNecessary() -> bool { return false; }
 
   virtual void setAffinityIfNecessary(const as::CpuMask& cpuMask) {
     // Do nothing in the general case.
@@ -122,7 +126,8 @@ class Base : public async::ExecInfo {
    * @param clone True of the buffer is the same (a clone) on all MPI processes.
    *  (Allows additional optimizations.)
    */
-  virtual unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false) = 0;
+  virtual auto
+      addSyncBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned int = 0;
 
   /**
    * @param buffer The original memory location in the application or NULL if ASYNC should
@@ -131,7 +136,7 @@ class Base : public async::ExecInfo {
    * @param clone True of the buffer is the same (a clone) on all MPI processes.
    * @return The id of the buffer
    */
-  virtual unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) = 0;
+  virtual auto addBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned int = 0;
 
   /**
    * Resize an existing buffer
@@ -153,9 +158,9 @@ class Base : public async::ExecInfo {
   virtual void removeBuffer(unsigned int id) {
     assert(id < numBuffers());
 
-    m_buffer[id].origin = 0L;
+    m_buffer[id].origin = nullptr;
     free(m_buffer[id].buffer);
-    m_buffer[id].buffer = 0L;
+    m_buffer[id].buffer = nullptr;
     async::ExecInfo::removeBufferInternal(id);
   }
 
@@ -165,13 +170,13 @@ class Base : public async::ExecInfo {
    *
    * @warning This buffer might be shared by ASYNC modules.
    */
-  virtual void* managedBuffer(unsigned int id) {
-    if (origin(id) == 0L) {
+  virtual auto managedBuffer(unsigned int id) -> void* {
+    if (origin(id) == nullptr) {
       assert(bufferInternal(id) != nullptr || async::ExecInfo::bufferSize(id) == 0);
       return bufferInternal(id);
     }
 
-    return 0L;
+    return nullptr;
   }
 
   /**
@@ -190,25 +195,26 @@ class Base : public async::ExecInfo {
   virtual void finalize() { finalizeInternal(); }
 
   protected:
-  Executor& executor() { return *m_executor; }
+  auto executor() -> Executor& { return *m_executor; }
 
-  unsigned int addBufferInternal(const void* origin, size_t size, bool allocate = true) {
+  auto addBufferInternal(const void* origin, size_t size, bool allocate = true) -> unsigned int {
     async::ExecInfo::addBufferInternal(size);
 
-    BufInfo buffer;
+    BufInfo buffer{};
     buffer.origin = origin;
 
-    if (size && allocate) {
+    if ((size != 0U) && allocate) {
       if (mAlignment > 0) {
         const size_t allocBufferSize = allocSize(size);
         const int ret = posix_memalign(&buffer.buffer, mAlignment, allocBufferSize);
-        if (ret)
+        if (ret != 0) {
           logError() << "Could not allocate buffer" << ret;
+        }
       } else {
         buffer.buffer = malloc(size);
       }
     } else {
-      buffer.buffer = 0L;
+      buffer.buffer = nullptr;
     }
 
     m_buffer.push_back(buffer);
@@ -234,8 +240,9 @@ class Base : public async::ExecInfo {
         const size_t allocBufferSize = allocSize(size);
         free(m_buffer[id].buffer);
         const int ret = posix_memalign(&m_buffer[id].buffer, mAlignment, allocBufferSize);
-        if (ret)
+        if (ret != 0) {
           logError() << "Could not allocate buffer" << ret;
+        }
       } else {
         m_buffer[id].buffer = realloc(m_buffer[id].buffer, size);
       }
@@ -245,12 +252,12 @@ class Base : public async::ExecInfo {
   /**
    * Return u_int8_t to allow arithmetic on the pointer
    */
-  const uint8_t* origin(unsigned int id) const {
+  [[nodiscard]] auto origin(unsigned int id) const -> const uint8_t* {
     assert(id < numBuffers());
     return static_cast<const uint8_t*>(m_buffer[id].origin);
   }
 
-  const void* bufferInternal(unsigned int id) const {
+  [[nodiscard]] auto bufferInternal(unsigned int id) const -> const void* {
     assert(id < numBuffers());
     return m_buffer[id].buffer;
   }
@@ -258,7 +265,7 @@ class Base : public async::ExecInfo {
   /**
    * Return u_int8_t to allow arithmetic on the pointer
    */
-  uint8_t* bufferInternal(unsigned int id) {
+  auto bufferInternal(unsigned int id) -> uint8_t* {
     assert(id < numBuffers());
     return static_cast<uint8_t*>(m_buffer[id].buffer);
   }
@@ -268,14 +275,15 @@ class Base : public async::ExecInfo {
    *
    * @return False if the class was already finalized
    */
-  bool finalizeInternal() {
-    if (m_finalized)
+  auto finalizeInternal() -> bool {
+    if (m_finalized) {
       return false;
+    }
 
     for (unsigned int i = 0; i < m_buffer.size(); i++) {
-      m_buffer[i].origin = 0L;
+      m_buffer[i].origin = nullptr;
       free(m_buffer[i].buffer);
-      m_buffer[i].buffer = 0L;
+      m_buffer[i].buffer = nullptr;
       async::ExecInfo::removeBufferInternal(i);
     }
 
@@ -287,7 +295,7 @@ class Base : public async::ExecInfo {
   /**
    * Compute the allocated size depending on the requested size
    */
-  size_t allocSize(size_t size) {
+  auto allocSize(size_t size) -> size_t {
     // Make the allocated buffer size a multiple of m_alignment
     size_t allocBufferSize = (size + mAlignment - 1) / mAlignment;
     allocBufferSize *= mAlignment;
@@ -295,38 +303,39 @@ class Base : public async::ExecInfo {
     return allocBufferSize;
   }
 
-  private:
   template <typename E, typename P>
-  typename std::enable_if_t<execInitHasExec<E, P>::value> callInitInternal(const P& parameters) {
+  auto callInitInternal(const P& parameters) ->
+      typename std::enable_if_t<execInitHasExec<E, P>::value> {
     const ExecInfo& info = *this;
     m_executor->execInit(info, parameters);
   }
 
   template <typename E, typename P>
-  typename std::enable_if_t<!execInitHasExec<E, P>::value> callInitInternal(const P& parameters) {
+  auto callInitInternal(const P& parameters) ->
+      typename std::enable_if_t<!execInitHasExec<E, P>::value> {
     m_executor->execInit(parameters);
   }
 
   template <typename E, typename P>
-  typename std::enable_if_t<execHasExec<E, P>::value> callInternal(const P& parameters) {
+  auto callInternal(const P& parameters) -> typename std::enable_if_t<execHasExec<E, P>::value> {
     const ExecInfo& info = *this;
     m_executor->exec(info, parameters);
   }
 
   template <typename E, typename P>
-  typename std::enable_if_t<!execHasExec<E, P>::value> callInternal(const P& parameters) {
+  auto callInternal(const P& parameters) -> typename std::enable_if_t<!execHasExec<E, P>::value> {
     m_executor->exec(parameters);
   }
 
   template <typename E, typename P>
-  typename std::enable_if_t<execWaitHasExec<E, P>::value> callWaitInternal() {
+  auto callWaitInternal() -> typename std::enable_if_t<execWaitHasExec<E, P>::value> {
     const ExecInfo& info = *this;
     m_executor->execWait(info);
   }
 
   template <typename E, typename P>
-  typename std::enable_if_t<!execWaitHasNoExec<E, P>::value && !execWaitHasExec<E, P>::value>
-      callWaitInternal() {}
+  auto callWaitInternal() ->
+      typename std::enable_if_t<!execWaitHasNoExec<E, P>::value && !execWaitHasExec<E, P>::value> {}
 };
 
 } // namespace async::as

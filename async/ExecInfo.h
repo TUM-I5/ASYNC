@@ -60,25 +60,25 @@ class ExecInfo {
   HostBufferOrigin* m_hostBuffer;
 
   public:
-  ExecInfo() { m_hostBuffer = new HostBufferOrigin(); }
+  ExecInfo() : m_hostBuffer(new HostBufferOrigin()) {}
 
   virtual ~ExecInfo() = default;
 
   /**
    * @return True, if this is an MPI executor
    */
-  virtual bool isExecutor() const {
+  [[nodiscard]] virtual auto isExecutor() const -> bool {
     return false; // Default for sync and thread
   }
 
-  unsigned int numBuffers() const { return m_bufferSize.size(); }
+  [[nodiscard]] auto numBuffers() const -> unsigned int { return m_bufferSize.size(); }
 
-  size_t bufferSize(unsigned int id) const {
+  [[nodiscard]] auto bufferSize(unsigned int id) const -> size_t {
     assert(id < numBuffers());
     return m_bufferSize[id];
   }
 
-  BufferOrigin& bufferOrigin(unsigned int id) const {
+  [[nodiscard]] auto bufferOrigin(unsigned int id) const -> BufferOrigin& {
     assert(id < numBuffers());
     return *m_bufferOrigin[id];
   }
@@ -86,7 +86,7 @@ class ExecInfo {
   /**
    * @return Read-only pointer to the buffer (Useful for executors.)
    */
-  virtual const void* buffer(unsigned int id) const = 0;
+  [[nodiscard]] virtual auto buffer(unsigned int id) const -> const void* = 0;
 
   protected:
   void addBufferInternal(size_t size) {

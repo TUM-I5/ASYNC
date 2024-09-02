@@ -61,16 +61,16 @@ namespace async::as {
 #define ASYNC_HAS_MEM_FUNC_T1(func, name, T1, return_type, ...)                                    \
   template <typename T, typename T1>                                                               \
   struct name {                                                                                    \
-    typedef return_type (T::*Sign)(__VA_ARGS__);                                                   \
-    typedef char yes[1];                                                                           \
-    typedef char no[2];                                                                            \
+    using Sign = auto (*)(__VA_ARGS__) -> return_type;                                             \
+    using Yes = double;                                                                            \
+    using No = float;                                                                              \
     template <typename U, U>                                                                       \
     struct type_check;                                                                             \
-    template <typename _1>                                                                         \
-    static yes& chk(type_check<Sign, &_1::func>*);                                                 \
+    template <typename Dummy>                                                                      \
+    static auto chk(type_check<Sign, &Dummy::func>*) -> Yes&;                                      \
     template <typename>                                                                            \
-    static no& chk(...);                                                                           \
-    static bool const value = sizeof(chk<T>(0)) == sizeof(yes);                                    \
+    static auto chk(...) -> No&;                                                                   \
+    static bool const value = sizeof(chk<T>(0)) == sizeof(Yes);                                    \
   }
 
 } // namespace async::as

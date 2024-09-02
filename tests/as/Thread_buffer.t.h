@@ -47,9 +47,9 @@
 
 class TestThread : public CxxTest::TestSuite {
   private:
-  pthread_spinlock_t m_lock;
+  pthread_spinlock_t m_lock{};
 
-  int m_value;
+  int m_value{};
 
   public:
   void setValue(int value) { m_value += value; }
@@ -71,7 +71,7 @@ class TestThread : public CxxTest::TestSuite {
     async.wait();
     async.sendBuffer(0, sizeof(int));
     TS_ASSERT_EQUALS(*reinterpret_cast<const int*>(async.buffer(0)), 42);
-    const uintptr_t p = reinterpret_cast<uintptr_t>(async.buffer(0));
+    const auto p = reinterpret_cast<uintptr_t>(async.buffer(0));
     TS_ASSERT_EQUALS(p % 65536, 0);
   }
 };

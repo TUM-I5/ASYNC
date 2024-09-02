@@ -56,15 +56,14 @@ struct Param {
 
 class Module : private async::Module<Module, Param, Param> {
   public:
-  bool mSetUp;
-  bool mExecInit;
-  bool mExec;
-  bool mTearDown;
+  bool mSetUp{false};
+  bool mExecInit{false};
+  bool mExec{false};
+  bool mTearDown{false};
 
-  int mCpu;
+  int mCpu{};
 
-  public:
-  Module() : mSetUp(false), mExecInit(false), mExec(false), mTearDown(false) {}
+  Module() = default;
 
   void run() {
     init();
@@ -108,22 +107,20 @@ class Module : private async::Module<Module, Param, Param> {
 
 class BufferModule : private async::Module<BufferModule, Param, Param> {
   public:
-  unsigned int mInitBufferSize;
-  unsigned int mBufferSize;
-  unsigned int mCloneBufferSize;
-  unsigned int mCloneSyncBufferSize;
-  int mBuffer;
-  int mManagedBuffer;
+  unsigned int mInitBufferSize{0};
+  unsigned int mBufferSize{0};
+  unsigned int mCloneBufferSize{0};
+  unsigned int mCloneSyncBufferSize{0};
+  int mBuffer{};
+  int mManagedBuffer{};
 
-  public:
-  BufferModule()
-      : mInitBufferSize(0), mBufferSize(0), mCloneBufferSize(0), mCloneSyncBufferSize(0) {}
+  BufferModule() = default;
 
   void run() {
     init();
 
-    int initBuffer[2];
-    addBuffer(initBuffer, 2 * sizeof(int));
+    auto initBuffer = std::array<int, 2>();
+    addBuffer(initBuffer.data(), 2 * sizeof(int));
 
     int buffer = 42;
     addBuffer(&buffer, sizeof(int));
@@ -134,13 +131,13 @@ class BufferModule : private async::Module<BufferModule, Param, Param> {
     long addCloneSyncBuffer = 2;
     addSyncBuffer(&addCloneSyncBuffer, sizeof(long), true);
 
-    addBuffer(0L, 2 * sizeof(int));
+    addBuffer(nullptr, 2 * sizeof(int));
 
     int buffer2 = 43;
     addBuffer(&buffer2, sizeof(int));
 
     int* managedBuffer = async::Module<BufferModule, Param, Param>::managedBuffer<int*>(4);
-    TS_ASSERT_DIFFERS(managedBuffer, static_cast<int*>(0L));
+    TS_ASSERT_DIFFERS(managedBuffer, static_cast<int*>(nullptr));
 
     const auto param = Param{0};
 
@@ -204,10 +201,9 @@ class BufferModule : private async::Module<BufferModule, Param, Param> {
 
 class ResizeBufferModule : private async::Module<ResizeBufferModule, Param, Param> {
   public:
-  unsigned int mBuffer0Size[2];
-  unsigned int mBuffer1Size[2];
+  std::array<unsigned int, 2> mBuffer0Size{};
+  std::array<unsigned int, 2> mBuffer1Size{};
 
-  public:
   ResizeBufferModule() = default;
 
   void run() {
@@ -216,8 +212,8 @@ class ResizeBufferModule : private async::Module<ResizeBufferModule, Param, Para
     int buffer0 = 42;
     addBuffer(&buffer0, sizeof(int));
 
-    int buffer1[2] = {1, 2};
-    addBuffer(buffer1, 2 * sizeof(int), true);
+    const auto buffer1 = std::array<int, 2>{1, 2};
+    addBuffer(buffer1.data(), 2 * sizeof(int), true);
 
     auto param = Param{0};
 
@@ -238,10 +234,10 @@ class ResizeBufferModule : private async::Module<ResizeBufferModule, Param, Para
 
     wait();
 
-    int buffer2[2] = {4, 3};
-    resizeBuffer(0, buffer2, 2 * sizeof(int));
+    const auto buffer2 = std::array<int, 2>{4, 3};
+    resizeBuffer(0, buffer2.data(), 2 * sizeof(int));
 
-    resizeBuffer(1, buffer1, sizeof(int));
+    resizeBuffer(1, buffer1.data(), sizeof(int));
 
     sendBuffer(0);
     sendBuffer(1);
@@ -269,8 +265,8 @@ class ResizeBufferModule : private async::Module<ResizeBufferModule, Param, Para
 
   private:
   void execInternal(const Param& param, bool isExecutor = true) {
-    mBuffer0Size[param.step] = bufferSize(0);
-    mBuffer1Size[param.step] = bufferSize(1);
+    mBuffer0Size.at(param.step) = bufferSize(0);
+    mBuffer1Size.at(param.step) = bufferSize(1);
     switch (param.step) {
     case 0:
       TS_ASSERT_EQUALS(*static_cast<const int*>(buffer(0)), 42);
@@ -288,12 +284,11 @@ class ResizeBufferModule : private async::Module<ResizeBufferModule, Param, Para
 
 class RemoveBufferModule : private async::Module<RemoveBufferModule, Param, Param> {
   public:
-  unsigned int mBuffer0Size;
-  unsigned int mBuffer1Size;
-  unsigned int mManagedBufferSize;
+  unsigned int mBuffer0Size{42};
+  unsigned int mBuffer1Size{42};
+  unsigned int mManagedBufferSize{};
 
-  public:
-  RemoveBufferModule() : mBuffer0Size(42), mBuffer1Size(42) {}
+  RemoveBufferModule() = default;
 
   void run() {
     init();
@@ -304,7 +299,7 @@ class RemoveBufferModule : private async::Module<RemoveBufferModule, Param, Para
     int buffer1 = 42;
     addBuffer(&buffer1, sizeof(int));
 
-    addBuffer(0L, sizeof(int));
+    addBuffer(nullptr, sizeof(int));
 
     const auto param = Param{0};
 
@@ -347,8 +342,8 @@ class RemoveBufferModule : private async::Module<RemoveBufferModule, Param, Para
  * they work closely together.
  */
 class TestModule : public CxxTest::TestSuite {
-  int m_rank;
-  int m_size;
+  int m_rank{};
+  int m_size{};
 
   public:
   void setUp() override {
@@ -358,7 +353,7 @@ class TestModule : public CxxTest::TestSuite {
 #endif // USE_MPI
   }
 
-  void testModuleDispatcher() {
+  void testModuleDispatcher() const {
     async::Dispatcher dispatcher;
 #ifdef USE_MPI
     dispatcher.setCommunicator(MPI_COMM_WORLD);
@@ -403,15 +398,16 @@ class TestModule : public CxxTest::TestSuite {
     }
   }
 
-  void testBuffer() {
+  void testBuffer() const {
     async::Dispatcher dispatcher;
 
     BufferModule module;
 
     dispatcher.init();
 
-    if (dispatcher.dispatch())
+    if (dispatcher.dispatch()) {
       module.run();
+    }
 
     unsigned int initBufferSize = 2 * sizeof(int);
     unsigned int bufferSize = sizeof(int);
@@ -431,15 +427,16 @@ class TestModule : public CxxTest::TestSuite {
     TS_ASSERT_EQUALS(module.mCloneSyncBufferSize, cloneSyncBufferSize);
   }
 
-  void testResizeBuffer() {
+  void testResizeBuffer() const {
     async::Dispatcher dispatcher;
 
     ResizeBufferModule module;
 
     dispatcher.init();
 
-    if (dispatcher.dispatch())
+    if (dispatcher.dispatch()) {
       module.run();
+    }
 
     unsigned int bufferSize = sizeof(int);
 
@@ -455,15 +452,16 @@ class TestModule : public CxxTest::TestSuite {
     TS_ASSERT_EQUALS(module.mBuffer1Size[1], sizeof(int));
   }
 
-  void testRemoveBuffer() {
+  void testRemoveBuffer() const {
     async::Dispatcher dispatcher;
 
     RemoveBufferModule module;
 
     dispatcher.init();
 
-    if (dispatcher.dispatch())
+    if (dispatcher.dispatch()) {
       module.run();
+    }
 
     unsigned int buffer1Size = sizeof(int);
 
@@ -478,7 +476,7 @@ class TestModule : public CxxTest::TestSuite {
     TS_ASSERT_EQUALS(module.mManagedBufferSize, 0);
   }
 
-  void testModulesActiveDisabled() {
+  static void testModulesActiveDisabled() {
     async::Dispatcher dispatcher;
 
     const unsigned int groupSize = dispatcher.groupSize();

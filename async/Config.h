@@ -70,26 +70,27 @@ class Config {
 
   size_t m_alignment;
 
-  private:
   Config()
       : m_mode(str2mode(utils::Env::get<const char*>("ASYNC_MODE", "SYNC"))),
         m_pinCore(utils::Env::get<int>("ASYNC_PIN_CORE", -1)),
         m_groupSize(m_mode == MPI ? utils::Env::get("ASYNC_GROUP_SIZE", 64) : 1),
-        m_asyncCopy(utils::Env::get<int>("ASYNC_MPI_COPY", 0)),
+        m_asyncCopy(utils::Env::get<int>("ASYNC_MPI_COPY", 0) != 0),
         m_alignment(utils::Env::get<size_t>("ASYNC_BUFFER_ALIGNMENT", 0)) {}
 
   public:
-  static Mode mode() { return instance().m_mode; }
+  static auto mode() -> Mode { return instance().m_mode; }
 
-  static int getPinCore() { return instance().m_pinCore; }
+  static auto getPinCore() -> int { return instance().m_pinCore; }
 
-  static unsigned int groupSize() { return instance().m_groupSize; }
+  static auto groupSize() -> unsigned int { return instance().m_groupSize; }
 
-  static bool useAsyncCopy() { return instance().m_asyncCopy; }
+  static auto useAsyncCopy() -> bool { return instance().m_asyncCopy; }
 
-  static size_t alignment() { return instance().m_alignment; }
+  static auto alignment() -> size_t { return instance().m_alignment; }
 
-  static size_t maxSend() { return utils::Env::get<size_t>("ASYNC_MPI_MAX_SEND", 1UL << 30); }
+  static auto maxSend() -> size_t {
+    return utils::Env::get<size_t>("ASYNC_MPI_MAX_SEND", 1UL << 30);
+  }
 
   static void setMode(Mode mode) { instance().m_mode = mode; }
 
@@ -98,19 +99,20 @@ class Config {
   static void setUseAsyncCopy(bool useAsyncCopy) { instance().m_asyncCopy = useAsyncCopy; }
 
   static void setGroupSize(unsigned int groupSize) {
-    if (instance().mode() == MPI)
+    if (Config::mode() == MPI) {
       instance().m_groupSize = groupSize;
+    }
   }
 
   static void setAlignment(size_t alignment) { instance().m_alignment = alignment; }
 
   private:
-  static Config& instance() {
+  static auto instance() -> Config& {
     static Config config;
     return config;
   }
 
-  static Mode str2mode(const char* mode) {
+  static auto str2mode(const char* mode) -> Mode {
     std::string strMode(mode);
     utils::StringUtils::toUpper(strMode);
 

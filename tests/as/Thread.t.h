@@ -50,9 +50,9 @@
 
 class TestThread : public CxxTest::TestSuite {
   private:
-  pthread_spinlock_t m_lock;
+  pthread_spinlock_t m_lock{};
 
-  int m_value;
+  int m_value{};
 
   public:
   void setValue(int value) {
@@ -88,7 +88,7 @@ class TestThread : public CxxTest::TestSuite {
     async::as::Thread<Executor<TestThread>, Parameter, Parameter> async;
     async.setExecutor(executor);
 
-    int buffer;
+    int buffer = 0;
     async.addSyncBuffer(&buffer, sizeof(int));
 
     TS_ASSERT_EQUALS(async.numBuffers(), 1);
@@ -128,9 +128,9 @@ class TestThread : public CxxTest::TestSuite {
     async.setExecutor(executor);
 
     // Set affinity (choose a random CPU)
-    srand(time(0L));
+    srand(time(nullptr));
     const int cpu = rand() % get_nprocs();
-    async::as::CpuMask mask;
+    async::as::CpuMask mask{};
 #ifndef __APPLE__
     CPU_ZERO(&mask.set);
     CPU_SET(cpu, &mask.set);
@@ -200,9 +200,9 @@ class TestThread : public CxxTest::TestSuite {
     async::as::Thread<Executor<TestThread>, Parameter, Parameter> async;
     async.setExecutor(executor);
 
-    async.addBuffer(0L, sizeof(int));
+    async.addBuffer(nullptr, sizeof(int));
 
-    TS_ASSERT_DIFFERS(async.managedBuffer(0), static_cast<void*>(0L));
+    TS_ASSERT_DIFFERS(async.managedBuffer(0), static_cast<void*>(nullptr));
 
     async.wait();
 
@@ -228,8 +228,8 @@ class TestThread : public CxxTest::TestSuite {
 
     async.wait();
 
-    int buffer2[2] = {2, 3};
-    async.resizeBuffer(0, buffer2, 2 * sizeof(int));
+    const auto buffer2 = std::array<int, 2>{2, 3};
+    async.resizeBuffer(0, buffer2.data(), 2 * sizeof(int));
     TS_ASSERT_EQUALS(async.bufferSize(0), 2 * sizeof(int));
 
     async.sendBuffer(0, 2 * sizeof(int));
@@ -259,8 +259,8 @@ class TestThread : public CxxTest::TestSuite {
     async.wait();
 
     async.removeBuffer(0);
-    TS_ASSERT_EQUALS(async.buffer(0), static_cast<const void*>(0L));
-    TS_ASSERT_DIFFERS(async.buffer(1), static_cast<const void*>(0L));
+    TS_ASSERT_EQUALS(async.buffer(0), static_cast<const void*>(nullptr));
+    TS_ASSERT_DIFFERS(async.buffer(1), static_cast<const void*>(nullptr));
 
     async.sendBuffer(1, sizeof(int));
 
@@ -269,7 +269,7 @@ class TestThread : public CxxTest::TestSuite {
     async.wait();
 
     async.removeBuffer(1);
-    TS_ASSERT_EQUALS(async.buffer(1), static_cast<const void*>(0L));
+    TS_ASSERT_EQUALS(async.buffer(1), static_cast<const void*>(nullptr));
   }
 
   void testMultiple() {
@@ -350,7 +350,7 @@ class TestThread : public CxxTest::TestSuite {
     async1.call(parameter);
 
     // Add buffer during call phase
-    int buffer2;
+    int buffer2 = 0;
     TS_ASSERT_EQUALS(async1.addBuffer(&buffer2, sizeof(int)), 1);
 
     async1.wait();
