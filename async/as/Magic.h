@@ -61,7 +61,7 @@ namespace async::as {
 #define ASYNC_HAS_MEM_FUNC_T1(func, name, T1, return_type, ...)                                    \
   template <typename T, typename T1>                                                               \
   struct name {                                                                                    \
-    using Sign = auto (*)(__VA_ARGS__) -> return_type;                                             \
+    using Sign = auto (T::*)(__VA_ARGS__) -> return_type;                                          \
     using Yes = double;                                                                            \
     using No = float;                                                                              \
     template <typename U, U>                                                                       \
@@ -70,8 +70,8 @@ namespace async::as {
     static auto chk(type_check<Sign, &Dummy::func>*) -> Yes&;                                      \
     template <typename>                                                                            \
     static auto chk(...) -> No&;                                                                   \
-    static bool const value = sizeof(chk<T>(0)) == sizeof(Yes);                                    \
-  }
+    static bool const Value = sizeof(chk<T>(nullptr)) == sizeof(Yes);                              \
+  };
 
 } // namespace async::as
 

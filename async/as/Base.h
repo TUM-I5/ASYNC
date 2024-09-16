@@ -305,37 +305,37 @@ class Base : public async::ExecInfo {
 
   template <typename E, typename P>
   auto callInitInternal(const P& parameters) ->
-      typename std::enable_if_t<execInitHasExec<E, P>::value> {
+      typename std::enable_if_t<execInitHasExec<E, P>::Value> {
     const ExecInfo& info = *this;
     m_executor->execInit(info, parameters);
   }
 
   template <typename E, typename P>
   auto callInitInternal(const P& parameters) ->
-      typename std::enable_if_t<!execInitHasExec<E, P>::value> {
+      typename std::enable_if_t<!execInitHasExec<E, P>::Value> {
     m_executor->execInit(parameters);
   }
 
   template <typename E, typename P>
-  auto callInternal(const P& parameters) -> typename std::enable_if_t<execHasExec<E, P>::value> {
+  auto callInternal(const P& parameters) -> typename std::enable_if_t<execHasExec<E, P>::Value> {
     const ExecInfo& info = *this;
     m_executor->exec(info, parameters);
   }
 
   template <typename E, typename P>
-  auto callInternal(const P& parameters) -> typename std::enable_if_t<!execHasExec<E, P>::value> {
+  auto callInternal(const P& parameters) -> typename std::enable_if_t<!execHasExec<E, P>::Value> {
     m_executor->exec(parameters);
   }
 
   template <typename E, typename P>
-  auto callWaitInternal() -> typename std::enable_if_t<execWaitHasExec<E, P>::value> {
+  auto callWaitInternal() -> typename std::enable_if_t<execWaitHasExec<E, P>::Value> {
     const ExecInfo& info = *this;
     m_executor->execWait(info);
   }
 
   template <typename E, typename P>
   auto callWaitInternal() ->
-      typename std::enable_if_t<!execWaitHasNoExec<E, P>::value && !execWaitHasExec<E, P>::value> {}
+      typename std::enable_if_t<!execWaitHasNoExec<E, P>::Value && !execWaitHasExec<E, P>::Value> {}
 };
 
 } // namespace async::as
