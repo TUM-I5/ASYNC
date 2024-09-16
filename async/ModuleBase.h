@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2016-2024 Technical University of Munich
+//
+// SPDX-License-Identifier: BSD-3-Clause
+
 /**
  * @file
  *  This file is part of ASYNC
@@ -43,8 +47,7 @@
 #include "async/as/MPIScheduler.h"
 #endif // USE_MPI
 
-namespace async
-{
+namespace async {
 
 class Dispatcher;
 
@@ -52,53 +55,55 @@ class Dispatcher;
  * Base class for asynchronous modules. Works closely together
  * with the {@link Dispatcher}.
  */
-class ModuleBase
-{
-	friend class Dispatcher;
-protected:
-	ModuleBase()
-	{
-		modules().push_back(this);
-	}
+class ModuleBase {
+  friend class Dispatcher;
 
-public:
-	virtual ~ModuleBase()
-	{ }
+  protected:
+  ModuleBase() { modules().push_back(this); }
 
-	/**
-	 * Called at initialization. Is also called by the {@link Dispatcher}
-	 * on MPI executors.
-	 *
-	 * Should at least call {@link setExecutor}(*this).
-	 */
-	virtual void setUp() = 0;
+  public:
+  virtual ~ModuleBase() = default;
 
-	/**
-	 * Called after finalization. Is also called on MPI
-	 * executors.
-	 */
-	virtual void tearDown()
-	{ }
+  // avoid copy and move operations, due to the constructor above
 
-private:
-	/**
-	 * List of all I/O modules (required by the dispatcher)
-	 */
-	static std::vector<ModuleBase*>& modules()
-	{
-		// Use a function here to avoid an additional .cpp file
-		static std::vector<ModuleBase*> moduleList;
-		return moduleList;
-	}
+  ModuleBase(const ModuleBase&) = delete;
+  ModuleBase(ModuleBase&&) = delete;
+
+  auto operator=(const ModuleBase&) -> ModuleBase& = delete;
+  auto operator=(ModuleBase&&) -> ModuleBase& = delete;
+
+  /**
+   * Called at initialization. Is also called by the {@link Dispatcher}
+   * on MPI executors.
+   *
+   * Should at least call {@link setExecutor}(*this).
+   */
+  virtual void setUp() = 0;
+
+  /**
+   * Called after finalization. Is also called on MPI
+   * executors.
+   */
+  virtual void tearDown() {}
+
+  private:
+  /**
+   * List of all I/O modules (required by the dispatcher)
+   */
+  static auto modules() -> std::vector<ModuleBase*>& {
+    // Use a function here to avoid an additional .cpp file
+    static std::vector<ModuleBase*> moduleList;
+    return moduleList;
+  }
 
 #ifdef USE_MPI
-	/**
-	 * Set the scheduler for this module.
-	 */
-	virtual void setScheduler(as::MPIScheduler &scheduler) = 0;
+  /**
+   * Set the scheduler for this module.
+   */
+  virtual void setScheduler(as::MPIScheduler& scheduler) = 0;
 #endif // USE_MPI
 };
 
-}
+} // namespace async
 
 #endif // ASYNC_MODULEBASE_H

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2016-2024 Technical University of Munich
+//
+// SPDX-License-Identifier: BSD-3-Clause
+
 /**
  * @file
  *  This file is part of ASYNC
@@ -40,100 +44,82 @@
 #include <mpi.h>
 
 #include <cassert>
-#include <vector>
 
 #include "MPIBase.h"
 
-namespace async
-{
-
-namespace as
-{
+namespace async::as {
 
 /**
  * Asynchronous call via MPI
  */
-template<class Executor, typename InitParameter, typename Parameter>
-class MPI : public MPIBase<Executor, InitParameter, Parameter>
-{
-public:
-	MPI()
-	{
-	}
+template <class Executor, typename InitParameter, typename Parameter>
+class MPI : public MPIBase<Executor, InitParameter, Parameter> {
+  public:
+  MPI() = default;
 
-	~MPI()
-	{
-	}
+  ~MPI() override = default;
 
-	unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false)
-	{
-		MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone);
-		return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
-	}
+  auto addSyncBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned override {
+    MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone);
+    return Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, false);
+  }
 
-	unsigned int addBuffer(const void* buffer, size_t size, bool clone = false)
-	{
-		if (buffer == 0L)
-			MPIBase<Executor, InitParameter, Parameter>::scheduler().addManagedBuffer(size);
+  auto addBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned override {
+    if (buffer == nullptr) {
+      MPIBase<Executor, InitParameter, Parameter>::scheduler().addManagedBuffer(size);
+    }
 
-		MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone);
-		return Base<Executor, InitParameter, Parameter>::_addBuffer(buffer, size, false);
-	}
-	
-	void resizeBuffer(unsigned int id, const void* buffer, size_t size)
-	{
-		if (!Base<Executor, InitParameter, Parameter>::origin(id)) {
-			// Resize the managed buffer
-			MPIBase<Executor, InitParameter, Parameter>::scheduler().resizeManagedBuffer(
-				Base<Executor, InitParameter, Parameter>::bufferSize(id), size);
-		}
-		
-		MPIBase<Executor, InitParameter, Parameter>::resizeBuffer(id, buffer, size);
-	}
+    MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone);
+    return Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, false);
+  }
 
-	void removeBuffer(unsigned int id)
-	{
-		if (!Base<Executor, InitParameter, Parameter>::origin(id))
-			MPIBase<Executor, InitParameter, Parameter>::scheduler().removeManagedBuffer(
-				Base<Executor, InitParameter, Parameter>::bufferSize(id));
+  void resizeBuffer(unsigned int id, const void* buffer, size_t size) override {
+    if (Base<Executor, InitParameter, Parameter>::origin(id) == nullptr) {
+      // Resize the managed buffer
+      MPIBase<Executor, InitParameter, Parameter>::scheduler().resizeManagedBuffer(
+          Base<Executor, InitParameter, Parameter>::bufferSize(id), size);
+    }
 
-		MPIBase<Executor, InitParameter, Parameter>::removeBuffer(id);
-	}
+    MPIBase<Executor, InitParameter, Parameter>::resizeBuffer(id, buffer, size);
+  }
 
-	void* managedBuffer(unsigned int id)
-	{
-		if (!Base<Executor, InitParameter, Parameter>::origin(id))
-			return MPIBase<Executor, InitParameter, Parameter>::scheduler().managedBuffer();
+  void removeBuffer(unsigned int id) override {
+    if (Base<Executor, InitParameter, Parameter>::origin(id) == nullptr) {
+      MPIBase<Executor, InitParameter, Parameter>::scheduler().removeManagedBuffer(
+          Base<Executor, InitParameter, Parameter>::bufferSize(id));
+    }
 
-		return 0L;
-	}
+    MPIBase<Executor, InitParameter, Parameter>::removeBuffer(id);
+  }
 
-	const void* buffer(unsigned int id) const
-	{
-		if (MPIBase<Executor, InitParameter, Parameter>::scheduler().isExecutor())
-			return MPIBase<Executor, InitParameter, Parameter>::buffer(id);
+  auto managedBuffer(unsigned int id) -> void* override {
+    if (Base<Executor, InitParameter, Parameter>::origin(id) == nullptr) {
+      return MPIBase<Executor, InitParameter, Parameter>::scheduler().managedBuffer();
+    }
 
-		return Base<Executor, InitParameter, Parameter>::origin(id);
-	}
+    return nullptr;
+  }
 
-	/**
-	 * @warning Only the parameter from one task will be considered
-	 */
-	void call(const Parameter &parameters)
-	{
-		MPIBase<Executor, InitParameter, Parameter>::scheduler().sendParam(
-			MPIBase<Executor, InitParameter, Parameter>::id(), parameters);
-	}
+  [[nodiscard]] auto buffer(unsigned int id) const -> const void* override {
+    if (MPIBase<Executor, InitParameter, Parameter>::scheduler().isExecutor()) {
+      return MPIBase<Executor, InitParameter, Parameter>::buffer(id);
+    }
 
-private:
-	bool useAsyncCopy() const
-	{
-		return false;
-	}
+    return Base<Executor, InitParameter, Parameter>::origin(id);
+  }
+
+  /**
+   * @warning Only the parameter from one task will be considered
+   */
+  void call(const Parameter& parameters) override {
+    MPIBase<Executor, InitParameter, Parameter>::scheduler().sendParam(
+        MPIBase<Executor, InitParameter, Parameter>::id(), parameters);
+  }
+
+  private:
+  [[nodiscard]] auto useAsyncCopy() const -> bool override { return false; }
 };
 
-}
-
-}
+} // namespace async::as
 
 #endif // ASYNC_AS_MPI_H

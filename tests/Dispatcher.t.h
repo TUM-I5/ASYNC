@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2016-2024 Technical University of Munich
+//
+// SPDX-License-Identifier: BSD-3-Clause
+
 /**
  * @file
  *  This file is part of ASYNC
@@ -45,28 +49,24 @@
 /**
  * Test the dispatcher for non MPI mode
  */
-class TestDispatcher : public CxxTest::TestSuite
-{
-public:
-	void testGroupSize()
-	{
-		async::Dispatcher dispatcher;
-		TS_ASSERT_EQUALS(dispatcher.groupSize(), 1);
-	}
+class TestDispatcher : public CxxTest::TestSuite {
+  public:
+  static void testGroupSize() {
+    const async::Dispatcher dispatcher;
+    TS_ASSERT_EQUALS(dispatcher.groupSize(), 1);
+  }
 
-	void testGroupComm()
-	{
-		async::Dispatcher dispatcher;
+  static void testGroupComm() {
+    const async::Dispatcher dispatcher;
 #ifdef USE_MPI
-		TS_ASSERT_EQUALS(dispatcher.groupComm(), MPI_COMM_SELF);
+    TS_ASSERT_EQUALS(dispatcher.groupComm(), MPI_COMM_SELF);
 #endif // USE_MPI
-	}
+  }
 
-	void testCommWorld()
-	{
-		async::Dispatcher dispatcher;
+  static void testCommWorld() {
+    const async::Dispatcher dispatcher;
 #ifdef USE_MPI
-		TS_ASSERT_EQUALS(dispatcher.commWorld(), MPI_COMM_WORLD);
+    TS_ASSERT_EQUALS(dispatcher.commWorld(), MPI_COMM_WORLD);
 #endif // USE_MPI
-	}
+  }
 };
