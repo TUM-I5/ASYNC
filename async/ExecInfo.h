@@ -43,6 +43,7 @@
 
 #include "async/BufferOrigin.h"
 #include <cassert>
+#include <cstddef>
 #include <vector>
 
 namespace async {
