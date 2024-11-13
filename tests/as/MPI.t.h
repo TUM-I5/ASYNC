@@ -265,8 +265,9 @@ class TestMPI : public CxxTest::TestSuite {
     if (m_scheduler->isExecutor()) {
       m_scheduler->loop();
 
-      for (auto i = m_buffers.begin(); i != m_buffers.end(); i++)
+      for (const auto& i : m_buffers) {
         TS_ASSERT_EQUALS(i, 43);
+      }
     } else {
       int buffer = 43;
       async.addBuffer(&buffer, sizeof(int));
@@ -294,8 +295,9 @@ class TestMPI : public CxxTest::TestSuite {
 
       TS_ASSERT_LESS_THAN_EQUALS(1, m_buffers.size());
       TS_ASSERT_LESS_THAN_EQUALS(m_buffers.size(), 2);
-      for (auto i = m_buffers.begin(); i != m_buffers.end(); i++)
+      for (const auto& i : m_buffers) {
         TS_ASSERT_EQUALS(i, 3);
+      }
     } else {
       int buffer = 3;
       async.addSyncBuffer(&buffer, sizeof(int));
@@ -322,8 +324,9 @@ class TestMPI : public CxxTest::TestSuite {
       m_scheduler->loop();
 
       TS_ASSERT_EQUALS(m_buffers.size(), 1);
-      for (auto i = m_buffers.begin(); i != m_buffers.end(); i++)
+      for (const auto& i : m_buffers) {
         TS_ASSERT_EQUALS(i, 3);
+      }
     } else {
       int buffer = 3;
       async.addSyncBuffer(&buffer, sizeof(int), true);
@@ -350,8 +353,9 @@ class TestMPI : public CxxTest::TestSuite {
       m_scheduler->loop();
 
       TS_ASSERT_EQUALS(m_buffers.size(), 1);
-      for (auto i = m_buffers.begin(); i != m_buffers.end(); i++)
+      for (const auto& i : m_buffers) {
         TS_ASSERT_EQUALS(i, 3);
+      }
     } else {
       int buffer = 3;
       async.addBuffer(&buffer, sizeof(int), true);
@@ -637,8 +641,9 @@ class TestMPI : public CxxTest::TestSuite {
     if (m_scheduler->isExecutor()) {
       m_scheduler->loop();
 
-      for (auto i = m_buffers.begin(); i != m_buffers.end(); i++)
+      for (const auto& i : m_buffers) {
         TS_ASSERT_EQUALS(i, 43);
+      }
     } else {
       async.addBuffer(nullptr, sizeof(int));
 
