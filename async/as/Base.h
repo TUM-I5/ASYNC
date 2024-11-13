@@ -97,8 +97,8 @@ class Base : public async::ExecInfo {
    * @param clone True of the buffer is the same (a clone) on all MPI processes.
    *  (Allows additional optimizations.)
    */
-  virtual auto
-      addSyncBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned int = 0;
+  virtual auto addSyncBuffer(const void* buffer, size_t size, bool clone = false)
+      -> unsigned int = 0;
 
   /**
    * @param buffer The original memory location in the application or NULL if ASYNC should

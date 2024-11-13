@@ -185,8 +185,8 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
 
   [[nodiscard]] auto scheduler() const -> const MPIScheduler& { return *m_scheduler; }
 
-  auto
-      addBuffer(const void* buffer, size_t size, bool clone = false, bool sync = true) -> unsigned {
+  auto addBuffer(const void* buffer, size_t size, bool clone = false, bool sync = true)
+      -> unsigned {
     assert(m_scheduler);
     assert(!m_scheduler->isExecutor());
 
