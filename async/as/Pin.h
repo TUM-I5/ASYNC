@@ -7,6 +7,10 @@
 
 #include <pthread.h>
 
+#ifndef __APPLE__
+#include <sched.h>
+#endif
+
 namespace async::as {
 struct CpuMask {
 #ifndef __APPLE__

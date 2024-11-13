@@ -13,10 +13,10 @@
 #define ASYNC_MODULE_H
 
 #include "async/BufferOrigin.h"
+#include "async/as/Base.h"
+#include "async/as/MPIScheduler.h"
+#include <cstddef>
 #include <memory>
-#ifdef USE_MPI
-#include <mpi.h>
-#endif // USE_MPI
 
 #ifdef USE_MPI
 #include "async/as/MPI.h"

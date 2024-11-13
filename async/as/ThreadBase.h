@@ -12,10 +12,10 @@
 #ifndef ASYNC_AS_THREADBASE_H
 #define ASYNC_AS_THREADBASE_H
 
+#include <cassert>
 #include <cstring>
 #include <optional>
 #include <pthread.h>
-#include <sched.h>
 
 #include "utils/logger.h"
 

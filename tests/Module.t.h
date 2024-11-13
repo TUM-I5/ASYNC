@@ -9,6 +9,9 @@
  * @author Sebastian Rettenberger <sebastian.rettenberger@tum.de>
  */
 
+#include "async/ExecInfo.h"
+#include <array>
+#include <sys/sysinfo.h>
 #ifdef USE_MPI
 #include <mpi.h>
 #endif // USE_MPI

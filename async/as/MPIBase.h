@@ -12,6 +12,8 @@
 #ifndef ASYNC_AS_MPIBASE_H
 #define ASYNC_AS_MPIBASE_H
 
+#include <cstdint>
+#include <algorithm>
 #include <mpi.h>
 
 #include <cassert>
@@ -21,6 +23,7 @@
 #include "MPIScheduler.h"
 #include "ThreadBase.h"
 #include "async/Config.h"
+#include "async/as/Base.h"
 
 namespace async::as {
 

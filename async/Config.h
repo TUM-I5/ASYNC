@@ -12,6 +12,7 @@
 #ifndef ASYNC_CONFIG_H
 #define ASYNC_CONFIG_H
 
+#include <cstddef>
 #include <string>
 
 #include "utils/env.h"

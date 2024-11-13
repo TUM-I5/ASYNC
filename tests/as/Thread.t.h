@@ -14,9 +14,11 @@
 #include <cstdlib>
 #include <ctime>
 #include <pthread.h>
+#include <sched.h>
 #include <sys/sysinfo.h>
 
 #include "Executor.h"
+#include "async/as/Pin.h"
 #include "async/as/Thread.h"
 
 class TestThread : public CxxTest::TestSuite {

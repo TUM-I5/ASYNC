@@ -9,8 +9,13 @@
  * @author Sebastian Rettenberger <sebastian.rettenberger@tum.de>
  */
 
+#include <cstddef>
+#include "async/Config.h"
+#include "async/as/MPIScheduler.h"
+#include <array>
 #include <mpi.h>
 
+#include <pthread.h>
 #include <vector>
 
 #include <cxxtest/GlobalFixture.h>

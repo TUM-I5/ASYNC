@@ -12,11 +12,12 @@
 #ifndef ASYNC_AS_MPI_H
 #define ASYNC_AS_MPI_H
 
-#include <mpi.h>
+#include <cstddef>
 
 #include <cassert>
 
 #include "MPIBase.h"
+#include "async/as/Base.h"
 
 namespace async::as {
 

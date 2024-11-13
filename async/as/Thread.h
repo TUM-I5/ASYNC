@@ -12,9 +12,14 @@
 #ifndef ASYNC_AS_THREAD_H
 #define ASYNC_AS_THREAD_H
 
+#include "async/as/Pin.h"
+#include "utils/logger.h"
+#include "async/as/Base.h"
+#include "async/ExecInfo.h"
 #include <cassert>
 #include <cstring>
 #include <sched.h>
+#include <vector>
 #ifndef __APPLE__
 #include <sys/sysinfo.h>
 #endif // __APPLE__

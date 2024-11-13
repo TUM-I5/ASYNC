@@ -9,6 +9,7 @@
  * @author Sebastian Rettenberger <sebastian.rettenberger@tum.de>
  */
 
+#include <cstdint>
 #include <cxxtest/TestSuite.h>
 
 #include <cmath>
