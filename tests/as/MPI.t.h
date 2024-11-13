@@ -9,10 +9,10 @@
  * @author Sebastian Rettenberger <sebastian.rettenberger@tum.de>
  */
 
-#include <cstddef>
 #include "async/Config.h"
 #include "async/as/MPIScheduler.h"
 #include <array>
+#include <cstddef>
 #include <mpi.h>
 
 #include <pthread.h>

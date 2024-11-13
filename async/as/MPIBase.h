@@ -12,8 +12,8 @@
 #ifndef ASYNC_AS_MPIBASE_H
 #define ASYNC_AS_MPIBASE_H
 
-#include <cstdint>
 #include <algorithm>
+#include <cstdint>
 #include <mpi.h>
 
 #include <cassert>

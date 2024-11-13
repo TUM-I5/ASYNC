@@ -13,9 +13,9 @@
 #define ASYNC_AS_THREAD_H
 
 #include "async/as/Pin.h"
-#include "utils/logger.h"
-#include "async/as/Base.h"
 #include "async/ExecInfo.h"
+#include "async/as/Base.h"
+#include "utils/logger.h"
 #include <cassert>
 #include <cstring>
 #include <sched.h>
