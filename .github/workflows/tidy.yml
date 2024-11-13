@@ -42,4 +42,5 @@ jobs:
           mkdir -p build && cd build
           cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DTESTING=ON -DUSE_MPI=ON -GNinja
           sed -i 's/-fprofile-abs-path //g' compile_commands.json
-          for f in $(find ../ -iname '*.h'); do clang-tidy-18 -p . $f; done
+          for f in $(find ../async -iname '*.h'); do clang-tidy-18 -p . $f; done
+          for f in $(find ../tests -iname '*.h'); do clang-tidy-18 -p . $f; done
