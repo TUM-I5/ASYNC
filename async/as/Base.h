@@ -1,357 +1,315 @@
+// SPDX-FileCopyrightText: 2016-2024 Technical University of Munich
+//
+// SPDX-License-Identifier: BSD-3-Clause
+
 /**
  * @file
  *  This file is part of ASYNC
  *
  * @author Sebastian Rettenberger <sebastian.rettenberger@tum.de>
- *
- * @copyright Copyright (c) 2016-2017, Technische Universitaet Muenchen.
- *  All rights reserved.
- *
- *  Redistribution and use in source and binary forms, with or without
- *  modification, are permitted provided that the following conditions are met:
- *
- *  1. Redistributions of source code must retain the above copyright notice,
- *     this list of conditions and the following disclaimer.
- *
- *  2. Redistributions in binary form must reproduce the above copyright notice
- *     this list of conditions and the following disclaimer in the documentation
- *     and/or other materials provided with the distribution.
- *
- *  3. Neither the name of the copyright holder nor the names of its
- *     contributors may be used to endorse or promote products derived from this
- *     software without specific prior written permission.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- *  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- *  IMPLIED WARRANTIES OF  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- *  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- *  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- *  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- *  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- *  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- *  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *  ARISING IN ANY WAY OUT OF THE  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef ASYNC_AS_BASE_H
 #define ASYNC_AS_BASE_H
 
 #include <cassert>
+#include <cstdint>
 #include <cstdlib>
-#include <stdint.h>
+#include <type_traits>
 #include <vector>
 
+#include "Pin.h"
 #include "utils/logger.h"
 
-#include "async/as/Pin.h"
+#include "Magic.h"
 #include "async/Config.h"
 #include "async/ExecInfo.h"
-#include "Magic.h"
+#include "async/NoParam.h"
+#include "async/as/Pin.h"
 
-namespace async
-{
-
-namespace as
-{
+namespace async::as {
 
 class MPIScheduler;
-
-
 
 /**
  * Base class for (a)synchronous communication
  */
-template<class Executor, typename InitParameter, typename Parameter>
-class Base : public async::ExecInfo
-{
-private:
-	ASYNC_HAS_MEM_FUNC_T1(execInit, execInitHasExec, P, void, const ExecInfo&, const P&);
-	ASYNC_HAS_MEM_FUNC_T1(exec, execHasExec, P, void, const ExecInfo&, const P&);
+template <class Executor, typename InitParameter = NoParam, typename Parameter = NoParam>
+class Base : public async::ExecInfo {
+  private:
+  ASYNC_HAS_MEM_FUNC_T1(execInit, ExecInitHasExec, P, void, const ExecInfo&, const P&);
+  ASYNC_HAS_MEM_FUNC_T1(exec, ExecHasExec, P, void, const ExecInfo&, const P&);
+  ASYNC_HAS_MEM_FUNC_T1(execWait, ExecWaitHasExec, P, void, const ExecInfo&);
+  ASYNC_HAS_MEM_FUNC_T1(execWait, ExecWaitHasNoExec, P, void);
 
-	/**
-	 * Description of a buffer
-	 */
-	struct BufInfo
-	{
-		/** The original memory */
-		const void* origin;
-		/** The buffer on the executor */
-		void* buffer;
-	};
+  /**
+   * Description of a buffer
+   */
+  struct BufInfo {
+    /** The original memory */
+    const void* origin;
+    /** The buffer on the executor */
+    void* buffer;
+  };
 
-private:
-	/** The executor for the asynchronous call */
-	Executor* m_executor;
+  /** The executor for the asynchronous call */
+  Executor* m_executor;
 
-	/** The buffers */
-	std::vector<BufInfo> m_buffer;
+  /** The buffers */
+  std::vector<BufInfo> m_buffer;
 
-	/** Already cleanup everything? */
-	bool m_finalized;
+  /** Already cleanup everything? */
+  bool m_finalized{false};
 
-	/** Aligment of buffers (might be requested for I/O back-ends) */
-	const size_t m_alignment;
+  /** Aligment of buffers (might be requested for I/O back-ends) */
+  const size_t mAlignment;
 
-protected:
-	Base()
-		: m_executor(0L),
-		  m_finalized(false),
-		  m_alignment(async::Config::alignment())
-	{
-	}
+  Parameter m_lastParameters;
 
-public:
-	virtual ~Base()
-	{
-		_finalize();
-	}
+  protected:
+  Base() : m_executor(nullptr), mAlignment(async::Config::alignment()) {}
 
-	/**
-	 * Only required in asynchronous MPI mode
-	 */
-	virtual void setScheduler(MPIScheduler &scheduler)
-	{ }
+  public:
+  ~Base() override { finalizeInternal(); }
 
-	virtual void setExecutor(Executor &executor)
-	{
-		m_executor = &executor;
-	}
+  auto operator=(Base&&) -> Base& = delete;
+  auto operator=(const Base&) -> Base& = delete;
+  Base(const Base&) = delete;
+  Base(Base&&) = delete;
 
-	virtual bool isAffinityNecessary() {
-		return false;
-	}
+  /**
+   * Only required in asynchronous MPI mode
+   */
+  virtual void setScheduler(MPIScheduler& scheduler) {}
 
-	virtual void setAffinityIfNecessary(const as::CpuMask& cpuMask) {
-		// Do nothing in the general case.
-	}
+  virtual void setExecutor(Executor& executor) { m_executor = &executor; }
 
-	/**
-	 * Add a buffer that is not copied for asychronous calls.
-	 *
-	 * Can be used for constant data or for initialization calls.
-	 *
-	 * @param clone True of the buffer is the same (a clone) on all MPI processes.
-	 *  (Allows additional optimizations.)
-	 */
-	virtual unsigned int addSyncBuffer(const void* buffer, size_t size, bool clone = false) = 0;
+  virtual auto isAffinityNecessary() -> bool { return false; }
 
-	/**
-	 * @param buffer The original memory location in the application or NULL if ASYNC should
-	 *  manage the buffer. (See {@link managedBuffer()}
-	 * @param bufferSize The size of the memory location
-	 * @param clone True of the buffer is the same (a clone) on all MPI processes.
-	 * @return The id of the buffer
-	 */
-	virtual unsigned int addBuffer(const void* buffer, size_t size, bool clone = false) = 0;
-	
-	/**
-	 * Resize an existing buffer
-	 * 
-	 * @param id The id of the buffer
-	 * @param buffer The new original memory location
-	 * @param size The new size
-	 */
-	virtual void resizeBuffer(unsigned int id, const void* buffer, size_t size) = 0;
+  virtual void setAffinityIfNecessary(const as::CpuMask& cpuMask) {
+    // Do nothing in the general case.
+  }
 
-	/**
-	 * Frees all memory allocated for the buffer.
-	 *
-	 * It is errornous to send buffers which have been removed. Removing buffers
-	 * should only be done between {@link wait()} and {@link call()}.
-	 *
-	 * @warning This will not change the results of {@link numBuffers()}.
-	 */
-	virtual void removeBuffer(unsigned int id)
-	{
-		assert(id < numBuffers());
+  /**
+   * Add a buffer that is not copied for asychronous calls.
+   *
+   * Can be used for constant data or for initialization calls.
+   *
+   * @param clone True of the buffer is the same (a clone) on all MPI processes.
+   *  (Allows additional optimizations.)
+   */
+  virtual auto addSyncBuffer(const void* buffer, size_t size, bool clone = false)
+      -> unsigned int = 0;
 
-		m_buffer[id].origin = 0L;
-		free(m_buffer[id].buffer);
-		m_buffer[id].buffer = 0L;
-		async::ExecInfo::_removeBuffer(id);
-	}
+  /**
+   * @param buffer The original memory location in the application or NULL if ASYNC should
+   *  manage the buffer. (See {@link managedBuffer()}
+   * @param bufferSize The size of the memory location
+   * @param clone True of the buffer is the same (a clone) on all MPI processes.
+   * @return The id of the buffer
+   */
+  virtual auto addBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned int = 0;
 
-	/**
-	 * @return Pointer to the managed buffer or NULL if this buffer is
-	 *  not managed
-	 *
-	 * @warning This buffer might be shared by ASYNC modules.
-	 */
-	virtual void* managedBuffer(unsigned int id)
-	{
-		if (origin(id) == 0L) {
-			assert(_buffer(id));
-			return _buffer(id);
-		}
+  /**
+   * Resize an existing buffer
+   *
+   * @param id The id of the buffer
+   * @param buffer The new original memory location
+   * @param size The new size
+   */
+  virtual void resizeBuffer(unsigned int id, const void* buffer, size_t size) = 0;
 
-		return 0L;
-	}
+  /**
+   * Frees all memory allocated for the buffer.
+   *
+   * It is errornous to send buffers which have been removed. Removing buffers
+   * should only be done between {@link wait()} and {@link call()}.
+   *
+   * @warning This will not change the results of {@link numBuffers()}.
+   */
+  virtual void removeBuffer(unsigned int id) {
+    assert(id < numBuffers());
 
-	/**
-	 * @param size The size that should be transfered
-	 */
-	virtual void sendBuffer(unsigned int id, size_t size) = 0;
+    m_buffer[id].origin = nullptr;
+    free(m_buffer[id].buffer);
+    m_buffer[id].buffer = nullptr;
+    async::ExecInfo::removeBufferInternal(id);
+  }
 
-	virtual void callInit(const InitParameter &parameters)
-	{
-		_callInit<Executor, InitParameter>(parameters);
-	}
+  /**
+   * @return Pointer to the managed buffer or NULL if this buffer is
+   *  not managed
+   *
+   * @warning This buffer might be shared by ASYNC modules.
+   */
+  virtual auto managedBuffer(unsigned int id) -> void* {
+    if (origin(id) == nullptr) {
+      assert(bufferInternal(id) != nullptr || async::ExecInfo::bufferSize(id) == 0);
+      return bufferInternal(id);
+    }
 
-	virtual void call(const Parameter &parameters)
-	{
-		_call<Executor, Parameter>(parameters);
-	}
+    return nullptr;
+  }
 
-	virtual void wait() = 0;
+  /**
+   * @param size The size that should be transfered
+   */
+  virtual void sendBuffer(unsigned int id, size_t size) = 0;
 
-	virtual void finalize()
-	{
-		_finalize();
-	}
+  virtual void callInit(const InitParameter& parameters) {
+    callInitInternal<Executor, InitParameter>(parameters);
+  }
 
-protected:
-	Executor& executor() {
-		return *m_executor;
-	}
+  virtual void call(const Parameter& parameters) { callInternal<Executor, Parameter>(parameters); }
 
-	unsigned int _addBuffer(const void* origin, size_t size, bool allocate = true)
-	{
-		async::ExecInfo::_addBuffer(size);
+  virtual void wait() { callWaitInternal<Executor, Parameter>(); }
 
-		BufInfo buffer;
-		buffer.origin = origin;
+  virtual void finalize() { finalizeInternal(); }
 
-		if (size && allocate) {
-			if (m_alignment > 0) {
-				const size_t allocBufferSize = allocSize(size);
-				int ret = posix_memalign(&buffer.buffer, m_alignment, allocBufferSize);
-				if (ret)
-					logError() << "Could not allocate buffer" << ret;
-			} else {
-				buffer.buffer = malloc(size);
-			}
-		} else
-			buffer.buffer = 0L;
+  protected:
+  auto executor() -> Executor& { return *m_executor; }
 
-		m_buffer.push_back(buffer);
-		assert(m_buffer.size() == numBuffers());
+  auto addBufferInternal(const void* origin, size_t size, bool allocate = true) -> unsigned int {
+    async::ExecInfo::addBufferInternal(size);
 
-		return m_buffer.size()-1;
-	}
-	
-	void _resizeBuffer(unsigned int id, const void* origin, size_t size)
-	{
-		assert(id < numBuffers());
-		if (origin && m_buffer[id].origin)
-			m_buffer[id].origin = origin;
-		
-		if (async::ExecInfo::bufferSize(id) == size)
-			return;
-		
-		async::ExecInfo::_resizeBuffer(id, size);
-		
-		if (size && m_buffer[id].buffer) {
-			if (m_alignment > 0) {
-				const size_t allocBufferSize = allocSize(size);
-				free(m_buffer[id].buffer);
-				int ret = posix_memalign(&m_buffer[id].buffer, m_alignment, allocBufferSize);
-				if (ret)
-					logError() << "Could not allocate buffer" << ret;
-			} else {
-				m_buffer[id].buffer = realloc(m_buffer[id].buffer, size);
-			}
-		}
-	}
+    BufInfo buffer{};
+    buffer.origin = origin;
 
-	/**
-	 * Return u_int8_t to allow arithmetic on the pointer
-	 */
-	const uint8_t* origin(unsigned int id) const
-	{
-		assert(id < numBuffers());
-		return static_cast<const uint8_t*>(m_buffer[id].origin);
-	}
+    if ((size != 0U) && allocate) {
+      if (mAlignment > 0) {
+        const size_t allocBufferSize = allocSize(size);
+        const int ret = posix_memalign(&buffer.buffer, mAlignment, allocBufferSize);
+        if (ret != 0) {
+          logError() << "Could not allocate buffer" << ret;
+        }
+      } else {
+        buffer.buffer = malloc(size);
+      }
+    } else {
+      buffer.buffer = nullptr;
+    }
 
-	const void* _buffer(unsigned int id) const
-	{
-		assert(id < numBuffers());
-		return m_buffer[id].buffer;
-	}
+    m_buffer.push_back(buffer);
+    assert(m_buffer.size() == numBuffers());
 
-	/**
-	 * Return u_int8_t to allow arithmetic on the pointer
-	 */
-	uint8_t* _buffer(unsigned int id)
-	{
-		assert(id < numBuffers());
-		return static_cast<uint8_t*>(m_buffer[id].buffer);
-	}
+    return m_buffer.size() - 1;
+  }
 
-	/**
-	 * Finalize (cleanup) the async call
-	 *
-	 * @return False if the class was already finalized
-	 */
-	bool _finalize()
-	{
-		if (m_finalized)
-			return false;
+  void resizeBufferInternal(unsigned int id, const void* origin, size_t size) {
+    assert(id < numBuffers());
+    if (origin && m_buffer[id].origin) {
+      m_buffer[id].origin = origin;
+    }
 
-		for (unsigned int i = 0; i < m_buffer.size(); i++) {
-			m_buffer[i].origin = 0L;
-			free(m_buffer[i].buffer);
-			m_buffer[i].buffer = 0L;
-			async::ExecInfo::_removeBuffer(i);
-		}
+    if (async::ExecInfo::bufferSize(id) == size) {
+      return;
+    }
 
-		m_finalized = true;
-		return true;
-	}
-	
-private:
-	/**
-	 * Compute the allocated size depending on the requested size
-	 */
-	size_t allocSize(size_t size)
-	{
-		// Make the allocated buffer size a multiple of m_alignment
-		size_t allocBufferSize = (size + m_alignment - 1) / m_alignment;
-		allocBufferSize *= m_alignment;
-		
-		return allocBufferSize;
-	}
+    async::ExecInfo::resizeBufferInternal(id, size);
 
-private:
-	template<typename E, typename P>
-	typename enable_if<execInitHasExec<E, P>::value>::type
-	_callInit(const P &parameters) {
-		const ExecInfo &info = *this;
-		m_executor->execInit(info, parameters);
-	}
+    if (size && m_buffer[id].buffer) {
+      if (mAlignment > 0) {
+        const size_t allocBufferSize = allocSize(size);
+        free(m_buffer[id].buffer);
+        const int ret = posix_memalign(&m_buffer[id].buffer, mAlignment, allocBufferSize);
+        if (ret != 0) {
+          logError() << "Could not allocate buffer" << ret;
+        }
+      } else {
+        m_buffer[id].buffer = realloc(m_buffer[id].buffer, size);
+      }
+    }
+  }
 
-	template<typename E, typename P>
-	typename enable_if<!execInitHasExec<E, P>::value>::type
-	_callInit(const P &parameters) {
-		m_executor->execInit(parameters);
-	}
+  /**
+   * Return u_int8_t to allow arithmetic on the pointer
+   */
+  [[nodiscard]] auto origin(unsigned int id) const -> const uint8_t* {
+    assert(id < numBuffers());
+    return static_cast<const uint8_t*>(m_buffer[id].origin);
+  }
 
-	template<typename E, typename P>
-	typename enable_if<execHasExec<E, P>::value>::type
-	_call(const P &parameters) {
-		const ExecInfo &info = *this;
-		m_executor->exec(info, parameters);
-	}
+  [[nodiscard]] auto bufferInternal(unsigned int id) const -> const void* {
+    assert(id < numBuffers());
+    return m_buffer[id].buffer;
+  }
 
-	template<typename E, typename P>
-	typename enable_if<!execHasExec<E, P>::value>::type
-	_call(const P &parameters) {
-		m_executor->exec(parameters);
-	}
+  /**
+   * Return u_int8_t to allow arithmetic on the pointer
+   */
+  auto bufferInternal(unsigned int id) -> uint8_t* {
+    assert(id < numBuffers());
+    return static_cast<uint8_t*>(m_buffer[id].buffer);
+  }
+
+  /**
+   * Finalize (cleanup) the async call
+   *
+   * @return False if the class was already finalized
+   */
+  auto finalizeInternal() -> bool {
+    if (m_finalized) {
+      return false;
+    }
+
+    for (unsigned int i = 0; i < m_buffer.size(); i++) {
+      m_buffer[i].origin = nullptr;
+      free(m_buffer[i].buffer);
+      m_buffer[i].buffer = nullptr;
+      async::ExecInfo::removeBufferInternal(i);
+    }
+
+    m_finalized = true;
+    return true;
+  }
+
+  private:
+  /**
+   * Compute the allocated size depending on the requested size
+   */
+  auto allocSize(size_t size) -> size_t {
+    // Make the allocated buffer size a multiple of m_alignment
+    size_t allocBufferSize = (size + mAlignment - 1) / mAlignment;
+    allocBufferSize *= mAlignment;
+
+    return allocBufferSize;
+  }
+
+  template <typename E, typename P>
+  auto callInitInternal(const P& parameters) ->
+      typename std::enable_if_t<ExecInitHasExec<E, P>::Value> {
+    const ExecInfo& info = *this;
+    m_executor->execInit(info, parameters);
+  }
+
+  template <typename E, typename P>
+  auto callInitInternal(const P& parameters) ->
+      typename std::enable_if_t<!ExecInitHasExec<E, P>::Value> {
+    m_executor->execInit(parameters);
+  }
+
+  template <typename E, typename P>
+  auto callInternal(const P& parameters) -> typename std::enable_if_t<ExecHasExec<E, P>::Value> {
+    const ExecInfo& info = *this;
+    m_executor->exec(info, parameters);
+  }
+
+  template <typename E, typename P>
+  auto callInternal(const P& parameters) -> typename std::enable_if_t<!ExecHasExec<E, P>::Value> {
+    m_executor->exec(parameters);
+  }
+
+  template <typename E, typename P>
+  auto callWaitInternal() -> typename std::enable_if_t<ExecWaitHasExec<E, P>::Value> {
+    const ExecInfo& info = *this;
+    m_executor->execWait(info);
+  }
+
+  template <typename E, typename P>
+  auto callWaitInternal() ->
+      typename std::enable_if_t<!ExecWaitHasNoExec<E, P>::Value && !ExecWaitHasExec<E, P>::Value> {}
 };
 
-}
-
-}
+} // namespace async::as
 
 #endif // ASYNC_AS_BASE_H
