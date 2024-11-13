@@ -39,9 +39,7 @@ jobs:
           set -euo pipefail
           clang-tidy-18 --version
           which clang-tidy-18
-          git submodule update --init
           mkdir -p build && cd build
           cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DTESTING=ON -DUSE_MPI=ON -GNinja
           sed -i 's/-fprofile-abs-path //g' compile_commands.json
-          ninja
-          run-clang-tidy ../tests -clang-tidy-binary=$(which clang-tidy-18) -quiet -j $(nproc)
+          for f in $(find ../ -iname '*.h'); do clang-tidy-18 -p . $f; done
