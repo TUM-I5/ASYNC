@@ -32,6 +32,8 @@ enum Mode { SYNC, THREAD, MPI };
  */
 class Config {
   private:
+  utils::Env env{"ASYNC_"};
+
   Mode m_mode;
 
   int m_pinCore;
@@ -43,11 +45,11 @@ class Config {
   size_t m_alignment;
 
   Config()
-      : m_mode(str2mode(utils::Env::get<const char*>("ASYNC_MODE", "SYNC"))),
-        m_pinCore(utils::Env::get<int>("ASYNC_PIN_CORE", -1)),
-        m_groupSize(m_mode == MPI ? utils::Env::get("ASYNC_GROUP_SIZE", 64) : 1),
-        m_asyncCopy(utils::Env::get<int>("ASYNC_MPI_COPY", 0) != 0),
-        m_alignment(utils::Env::get<size_t>("ASYNC_BUFFER_ALIGNMENT", 0)) {}
+      : m_mode(str2mode(env.get<const char*>("MODE", "SYNC"))),
+      m_pinCore(env.get<int>("PIN_CORE", -1)),
+      m_groupSize(m_mode == MPI ? env.get("GROUP_SIZE", 64) : 1),
+      m_asyncCopy(env.get<bool>("MPI_COPY", false)),
+      m_alignment(env.get<size_t>("BUFFER_ALIGNMENT", 0)) {}
 
   public:
   static auto mode() -> Mode { return instance().m_mode; }
@@ -61,7 +63,7 @@ class Config {
   static auto alignment() -> size_t { return instance().m_alignment; }
 
   static auto maxSend() -> size_t {
-    return utils::Env::get<size_t>("ASYNC_MPI_MAX_SEND", 1UL << 30);
+    return instance().env.get<size_t>("MPI_MAX_SEND", 1UL << 30);
   }
 
   static void setMode(Mode mode) { instance().m_mode = mode; }
