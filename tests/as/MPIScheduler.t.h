@@ -73,6 +73,10 @@ class TestMPIScheduler : public CxxTest::TestSuite {
     case 3:
       MPI_Comm_size(scheduler.groupComm(), &size);
       TS_ASSERT_EQUALS(size, 1);
+      break;
+    default:
+      TS_ASSERT(false);
+      break;
     }
   }
 };

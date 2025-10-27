@@ -14,14 +14,15 @@
 
 #include "async/BufferOrigin.h"
 #include "async/as/Base.h"
-#include "async/as/MPIScheduler.h"
 #include <cstddef>
 #include <memory>
 
 #ifdef USE_MPI
 #include "async/as/MPI.h"
 #include "async/as/MPIAsync.h"
+#include "async/as/MPIScheduler.h"
 #endif // USE_MPI
+
 #include "async/as/Pin.h"
 #include "async/as/Sync.h"
 #include "async/as/Thread.h"
@@ -39,13 +40,13 @@ class Module : public ModuleBase {
   public:
   Module() {
     switch (Config::mode()) {
-    case SYNC:
+    case Mode::Sync:
       m_async = std::make_unique<async::as::Sync<Executor, InitParameter, Parameter>>();
       break;
-    case THREAD:
+    case Mode::Thread:
       m_async = std::make_unique<async::as::Thread<Executor, InitParameter, Parameter>>();
       break;
-    case MPI:
+    case Mode::MPI:
 #ifdef USE_MPI
       if (Config::useAsyncCopy()) {
         m_async = std::make_unique<async::as::MPIAsync<Executor, InitParameter, Parameter>>();
@@ -83,7 +84,7 @@ class Module : public ModuleBase {
 
   void removeBuffer(unsigned int id) { m_async->removeBuffer(id); }
 
-  [[nodiscard]] auto numBuffers() const -> unsigned int { return m_async->numBuffers(); }
+  [[nodiscard]] auto numBuffers() const -> std::size_t { return m_async->numBuffers(); }
 
   [[nodiscard]] auto bufferSize(unsigned int id) const -> size_t { return m_async->bufferSize(id); }
 

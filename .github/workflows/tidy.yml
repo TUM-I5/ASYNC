@@ -36,11 +36,15 @@ jobs:
 
       - name: clang-tidy
         run: |
-          set -euo pipefail
           clang-tidy-21 --version
           which clang-tidy-21
           mkdir -p build && cd build
           cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DTESTING=ON -DUSE_MPI=ON -GNinja
           sed -i 's/-fprofile-abs-path //g' compile_commands.json
-          for f in $(find ../async -iname '*.h'); do clang-tidy-21 -p . $f; done
-          for f in $(find ../tests -iname '*.h'); do clang-tidy-21 -p . $f; done
+
+          # idea taken from https://stackoverflow.com/a/34951881
+          FAILED=0
+          for f in $(find ../async -iname '*.h'); do clang-tidy-21 -p . $f || FAILED=1; done
+          for f in $(find ../tests -iname '*.h'); do clang-tidy-21 -p . $f || FAILED=1; done
+
+          exit $FAILED

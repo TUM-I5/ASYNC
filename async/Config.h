@@ -24,7 +24,7 @@ namespace async {
 /**
  * The asynchnchronous mode that should be used
  */
-enum Mode { SYNC, THREAD, MPI };
+enum class Mode { Sync, Thread, MPI };
 
 /**
  * @warning Overwriting the default values from the environment is only allowed
@@ -47,7 +47,7 @@ class Config {
   Config()
       : m_mode(str2mode(env.get<const char*>("MODE", "SYNC"))),
         m_pinCore(env.get<int>("PIN_CORE", -1)),
-        m_groupSize(m_mode == MPI ? env.get("GROUP_SIZE", 64) : 1),
+        m_groupSize(m_mode == Mode::MPI ? env.get("GROUP_SIZE", 64) : 1),
         m_asyncCopy(env.get<bool>("MPI_COPY", false)),
         m_alignment(env.get<size_t>("BUFFER_ALIGNMENT", 0)) {}
 
@@ -71,7 +71,7 @@ class Config {
   static void setUseAsyncCopy(bool useAsyncCopy) { instance().m_asyncCopy = useAsyncCopy; }
 
   static void setGroupSize(unsigned int groupSize) {
-    if (Config::mode() == MPI) {
+    if (Config::mode() == Mode::MPI) {
       instance().m_groupSize = groupSize;
     }
   }
@@ -89,11 +89,11 @@ class Config {
     utils::StringUtils::toUpper(strMode);
 
     if (strMode == "THREAD") {
-      return THREAD;
+      return Mode::Thread;
     }
     if (strMode == "MPI") {
 #ifdef USE_MPI
-      return MPI;
+      return Mode::MPI;
 #else  // USE_MPI
       logError() << "Asynchronous MPI is not supported without MPI";
 #endif // USE_MPI
@@ -102,7 +102,7 @@ class Config {
       logWarning() << "Unknown mode" << utils::nospace << strMode
                    << "for ASYNC output. Using synchronous mode.";
     }
-    return SYNC;
+    return Mode::Sync;
   }
 };
 

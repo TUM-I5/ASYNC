@@ -43,7 +43,7 @@ class ExecInfo {
     return false; // Default for sync and thread
   }
 
-  [[nodiscard]] auto numBuffers() const -> unsigned int { return m_bufferSize.size(); }
+  [[nodiscard]] auto numBuffers() const -> std::size_t { return m_bufferSize.size(); }
 
   [[nodiscard]] auto bufferSize(unsigned int id) const -> size_t {
     assert(id < numBuffers());

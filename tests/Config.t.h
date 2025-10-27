@@ -19,10 +19,10 @@
 class TestConfig : public CxxTest::TestSuite {
   public:
   static void testMode() {
-    TS_ASSERT_EQUALS(async::Config::mode(), async::SYNC);
+    TS_ASSERT_EQUALS(async::Config::mode(), async::Mode::Sync);
 
-    async::Config::setMode(async::THREAD);
-    TS_ASSERT_EQUALS(async::Config::mode(), async::THREAD);
+    async::Config::setMode(async::Mode::Thread);
+    TS_ASSERT_EQUALS(async::Config::mode(), async::Mode::Thread);
   }
 
   static void testGetPinCore() {
@@ -38,7 +38,7 @@ class TestConfig : public CxxTest::TestSuite {
     async::Config::setGroupSize(4);
     TS_ASSERT_EQUALS(async::Config::groupSize(), 1);
 
-    async::Config::setMode(async::MPI);
+    async::Config::setMode(async::Mode::MPI);
     async::Config::setGroupSize(4);
     TS_ASSERT_EQUALS(async::Config::groupSize(), 4);
   }

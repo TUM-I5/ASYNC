@@ -13,6 +13,7 @@
 
 #include "Executor.h"
 #include "async/as/Sync.h"
+#include <array>
 
 class Param;
 class TestSync : public CxxTest::TestSuite {

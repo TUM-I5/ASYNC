@@ -11,6 +11,7 @@
 
 #include <cxxtest/TestSuite.h>
 
+#include <array>
 #include <cstdlib>
 #include <ctime>
 #include <pthread.h>

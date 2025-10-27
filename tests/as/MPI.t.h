@@ -55,6 +55,9 @@ class LargeBuffer : public CxxTest::GlobalFixture {
   [[nodiscard]] auto size() const -> size_t { return m_size; }
 };
 
+// the following needs to be global to work correctly.
+
+// NOLINTNEXTLINE
 static LargeBuffer largeBuffer;
 
 class TestMPI : public CxxTest::TestSuite {

@@ -13,11 +13,8 @@
 #define ASYNC_DISPATCHER_H
 
 #ifdef USE_MPI
-#include <mpi.h>
-#endif // USE_MPI
-
-#ifdef USE_ASYNC_MPI
 #include "async/as/MPIScheduler.h"
+#include <mpi.h>
 #endif // USE_ASYNC_MPI
 
 #include "Config.h"
@@ -60,7 +57,7 @@ class Dispatcher {
    * @deprecated Use {@link Config::setGroupSize}
    */
   void setGroupSize(unsigned int groupSize) {
-    if (Config::mode() == MPI) {
+    if (Config::mode() == Mode::MPI) {
       m_groupSize = groupSize;
     }
   }
@@ -79,7 +76,7 @@ class Dispatcher {
       module->setScheduler(m_scheduler);
     }
 
-    if (Config::mode() == MPI) {
+    if (Config::mode() == Mode::MPI) {
       // Initialize the scheduler
       m_scheduler.setCommunicator(m_comm, m_groupSize);
     }

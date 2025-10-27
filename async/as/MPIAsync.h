@@ -43,7 +43,7 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
      *
      * This is not counting the selecting isend.
      */
-    unsigned int requests;
+    std::size_t requests;
   };
 
   /** Buffer for the parameter */
@@ -84,11 +84,10 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
    */
   auto addBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned override {
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone, false);
-    const unsigned int id =
-        Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size);
+    const auto id = Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size);
 
     // Initialize the requests
-    unsigned int requests = 0;
+    std::size_t requests = 0;
     if (size > 0 &&
         (!clone || MPIBase<Executor, InitParameter, Parameter>::scheduler().groupRank() == 0)) {
       requests = (size + MPIBase<Executor, InitParameter, Parameter>::maxSend() - 1) /
@@ -109,7 +108,7 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
   void resizeBuffer(unsigned int id, const void* buffer, size_t size) override {
     assert(id < m_buffer.size());
 
-    int requests = m_buffer[id].requests;
+    auto requests = m_buffer[id].requests;
     if (requests > 0) {
       m_buffer[id].requests = (size + MPIBase<Executor, InitParameter, Parameter>::maxSend() - 1) /
                               MPIBase<Executor, InitParameter, Parameter>::maxSend();
@@ -215,12 +214,12 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
    * Should only be used in asynchronous copy mode
    */
   void iSendAllBuffers() {
-    unsigned int nextRequest = 0;
+    std::size_t nextRequest = 0;
 
     // Send all buffers
-    for (unsigned int i = 0; i < Base<Executor, InitParameter, Parameter>::numBuffers(); i++) {
+    for (std::size_t i = 0; i < Base<Executor, InitParameter, Parameter>::numBuffers(); i++) {
       size_t done = 0;
-      for (unsigned int j = 0; j < m_buffer[i].requests; j++) {
+      for (std::size_t j = 0; j < m_buffer[i].requests; j++) {
         const size_t send =
             std::min(MPIBase<Executor, InitParameter, Parameter>::maxSend(),
                      MPIBase<Executor, InitParameter, Parameter>::bufferPos(i) - done);
