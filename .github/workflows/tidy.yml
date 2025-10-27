@@ -20,27 +20,27 @@ jobs:
 
           # keep, for once clang-19 or higher is needed
           wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-          sudo add-apt-repository "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main"
-          sudo add-apt-repository "deb-src http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main"
+          sudo add-apt-repository "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-21 main"
+          sudo add-apt-repository "deb-src http://apt.llvm.org/jammy/ llvm-toolchain-jammy-21 main"
           sudo apt-get -y update
 
-          sudo apt-get -y install clang-18 clang-tidy-18 libomp-18-dev
+          sudo apt-get -y install clang-21 clang-tidy-21 libomp-21-dev
           sudo apt-get -y install cxxtest
 
           sudo pip3 install numpy
           sudo mkdir -p /opt/dependencies
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'true'
 
       - name: clang-tidy
         run: |
           set -euo pipefail
-          clang-tidy-18 --version
-          which clang-tidy-18
+          clang-tidy-21 --version
+          which clang-tidy-21
           mkdir -p build && cd build
           cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DTESTING=ON -DUSE_MPI=ON -GNinja
           sed -i 's/-fprofile-abs-path //g' compile_commands.json
-          for f in $(find ../async -iname '*.h'); do clang-tidy-18 -p . $f; done
-          for f in $(find ../tests -iname '*.h'); do clang-tidy-18 -p . $f; done
+          for f in $(find ../async -iname '*.h'); do clang-tidy-21 -p . $f; done
+          for f in $(find ../tests -iname '*.h'); do clang-tidy-21 -p . $f; done

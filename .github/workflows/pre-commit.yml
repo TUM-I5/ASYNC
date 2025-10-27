@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2025 Technical University of Munich
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+name: pre-commit-check
+on:
+  - push
+
+jobs:
+  pre-commit-check:
+    name: pre-commit-check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - uses: pre-commit/action@v3.0.1
