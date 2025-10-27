@@ -30,19 +30,13 @@ class Dispatcher {
 #ifdef USE_MPI
   async::as::MPIScheduler m_scheduler;
 
-  MPI_Comm m_comm;
+  MPI_Comm m_comm{MPI_COMM_WORLD};
 #endif // USE_MPI
 
   unsigned int m_groupSize;
 
   public:
-  Dispatcher()
-      :
-#ifdef USE_MPI
-        m_comm(MPI_COMM_WORLD),
-#endif // USE_MPI
-        m_groupSize(Config::groupSize()) {
-  }
+  Dispatcher() : m_groupSize(Config::groupSize()) {}
 
   ~Dispatcher() {
     // Delete all modules so we can create a new dispatcher

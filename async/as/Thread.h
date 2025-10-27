@@ -139,9 +139,10 @@ class Thread : public ThreadBase<Executor, InitParameter, Parameter> {
       return;
     }
 
-    assert((Base<Executor, InitParameter, Parameter>::bufferInternal(id)));
+    assert((Base<Executor, InitParameter, Parameter>::bufferInternal(id) != nullptr) ||
+           (Base<Executor, InitParameter, Parameter>::bufferSize(id) == 0));
 
-    if (Base<Executor, InitParameter, Parameter>::origin(id)) {
+    if (Base<Executor, InitParameter, Parameter>::origin(id) != nullptr) {
       assert(m_buffer[id].position + size <=
              (Base<Executor, InitParameter, Parameter>::bufferSize(id)));
 

@@ -46,10 +46,10 @@ class Config {
 
   Config()
       : m_mode(str2mode(env.get<const char*>("MODE", "SYNC"))),
-      m_pinCore(env.get<int>("PIN_CORE", -1)),
-      m_groupSize(m_mode == MPI ? env.get("GROUP_SIZE", 64) : 1),
-      m_asyncCopy(env.get<bool>("MPI_COPY", false)),
-      m_alignment(env.get<size_t>("BUFFER_ALIGNMENT", 0)) {}
+        m_pinCore(env.get<int>("PIN_CORE", -1)),
+        m_groupSize(m_mode == MPI ? env.get("GROUP_SIZE", 64) : 1),
+        m_asyncCopy(env.get<bool>("MPI_COPY", false)),
+        m_alignment(env.get<size_t>("BUFFER_ALIGNMENT", 0)) {}
 
   public:
   static auto mode() -> Mode { return instance().m_mode; }
@@ -62,9 +62,7 @@ class Config {
 
   static auto alignment() -> size_t { return instance().m_alignment; }
 
-  static auto maxSend() -> size_t {
-    return instance().env.get<size_t>("MPI_MAX_SEND", 1UL << 30);
-  }
+  static auto maxSend() -> size_t { return instance().env.get<size_t>("MPI_MAX_SEND", 1UL << 30); }
 
   static void setMode(Mode mode) { instance().m_mode = mode; }
 

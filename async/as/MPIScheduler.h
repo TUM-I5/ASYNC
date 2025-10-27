@@ -185,7 +185,7 @@ class MPIScheduler {
     int rank = 0;
     MPI_Comm_rank(comm, &rank);
 
-    MPI_Comm groupComm = nullptr;
+    MPI_Comm groupComm = MPI_COMM_NULL;
 
     // Create group communicator
     MPI_Comm_split(comm, static_cast<int>(rank / (groupSize + 1)), 0, &groupComm);
@@ -273,7 +273,7 @@ class MPIScheduler {
       unsigned int bufferId = 0; // Required for remove tag and buffer tag
 
       do {
-        MPI_Message message = nullptr;
+        MPI_Message message = MPI_MESSAGE_NULL;
         MPI_Mprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, m_privateGroupComm, &message, &status);
 
         if (status.MPI_TAG == KillTag) {
@@ -587,7 +587,7 @@ class MPIScheduler {
   auto iSendParam(int id, const Parameter& param) -> MPI_Request {
     assert(id >= 0);
 
-    MPI_Request request = nullptr;
+    MPI_Request request = MPI_REQUEST_NULL;
 
     MPI_Isend(const_cast<Parameter*>(&param),
               sizeof(Parameter),
