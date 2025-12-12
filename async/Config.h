@@ -45,7 +45,7 @@ class Config {
   size_t m_alignment;
 
   Config()
-      : m_mode(str2mode(env.get<const char*>("MODE", "SYNC"))),
+      : m_mode(str2mode(env.getOptional<std::string>("MODE").value_or("SYNC"))),
         m_pinCore(env.get<int>("PIN_CORE", -1)),
         m_groupSize(m_mode == Mode::MPI ? env.get("GROUP_SIZE", 64) : 1),
         m_asyncCopy(env.get<bool>("MPI_COPY", false)),
@@ -84,7 +84,7 @@ class Config {
     return config;
   }
 
-  static auto str2mode(const char* mode) -> Mode {
+  static auto str2mode(const std::string& mode) -> Mode {
     std::string strMode(mode);
     utils::StringUtils::toUpper(strMode);
 
