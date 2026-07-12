@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <map>
@@ -597,6 +598,8 @@ class MPIScheduler {
               m_privateGroupComm,
               &request);
 
+    // suppress no matching receive linter issues
+    // NOLINTNEXTLINE
     return request;
   }
 

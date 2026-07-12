@@ -195,7 +195,7 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
 
     // Send parameters
     m_paramBuffer = parameters;
-    MPIBase<Executor, InitParameter, Parameter>::scheduler().iSendParam(
+    m_asyncRequests[0] = MPIBase<Executor, InitParameter, Parameter>::scheduler().iSendParam(
         MPIBase<Executor, InitParameter, Parameter>::id(), m_paramBuffer);
   }
 
@@ -208,7 +208,8 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
    * Should only be used in asynchronous copy mode
    */
   void iSendAllBuffers() {
-    std::size_t nextRequest = 0;
+    // request 0 is for the parameters
+    std::size_t nextRequest = 1;
 
     // Send all buffers
     for (std::size_t i = 0; i < Base<Executor, InitParameter, Parameter>::numBuffers(); i++) {
@@ -231,7 +232,7 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
       }
     }
 
-    assert(nextRequest == m_asyncRequests.size() - 1);
+    assert(nextRequest == m_asyncRequests.size());
   }
 };
 
