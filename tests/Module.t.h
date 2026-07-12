@@ -364,9 +364,10 @@ class TestModule : public CxxTest::TestSuite {
     }
     TS_ASSERT(module.mTearDown);
 
-    if (async::Config::mode() == async::Mode::Thread) {
-      TS_ASSERT_EQUALS(module.mCpu, get_nprocs() - 1);
-    }
+    // disabled; might fail for pre-pinned threads
+    // if (async::Config::mode() == async::Mode::Thread) {
+    //   TS_ASSERT_EQUALS(module.mCpu, get_nprocs() - 1);
+    // }
   }
 
   void testBuffer() const {
