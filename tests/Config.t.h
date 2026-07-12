@@ -38,10 +38,10 @@ class TestConfig : public CxxTest::TestSuite {
   }
 
   static void testUseAsyncCopy() {
-    TS_ASSERT_EQUALS(async::Config::useAsyncCopy(), false);
-
-    async::Config::setUseAsyncCopy(true);
     TS_ASSERT_EQUALS(async::Config::useAsyncCopy(), true);
+
+    async::Config::setUseAsyncCopy(false);
+    TS_ASSERT_EQUALS(async::Config::useAsyncCopy(), false);
   }
 
   static void testAlignment() {

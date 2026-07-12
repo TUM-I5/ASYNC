@@ -42,7 +42,7 @@ class Config {
       : m_mode(str2mode(env.getOptional<std::string>("MODE").value_or("SYNC"))),
         m_pinCore(env.get<int>("PIN_CORE", -1)),
         m_groupSize(m_mode == Mode::MPI ? env.get("GROUP_SIZE", 64) : 1),
-        m_asyncCopy(env.get<bool>("MPI_COPY", false)),
+        m_asyncCopy(env.get<bool>("MPI_COPY", true)),
         m_alignment(env.get<size_t>("BUFFER_ALIGNMENT", 0)) {}
 
   public:
