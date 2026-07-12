@@ -81,7 +81,7 @@ class Thread : public ThreadBase<Executor, InitParameter, Parameter> {
       }
     }
 
-    logDebug() << "Pinning executor to core" << realCore;
+    logDebug() << "Pinning executor to core" << realCore << "out of" << numCores;
 
     cpu_set_t cpuMask;
     CPU_ZERO(&cpuMask);
