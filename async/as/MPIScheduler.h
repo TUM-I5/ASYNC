@@ -44,7 +44,7 @@ class Scheduled {
   friend class MPIScheduler;
 
   private:
-  std::vector<char> m_paramBuffer;
+  std::vector<std::byte> m_paramBuffer;
 
   protected:
   Scheduled() = default;
@@ -131,6 +131,9 @@ class MPIScheduler {
   /** The size of the executor group (incl. the executor) */
   int m_groupSize{0};
 
+  /** The size of the executor group (incl. the executor) */
+  int m_executorRank{0};
+
   /** True of this task is an executor */
   bool m_isExecutor{false};
 
@@ -193,7 +196,9 @@ class MPIScheduler {
     MPI_Comm_rank(groupComm, &m_groupRank);
     MPI_Comm_size(groupComm, &m_groupSize);
 
-    const auto isExecutor = m_groupRank == m_groupSize - 1;
+    m_executorRank = m_groupSize - 1;
+
+    const auto isExecutor = m_groupRank == m_executorRank;
 
     // currently, executors need to be exclusive
     setCommunicator(comm, groupComm, isExecutor, true);
@@ -280,7 +285,7 @@ class MPIScheduler {
         if (status.MPI_TAG == KillTag) {
           // Dummy recv
           assert(status.MPI_SOURCE == 0);
-          MPI_Mrecv(nullptr, 0, MPI_CHAR, &message, MPI_STATUS_IGNORE);
+          MPI_Mrecv(nullptr, 0, MPI_BYTE, &message, MPI_STATUS_IGNORE);
 
           // Stop everything immediately (probably some finalizes were missing)
           for (auto& call : m_asyncCalls) {
@@ -321,8 +326,8 @@ class MPIScheduler {
           break;
         case InitTag:
         case ParamTag:
-          MPI_Get_count(&status, MPI_CHAR, &size);
-          MPI_Mrecv(m_asyncCalls[id]->paramBuffer(), size, MPI_CHAR, &message, MPI_STATUS_IGNORE);
+          MPI_Get_count(&status, MPI_BYTE, &size);
+          MPI_Mrecv(m_asyncCalls[id]->paramBuffer(), size, MPI_BYTE, &message, MPI_STATUS_IGNORE);
 
           lastTag[id] = tag;
           if (m_asyncCalls[id]->useAsyncCopy()) {
@@ -339,11 +344,11 @@ class MPIScheduler {
           MPI_Mprobe(status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm, &message, &status);
 
           // Get the size that is received
-          MPI_Get_count(&status, MPI_CHAR, &size);
+          MPI_Get_count(&status, MPI_BYTE, &size);
 
           // Receive the buffer
           buf = m_asyncCalls[id]->getBufferPos(bufferId, status.MPI_SOURCE, size);
-          MPI_Mrecv(buf, size, MPI_CHAR, &message, MPI_STATUS_IGNORE);
+          MPI_Mrecv(buf, size, MPI_BYTE, &message, MPI_STATUS_IGNORE);
 
           if (m_asyncCalls[id]->useAsyncCopy(bufferId)) {
             asyncReadyTasks[id]++;
@@ -351,7 +356,7 @@ class MPIScheduler {
           break;
         case WaitTag:
         case FinalizeTag:
-          MPI_Mrecv(nullptr, 0, MPI_CHAR, &message, MPI_STATUS_IGNORE);
+          MPI_Mrecv(nullptr, 0, MPI_BYTE, &message, MPI_STATUS_IGNORE);
 
           readyTasks[id]++;
           break;
@@ -424,7 +429,7 @@ class MPIScheduler {
 
     if (!m_asyncCalls.empty() && m_groupRank == 0) {
       // Some async calls are left, -> send the kill switch
-      MPI_Ssend(nullptr, 0, MPI_CHAR, m_groupSize - 1, KillTag, m_privateGroupComm);
+      MPI_Ssend(nullptr, 0, MPI_BYTE, m_executorRank, KillTag, m_privateGroupComm);
     }
 
     if (m_privateGroupComm != MPI_COMM_NULL) {
@@ -467,7 +472,7 @@ class MPIScheduler {
     MPI_Send(&syncInt,
              1,
              MPI_INT,
-             m_groupSize - 1,
+             m_executorRank,
              id * NumTags + AddTag + NumStaticTags,
              m_privateGroupComm);
 
@@ -480,7 +485,7 @@ class MPIScheduler {
     MPI_Send(&bufferId,
              1,
              MPI_UNSIGNED,
-             m_groupSize - 1,
+             m_executorRank,
              id * NumTags + ResizeTag + NumStaticTags,
              m_privateGroupComm);
 
@@ -493,7 +498,7 @@ class MPIScheduler {
     MPI_Send(&bufferId,
              1,
              MPI_UNSIGNED,
-             m_groupSize - 1,
+             m_executorRank,
              id * NumTags + RemoveTag + NumStaticTags,
              m_privateGroupComm);
 
@@ -507,15 +512,15 @@ class MPIScheduler {
     MPI_Send(&bufferId,
              1,
              MPI_UNSIGNED,
-             m_groupSize - 1,
+             m_executorRank,
              id * NumTags + BufferTag + NumStaticTags,
              m_privateGroupComm);
 
     // Send the buffer (synchronous to avoid overtaking of other messages)
     MPI_Ssend(buffer,
               size,
-              MPI_CHAR,
-              m_groupSize - 1,
+              MPI_BYTE,
+              m_executorRank,
               id * NumTags + BufferTag + NumStaticTags,
               m_privateGroupComm);
   }
@@ -529,7 +534,7 @@ class MPIScheduler {
     MPI_Isend(&m_heapBufferIds[bufferId],
               1,
               MPI_UNSIGNED,
-              m_groupSize - 1,
+              m_executorRank,
               id * NumTags + BufferTag + NumStaticTags,
               m_privateGroupComm,
               requests.r.data());
@@ -537,8 +542,8 @@ class MPIScheduler {
     // Send the buffer
     MPI_Isend(buffer,
               size,
-              MPI_CHAR,
-              m_groupSize - 1,
+              MPI_BYTE,
+              m_executorRank,
               id * NumTags + BufferTag + NumStaticTags,
               m_privateGroupComm,
               &requests.r[1]);
@@ -554,8 +559,8 @@ class MPIScheduler {
     // TODO find a nice way for hybrid systems
     MPI_Send(const_cast<Parameter*>(&param),
              sizeof(Parameter),
-             MPI_CHAR,
-             m_groupSize - 1,
+             MPI_BYTE,
+             m_executorRank,
              id * NumTags + InitTag + NumStaticTags,
              m_privateGroupComm);
 
@@ -573,8 +578,8 @@ class MPIScheduler {
     // TODO find a nice way for hybrid systems
     MPI_Send(const_cast<Parameter*>(&param),
              sizeof(Parameter),
-             MPI_CHAR,
-             m_groupSize - 1,
+             MPI_BYTE,
+             m_executorRank,
              id * NumTags + ParamTag + NumStaticTags,
              m_privateGroupComm);
 
@@ -592,8 +597,8 @@ class MPIScheduler {
 
     MPI_Isend(const_cast<Parameter*>(&param),
               sizeof(Parameter),
-              MPI_CHAR,
-              m_groupSize - 1,
+              MPI_BYTE,
+              m_executorRank,
               id * NumTags + ParamTag + NumStaticTags,
               m_privateGroupComm,
               &request);
@@ -606,8 +611,8 @@ class MPIScheduler {
 
     MPI_Send(nullptr,
              0,
-             MPI_CHAR,
-             m_groupSize - 1,
+             MPI_BYTE,
+             m_executorRank,
              id * NumTags + WaitTag + NumStaticTags,
              m_privateGroupComm);
 
@@ -627,8 +632,8 @@ class MPIScheduler {
 
     MPI_Send(nullptr,
              0,
-             MPI_CHAR,
-             m_groupSize - 1,
+             MPI_BYTE,
+             m_executorRank,
              id * NumTags + FinalizeTag + NumStaticTags,
              m_privateGroupComm);
 
