@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2016-2024 Technical University of Munich
+// SPDX-FileCopyrightText: 2016 Technical University of Munich
 //
 // SPDX-License-Identifier: BSD-3-Clause
 // SPDX-FileContributor: Sebastian Rettenberger <sebastian.rettenberger@tum.de>
