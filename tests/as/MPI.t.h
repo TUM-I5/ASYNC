@@ -582,7 +582,7 @@ class TestMPI : public CxxTest::TestSuite {
 
       async.wait();
 
-      const auto buffer5 = std::array<int, 2>{4, 5};
+      const auto buffer5 = std::array<int, 2>{20, 21};
       async.resizeBuffer(2, buffer5.data(), 2 * sizeof(int));
 
       async.sendBuffer(2, 2 * sizeof(int));
