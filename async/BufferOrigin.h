@@ -1,13 +1,7 @@
 // SPDX-FileCopyrightText: 2016-2024 Technical University of Munich
 //
 // SPDX-License-Identifier: BSD-3-Clause
-
-/**
- * @file
- *  This file is part of ASYNC
- *
- * @author David Schneller <david.schneller@tum.de>
- */
+// SPDX-FileContributor: David Schneller <david.schneller@tum.de>
 
 #ifndef ASYNC_BUFFERORIGIN_H
 #define ASYNC_BUFFERORIGIN_H

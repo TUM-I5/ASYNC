@@ -1,13 +1,7 @@
 // SPDX-FileCopyrightText: 2016-2024 Technical University of Munich
 //
 // SPDX-License-Identifier: BSD-3-Clause
-
-/**
- * @file
- *  This file is part of ASYNC
- *
- * @author Sebastian Rettenberger <sebastian.rettenberger@tum.de>
- */
+// SPDX-FileContributor: Sebastian Rettenberger <sebastian.rettenberger@tum.de>
 
 #include <mpi.h>
 
