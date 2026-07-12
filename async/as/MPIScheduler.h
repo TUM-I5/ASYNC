@@ -195,6 +195,7 @@ class MPIScheduler {
 
     const auto isExecutor = m_groupRank == m_groupSize - 1;
 
+    // currently, executors need to be exclusive
     setCommunicator(comm, groupComm, isExecutor, true);
   }
 
@@ -223,7 +224,7 @@ class MPIScheduler {
     MPI_Allreduce(MPI_IN_PLACE, &executorCount, 1, MPI_INT, MPI_SUM, groupComm);
 
     if (executorCount != 1) {
-      logError() << "";
+      logError() << "There exists more than one executor in the subgroup.";
     }
 
     if (executorExclusive) {
@@ -610,7 +611,8 @@ class MPIScheduler {
              id * NumTags + WaitTag + NumStaticTags,
              m_privateGroupComm);
 
-    // Wait for the return of the async call
+    // Wait for the return of the async call (note: need to call the barrier twice)
+    MPI_Barrier(m_privateGroupComm);
     MPI_Barrier(m_privateGroupComm);
   }
 
