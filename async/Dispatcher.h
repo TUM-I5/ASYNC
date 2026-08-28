@@ -13,6 +13,7 @@
 
 #include "Config.h"
 #include "ModuleBase.h"
+#include "utils/logger.h"
 
 namespace async {
 
@@ -76,7 +77,16 @@ class Dispatcher {
     }
 
     if (m_config.mode() == Mode::MPI) {
+      int provided = MPI_THREAD_SINGLE;
+      MPI_Query_thread(&provided);
+      if (provided < MPI_THREAD_MULTIPLE) {
+        logError() << "ASYNC: MPI mode drives the scheduler loop and the executor itself on two"
+                   << "threads, both of which call MPI. This requires MPI_THREAD_MULTIPLE, but the"
+                   << "MPI library was initialized with a lower thread level.";
+      }
+
       // Initialize the scheduler
+      m_scheduler.setPollIntervalUs(m_config.pollIntervalUs());
       m_scheduler.setCommunicator(m_comm, m_groupLayout);
 
       // Only the executors run the modules

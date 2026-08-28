@@ -61,6 +61,7 @@ class Config {
   bool m_asyncCopy;
   size_t m_alignment;
   size_t m_maxSend;
+  long m_pollIntervalUs;
 
   public:
   Config() : Config(utils::Env{"ASYNC_"}) {}
@@ -70,7 +71,8 @@ class Config {
         m_pinCore(env.get<int>("PIN_CORE", -1)), m_groupLayout(readGroupLayout(env)),
         m_asyncCopy(env.get<bool>("MPI_COPY", true)),
         m_alignment(env.get<size_t>("BUFFER_ALIGNMENT", 0)),
-        m_maxSend(env.get<size_t>("MPI_MAX_SEND", 1UL << 30)) {}
+        m_maxSend(env.get<size_t>("MPI_MAX_SEND", 1UL << 30)),
+        m_pollIntervalUs(env.get<long>("POLL_INTERVAL_US", -1)) {}
 
   [[nodiscard]] auto mode() const -> Mode { return m_mode; }
 
@@ -89,6 +91,14 @@ class Config {
   [[nodiscard]] auto alignment() const -> size_t { return m_alignment; }
 
   [[nodiscard]] auto maxSend() const -> size_t { return m_maxSend; }
+
+  /**
+   * The longest an idle executor sleeps between two probes, in microseconds.
+   * 0 keeps it spinning and yielding instead; a negative value lets the
+   * scheduler pick, depending on whether the executor shares its rank with
+   * the computation.
+   */
+  [[nodiscard]] auto pollIntervalUs() const -> long { return m_pollIntervalUs; }
 
   auto setMode(Mode mode) -> Config& {
     m_mode = mode;
@@ -125,6 +135,11 @@ class Config {
 
   auto setMaxSend(size_t maxSend) -> Config& {
     m_maxSend = maxSend;
+    return *this;
+  }
+
+  auto setPollIntervalUs(long pollIntervalUs) -> Config& {
+    m_pollIntervalUs = pollIntervalUs;
     return *this;
   }
 

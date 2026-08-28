@@ -11,10 +11,12 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <map>
+#include <thread>
 #include <vector>
 
 #include "async/Config.h"
@@ -27,6 +29,55 @@ namespace async::as {
  */
 struct MPIRequest2 {
   std::array<MPI_Request, 2> r;
+};
+
+/**
+ * Escalating wait for a poll loop.
+ *
+ * Spins first, then yields, then sleeps for an interval that doubles up to a
+ * cap. A blocking MPI call would look cheaper on a rank that has nothing else
+ * to do, but most implementations spin inside it: the process of an idle
+ * executor keeps a whole core busy. Next to the computation, that core is one
+ * the application needs.
+ *
+ * Short pauses right after a message keep the latency of a burst low; the
+ * growing sleep keeps an executor that waits for the next output cheap.
+ */
+class Backoff {
+  private:
+  static const unsigned int SpinRounds = 64;
+  static const unsigned int YieldRounds = 1024;
+  static const long FirstSleepUs = 50;
+
+  long m_maxSleepUs;
+
+  unsigned int m_idle{0};
+
+  long m_sleepUs{FirstSleepUs};
+
+  public:
+  /**
+   * @param maxSleepUs The longest sleep between two polls, in microseconds; 0
+   *  never sleeps and keeps yielding instead
+   */
+  explicit Backoff(long maxSleepUs) : m_maxSleepUs(maxSleepUs) {}
+
+  void pause() {
+    ++m_idle;
+
+    if (m_idle <= SpinRounds) {
+      return;
+    }
+
+    if (m_idle <= YieldRounds || m_maxSleepUs <= 0) {
+      std::this_thread::yield();
+      return;
+    }
+
+    const auto sleepUs = std::min(m_sleepUs, m_maxSleepUs);
+    std::this_thread::sleep_for(std::chrono::microseconds(sleepUs));
+    m_sleepUs = std::min(2 * m_sleepUs, m_maxSleepUs);
+  }
 };
 
 template <class Executor, typename InitParameter, typename Parameter>
@@ -160,6 +211,9 @@ class MPIScheduler {
 
   /** Class is finalized? */
   bool m_finalized{false};
+
+  /** Sleep between two probes of an idle executor, in microseconds */
+  long m_pollIntervalUs{0};
 
   public:
   MPIScheduler()
@@ -309,6 +363,14 @@ class MPIScheduler {
     }
   }
 
+  /**
+   * How long the executor sleeps between two probes once it has run out of
+   * work. A negative value selects the default for the current layout.
+   */
+  void setPollIntervalUs(long pollIntervalUs) {
+    m_pollIntervalUs = pollIntervalUs < 0 ? 0 : pollIntervalUs;
+  }
+
   [[nodiscard]] auto groupRank() const -> int { return m_groupRank; }
 
   [[nodiscard]] auto isExecutor() const -> bool { return m_isExecutor; }
@@ -345,7 +407,7 @@ class MPIScheduler {
 
       do {
         MPI_Message message = MPI_MESSAGE_NULL;
-        MPI_Mprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, m_privateGroupComm, &message, &status);
+        probe(MPI_ANY_SOURCE, MPI_ANY_TAG, message, status);
 
         if (status.MPI_TAG == KillTag) {
           // Dummy recv
@@ -406,7 +468,7 @@ class MPIScheduler {
           MPI_Mrecv(&bufferId, 1, MPI_UNSIGNED, &message, MPI_STATUS_IGNORE);
 
           // Probe buffer receive from some source/tag
-          MPI_Mprobe(status.MPI_SOURCE, status.MPI_TAG, m_privateGroupComm, &message, &status);
+          probe(status.MPI_SOURCE, status.MPI_TAG, message, status);
 
           // Get the size that is received
           MPI_Get_count(&status, MPI_BYTE, &size);
@@ -511,6 +573,22 @@ class MPIScheduler {
   }
 
   private:
+  /**
+   * Wait for a matching message without blocking inside MPI
+   */
+  void probe(int source, int tag, MPI_Message& message, MPI_Status& status) {
+    Backoff backoff(m_pollIntervalUs);
+
+    int flag = 0;
+    while (flag == 0) {
+      MPI_Improbe(source, tag, m_privateGroupComm, &flag, &message, &status);
+
+      if (flag == 0) {
+        backoff.pause();
+      }
+    }
+  }
+
   [[nodiscard]] auto privateGroupComm() const -> MPI_Comm { return m_privateGroupComm; }
 
   [[nodiscard]] auto groupSize() const -> int { return m_groupSize; }
