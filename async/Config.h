@@ -21,6 +21,26 @@ namespace async {
 enum class Mode { Sync, Thread, MPI };
 
 /**
+ * How the compute ranks are grouped around the executors in MPI mode.
+ *
+ * A group never straddles a node boundary: the aggregation buffer lives in
+ * the memory of the executor, "free cores" is a node-local notion, and the
+ * rank-to-node mapping is not guaranteed to be block-wise. groupNodes widens
+ * a group to several whole nodes for runs that want fewer executors than
+ * nodes.
+ */
+struct GroupLayout {
+  /** Number of executors on each node */
+  unsigned int executorsPerNode{1};
+
+  /** Number of whole nodes that share one set of executors */
+  unsigned int groupNodes{1};
+
+  /** Upper bound on the compute ranks per executor (0: unbounded) */
+  unsigned int maxGroupRanks{0};
+};
+
+/**
  * The settings of a single {@link Dispatcher} and of the {@link Module}s
  * attached to it.
  *
@@ -37,7 +57,7 @@ class Config {
   private:
   Mode m_mode;
   int m_pinCore;
-  unsigned int m_groupSize;
+  GroupLayout m_groupLayout;
   bool m_asyncCopy;
   size_t m_alignment;
   size_t m_maxSend;
@@ -47,8 +67,7 @@ class Config {
 
   explicit Config(utils::Env env)
       : m_mode(str2mode(env.getOptional<std::string>("MODE").value_or("SYNC"))),
-        m_pinCore(env.get<int>("PIN_CORE", -1)),
-        m_groupSize(m_mode == Mode::MPI ? env.get("GROUP_SIZE", 64) : 1),
+        m_pinCore(env.get<int>("PIN_CORE", -1)), m_groupLayout(readGroupLayout(env)),
         m_asyncCopy(env.get<bool>("MPI_COPY", true)),
         m_alignment(env.get<size_t>("BUFFER_ALIGNMENT", 0)),
         m_maxSend(env.get<size_t>("MPI_MAX_SEND", 1UL << 30)) {}
@@ -57,7 +76,13 @@ class Config {
 
   [[nodiscard]] auto pinCore() const -> int { return m_pinCore; }
 
-  [[nodiscard]] auto groupSize() const -> unsigned int { return m_groupSize; }
+  [[nodiscard]] auto groupLayout() const -> const GroupLayout& { return m_groupLayout; }
+
+  /**
+   * @return The upper bound on the compute ranks per executor (0: unbounded)
+   * @deprecated Use {@link groupLayout}
+   */
+  [[nodiscard]] auto groupSize() const -> unsigned int { return m_groupLayout.maxGroupRanks; }
 
   [[nodiscard]] auto useAsyncCopy() const -> bool { return m_asyncCopy; }
 
@@ -75,8 +100,16 @@ class Config {
     return *this;
   }
 
+  auto setGroupLayout(const GroupLayout& groupLayout) -> Config& {
+    m_groupLayout = groupLayout;
+    return *this;
+  }
+
+  /**
+   * @deprecated Use {@link setGroupLayout}
+   */
   auto setGroupSize(unsigned int groupSize) -> Config& {
-    m_groupSize = groupSize;
+    m_groupLayout.maxGroupRanks = groupSize;
     return *this;
   }
 
@@ -93,6 +126,23 @@ class Config {
   auto setMaxSend(size_t maxSend) -> Config& {
     m_maxSend = maxSend;
     return *this;
+  }
+
+  static auto readGroupLayout(utils::Env& env) -> GroupLayout {
+    GroupLayout layout{};
+    layout.executorsPerNode = env.get<unsigned int>("EXECUTORS_PER_NODE", 1);
+    layout.groupNodes = env.get<unsigned int>("GROUP_NODES", 1);
+    layout.maxGroupRanks = env.get<unsigned int>("MAX_GROUP_RANKS", 0);
+
+    const auto legacy = env.getOptional<unsigned int>("GROUP_SIZE");
+    if (legacy.has_value()) {
+      logWarning() << "The ASYNC setting GROUP_SIZE is deprecated: groups follow node boundaries,"
+                   << "which EXECUTORS_PER_NODE, GROUP_NODES and MAX_GROUP_RANKS shape."
+                   << "GROUP_SIZE is read as MAX_GROUP_RANKS.";
+      layout.maxGroupRanks = legacy.value();
+    }
+
+    return layout;
   }
 
   static auto str2mode(const std::string& mode) -> Mode {

@@ -8,6 +8,7 @@
 
 #include <mpi.h>
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstddef>
@@ -16,6 +17,7 @@
 #include <map>
 #include <vector>
 
+#include "async/Config.h"
 #include "utils/logger.h"
 
 namespace async::as {
@@ -178,6 +180,8 @@ class MPIScheduler {
    *
    * @param comm The MPI communicator that should be used
    * @param groupSize Number of ranks per group (excluding the executor)
+   * @deprecated Use the {@link GroupLayout} overload, which keeps groups
+   *  inside a node instead of assuming a block-wise rank distribution
    */
   void setCommunicator(MPI_Comm comm, unsigned int groupSize) {
     int rank = 0;
@@ -197,6 +201,72 @@ class MPIScheduler {
 
     // currently, executors need to be exclusive
     setCommunicator(comm, groupComm, isExecutor, true);
+  }
+
+  /**
+   * Set the MPI configuration, forming the groups along node boundaries.
+   *
+   * Has to be called before {@link init()}
+   *
+   * @param comm The MPI communicator that should be used
+   * @param layout How many executors to place per node, and how many nodes
+   *  share one set of executors
+   */
+  void setCommunicator(MPI_Comm comm, const GroupLayout& layout) {
+    int rank = 0;
+    MPI_Comm_rank(comm, &rank);
+
+    MPI_Comm nodeComm = MPI_COMM_NULL;
+    MPI_Comm_split_type(comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &nodeComm);
+
+    int nodeRank = 0;
+    int nodeSize = 0;
+    MPI_Comm_rank(nodeComm, &nodeRank);
+    MPI_Comm_size(nodeComm, &nodeSize);
+
+    // A dense node index, ordered by the first rank of each node
+    int nodeId = 0;
+    const int isNodeRoot = (nodeRank == 0) ? 1 : 0;
+    MPI_Exscan(&isNodeRoot, &nodeId, 1, MPI_INT, MPI_SUM, comm);
+    if (rank == 0) {
+      // MPI_Exscan leaves the result undefined on the first rank
+      nodeId = 0;
+    }
+    MPI_Bcast(&nodeId, 1, MPI_INT, 0, nodeComm);
+
+    // The stride between the group ids of a node has to be the same everywhere,
+    // so agree on the largest number of executors any node asks for
+    auto executorsPerNode = std::max(1U, layout.executorsPerNode);
+    if (layout.maxGroupRanks > 0) {
+      const auto required =
+          (static_cast<unsigned int>(nodeSize) + layout.maxGroupRanks - 1) / layout.maxGroupRanks;
+      executorsPerNode = std::max(executorsPerNode, required);
+    }
+    MPI_Allreduce(MPI_IN_PLACE, &executorsPerNode, 1, MPI_UNSIGNED, MPI_MAX, comm);
+
+    const auto groupNodes = std::max(1U, layout.groupNodes);
+
+    const auto localGroup = (static_cast<unsigned int>(nodeRank) * executorsPerNode) /
+                            static_cast<unsigned int>(nodeSize);
+    const auto groupId =
+        (static_cast<unsigned int>(nodeId) / groupNodes) * executorsPerNode + localGroup;
+
+    MPI_Comm groupComm = MPI_COMM_NULL;
+    MPI_Comm_split(comm, static_cast<int>(groupId), rank, &groupComm);
+    MPI_Comm_free(&nodeComm);
+
+    MPI_Comm_rank(groupComm, &m_groupRank);
+    MPI_Comm_size(groupComm, &m_groupSize);
+
+    m_executorRank = m_groupSize - 1;
+
+    if (m_groupSize < 2) {
+      logError() << "ASYNC: A group of" << m_groupSize
+                 << "rank(s) leaves no rank for the computation. Lower EXECUTORS_PER_NODE or"
+                 << "raise MAX_GROUP_RANKS.";
+    }
+
+    setCommunicator(comm, groupComm, m_groupRank == m_executorRank, true);
   }
 
   /**

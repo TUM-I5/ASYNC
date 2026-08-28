@@ -29,11 +29,11 @@ class Dispatcher {
 
   Config m_config;
 
-  unsigned int m_groupSize;
+  GroupLayout m_groupLayout;
 
   public:
   explicit Dispatcher(Config config = Config{})
-      : m_config(config), m_groupSize(m_config.groupSize()) {}
+      : m_config(config), m_groupLayout(m_config.groupLayout()) {}
 
   ~Dispatcher() {
     // Delete all modules so we can create a new dispatcher
@@ -51,16 +51,15 @@ class Dispatcher {
 #endif
 
   /**
-   * Use this to overwrite the group size set from the environment variable
-   *
-   * @param groupSize The group size (excl. the MPI executor)
-   * @deprecated Use {@link Config::setGroupSize} on the config passed to the constructor
+   * Use this to overwrite the group layout set from the environment variables
    */
-  void setGroupSize(unsigned int groupSize) {
-    if (m_config.mode() == Mode::MPI) {
-      m_groupSize = groupSize;
-    }
-  }
+  void setGroupLayout(const GroupLayout& groupLayout) { m_groupLayout = groupLayout; }
+
+  /**
+   * @param groupSize Upper bound on the compute ranks per executor
+   * @deprecated Use {@link setGroupLayout}
+   */
+  void setGroupSize(unsigned int groupSize) { m_groupLayout.maxGroupRanks = groupSize; }
 
   /**
    * Initialize the dispatcher
@@ -78,7 +77,7 @@ class Dispatcher {
 
     if (m_config.mode() == Mode::MPI) {
       // Initialize the scheduler
-      m_scheduler.setCommunicator(m_comm, m_groupSize);
+      m_scheduler.setCommunicator(m_comm, m_groupLayout);
 
       // Only the executors run the modules
       MPI_Comm_split(m_comm, m_scheduler.isExecutor() ? 0 : MPI_UNDEFINED, 0, &m_execComm);
@@ -99,9 +98,9 @@ class Dispatcher {
   [[nodiscard]] auto config() const -> const Config& { return m_config; }
 
   /**
-   * @return The groups size (or 1 for synchronous and asynchnchronous thread mode)
+   * @return The group layout that will be used in MPI mode
    */
-  [[nodiscard]] auto groupSize() const -> unsigned int { return m_groupSize; }
+  [[nodiscard]] auto groupLayout() const -> const GroupLayout& { return m_groupLayout; }
 
 #ifdef USE_MPI
   [[nodiscard]] auto groupComm() const -> MPI_Comm { return m_scheduler.groupComm(); }

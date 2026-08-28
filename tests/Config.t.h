@@ -14,7 +14,9 @@ class TestConfig : public CxxTest::TestSuite {
 
     TS_ASSERT_EQUALS(config.mode(), async::Mode::Sync);
     TS_ASSERT_EQUALS(config.pinCore(), -1);
-    TS_ASSERT_EQUALS(config.groupSize(), 1);
+    TS_ASSERT_EQUALS(config.groupLayout().executorsPerNode, 1);
+    TS_ASSERT_EQUALS(config.groupLayout().groupNodes, 1);
+    TS_ASSERT_EQUALS(config.groupLayout().maxGroupRanks, 0);
     TS_ASSERT_EQUALS(config.useAsyncCopy(), true);
     TS_ASSERT_EQUALS(config.alignment(), 0);
   }
@@ -22,11 +24,15 @@ class TestConfig : public CxxTest::TestSuite {
   static void testSetters() {
     async::Config config;
 
-    config.setMode(async::Mode::Thread).setPinCore(0).setGroupSize(4).setAlignment(2048);
+    config.setMode(async::Mode::Thread)
+        .setPinCore(0)
+        .setGroupLayout(async::GroupLayout{2, 4, 0})
+        .setAlignment(2048);
 
     TS_ASSERT_EQUALS(config.mode(), async::Mode::Thread);
     TS_ASSERT_EQUALS(config.pinCore(), 0);
-    TS_ASSERT_EQUALS(config.groupSize(), 4);
+    TS_ASSERT_EQUALS(config.groupLayout().executorsPerNode, 2);
+    TS_ASSERT_EQUALS(config.groupLayout().groupNodes, 4);
     TS_ASSERT_EQUALS(config.alignment(), 2048);
   }
 

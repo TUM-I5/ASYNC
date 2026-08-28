@@ -337,12 +337,8 @@ class TestModule : public CxxTest::TestSuite {
     dispatcher.setCommunicator(MPI_COMM_WORLD);
 #endif // USE_MPI
 
-    const unsigned int groupSize = dispatcher.groupSize();
-    if (testConfig().mode() == async::Mode::MPI) {
-      TS_ASSERT_EQUALS(groupSize, 64); // the default
-    } else {
-      TS_ASSERT_EQUALS(groupSize, 1);
-    }
+    TS_ASSERT_EQUALS(dispatcher.groupLayout().executorsPerNode, 1); // the default
+    TS_ASSERT_EQUALS(dispatcher.groupLayout().groupNodes, 1);
 
     Module module;
 
@@ -458,12 +454,8 @@ class TestModule : public CxxTest::TestSuite {
   static void testModulesActiveDisabled() {
     async::Dispatcher dispatcher;
 
-    const unsigned int groupSize = dispatcher.groupSize();
-    if (testConfig().mode() == async::Mode::MPI) {
-      TS_ASSERT_EQUALS(groupSize, 64); // the default
-    } else {
-      TS_ASSERT_EQUALS(groupSize, 1);
-    }
+    TS_ASSERT_EQUALS(dispatcher.groupLayout().executorsPerNode, 1); // the default
+    TS_ASSERT_EQUALS(dispatcher.groupLayout().groupNodes, 1);
 
     Module module0;
     const Module module1;
