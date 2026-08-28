@@ -11,6 +11,10 @@
 #include <cstddef>
 #include <vector>
 
+#ifdef USE_MPI
+#include <mpi.h>
+#endif // USE_MPI
+
 namespace async {
 
 /**
@@ -25,6 +29,10 @@ class ExecInfo {
 
   HostBufferOrigin* m_hostBuffer;
 
+#ifdef USE_MPI
+  MPI_Comm m_comm{MPI_COMM_NULL};
+#endif // USE_MPI
+
   public:
   ExecInfo() : m_hostBuffer(new HostBufferOrigin()) {}
 
@@ -36,6 +44,21 @@ class ExecInfo {
   [[nodiscard]] virtual auto isExecutor() const -> bool {
     return false; // Default for sync and thread
   }
+
+#ifdef USE_MPI
+  /**
+   * The communicator spanning all ranks on which this call is executed.
+   *
+   * Collective operations inside an executor have to use this communicator:
+   * in MPI mode the executors are a strict subset of the ranks the
+   * application runs on, and any other communicator would either deadlock or
+   * exclude the executor.
+   *
+   * It is MPI_COMM_NULL on ranks that never execute. The communicator is
+   * owned by the {@link Dispatcher} and must not be freed by the executor.
+   */
+  [[nodiscard]] auto comm() const -> MPI_Comm { return m_comm; }
+#endif // USE_MPI
 
   [[nodiscard]] auto numBuffers() const -> std::size_t { return m_bufferSize.size(); }
 
@@ -55,6 +78,10 @@ class ExecInfo {
   [[nodiscard]] virtual auto buffer(unsigned int id) const -> const void* = 0;
 
   protected:
+#ifdef USE_MPI
+  void setCommInternal(MPI_Comm comm) { m_comm = comm; }
+#endif // USE_MPI
+
   void addBufferInternal(size_t size) {
     m_bufferSize.push_back(size);
     m_bufferOrigin.push_back(m_hostBuffer);

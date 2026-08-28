@@ -10,6 +10,7 @@
 
 #ifdef USE_MPI
 #include "async/as/MPIScheduler.h"
+#include <mpi.h>
 #endif // USE_MPI
 
 namespace async {
@@ -66,6 +67,11 @@ class ModuleBase {
    * Set the scheduler for this module.
    */
   virtual void setScheduler(as::MPIScheduler& scheduler) = 0;
+
+  /**
+   * Set the communicator spanning the ranks that execute this module.
+   */
+  virtual void setComm(MPI_Comm comm) = 0;
 #endif // USE_MPI
 };
 

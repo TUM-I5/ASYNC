@@ -15,6 +15,7 @@
 #include "async/as/MPI.h"
 #include "async/as/MPIAsync.h"
 #include "async/as/MPIScheduler.h"
+#include <mpi.h>
 #endif // USE_MPI
 
 #include "async/as/Pin.h"
@@ -115,6 +116,8 @@ class Module : public ModuleBase {
   private:
 #ifdef USE_MPI
   void setScheduler(as::MPIScheduler& scheduler) override { m_async->setScheduler(scheduler); }
+
+  void setComm(MPI_Comm comm) override { m_async->setComm(comm); }
 #endif // USE_MPI
 };
 

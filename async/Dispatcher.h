@@ -22,6 +22,9 @@ class Dispatcher {
   async::as::MPIScheduler m_scheduler;
 
   MPI_Comm m_comm{MPI_COMM_WORLD};
+
+  /** The communicator spanning all ranks that run the executors */
+  MPI_Comm m_execComm{MPI_COMM_NULL};
 #endif // USE_MPI
 
   Config m_config;
@@ -76,6 +79,16 @@ class Dispatcher {
     if (m_config.mode() == Mode::MPI) {
       // Initialize the scheduler
       m_scheduler.setCommunicator(m_comm, m_groupSize);
+
+      // Only the executors run the modules
+      MPI_Comm_split(m_comm, m_scheduler.isExecutor() ? 0 : MPI_UNDEFINED, 0, &m_execComm);
+    } else {
+      // Every rank runs its own executor
+      MPI_Comm_dup(m_comm, &m_execComm);
+    }
+
+    for (const auto& module : modules) {
+      module->setComm(m_execComm);
     }
 #endif // USE_MPI
   }
@@ -94,6 +107,12 @@ class Dispatcher {
   [[nodiscard]] auto groupComm() const -> MPI_Comm { return m_scheduler.groupComm(); }
 
   [[nodiscard]] auto commWorld() const -> MPI_Comm { return m_scheduler.commWorld(); }
+
+  /**
+   * @return The communicator spanning all ranks that run the executors.
+   *  MPI_COMM_NULL on ranks that never execute.
+   */
+  [[nodiscard]] auto execComm() const -> MPI_Comm { return m_execComm; }
 #endif // USE_MPI
 
   /**
@@ -141,6 +160,11 @@ class Dispatcher {
   void finalize() {
 #ifdef USE_MPI
     m_scheduler.finalize();
+
+    if (m_execComm != MPI_COMM_NULL) {
+      MPI_Comm_free(&m_execComm);
+      m_execComm = MPI_COMM_NULL;
+    }
 #endif // USE_MPI
   }
 };

@@ -13,6 +13,10 @@
 #include <type_traits>
 #include <vector>
 
+#ifdef USE_MPI
+#include <mpi.h>
+#endif // USE_MPI
+
 #include "Pin.h"
 #include "utils/logger.h"
 
@@ -76,6 +80,10 @@ class Base : public async::ExecInfo {
    * Only required in asynchronous MPI mode
    */
   virtual void setScheduler(MPIScheduler& scheduler) {}
+
+#ifdef USE_MPI
+  virtual void setComm(MPI_Comm comm) { async::ExecInfo::setCommInternal(comm); }
+#endif // USE_MPI
 
   virtual void setExecutor(Executor& executor) { m_executor = &executor; }
 
