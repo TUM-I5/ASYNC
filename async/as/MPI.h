@@ -11,6 +11,7 @@
 #include <cassert>
 
 #include "MPIBase.h"
+#include "async/Config.h"
 #include "async/as/Base.h"
 
 namespace async::as {
@@ -21,7 +22,7 @@ namespace async::as {
 template <class Executor, typename InitParameter, typename Parameter>
 class MPI : public MPIBase<Executor, InitParameter, Parameter> {
   public:
-  MPI() = default;
+  explicit MPI(Config config = Config{}) : MPIBase<Executor, InitParameter, Parameter>(config) {}
 
   ~MPI() override = default;
 

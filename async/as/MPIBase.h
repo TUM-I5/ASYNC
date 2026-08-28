@@ -76,7 +76,9 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   std::vector<ExecutorBufInfo> m_executorBuffer;
 
   public:
-  MPIBase() : mMaxSend(async::Config::maxSend()) {}
+  explicit MPIBase(Config config)
+      : ThreadBase<Executor, InitParameter, Parameter>(config),
+        mMaxSend(Base<Executor, InitParameter, Parameter>::config().maxSend()) {}
 
   ~MPIBase() override { finalize(); }
 

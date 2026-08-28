@@ -21,61 +21,78 @@ namespace async {
 enum class Mode { Sync, Thread, MPI };
 
 /**
- * @warning Overwriting the default values from the environment is only allowed
- *  before any other ASYNC class is created. Otherwise the behavior is undefined.
+ * The settings of a single {@link Dispatcher} and of the {@link Module}s
+ * attached to it.
+ *
+ * A Config is a plain value. It reads its defaults from the environment once,
+ * at construction; the setters override them afterwards. The environment
+ * prefix is supplied by the caller, so an application can namespace the
+ * variables:
+ *
+ * @code
+ * async::Config config{utils::Env{"MYAPP_ASYNC_", "ASYNC_"}};
+ * @endcode
  */
 class Config {
   private:
-  utils::Env env{"ASYNC_"};
-
   Mode m_mode;
-
   int m_pinCore;
-
   unsigned int m_groupSize;
-
   bool m_asyncCopy;
-
   size_t m_alignment;
+  size_t m_maxSend;
 
-  Config()
+  public:
+  Config() : Config(utils::Env{"ASYNC_"}) {}
+
+  explicit Config(utils::Env env)
       : m_mode(str2mode(env.getOptional<std::string>("MODE").value_or("SYNC"))),
         m_pinCore(env.get<int>("PIN_CORE", -1)),
         m_groupSize(m_mode == Mode::MPI ? env.get("GROUP_SIZE", 64) : 1),
         m_asyncCopy(env.get<bool>("MPI_COPY", true)),
-        m_alignment(env.get<size_t>("BUFFER_ALIGNMENT", 0)) {}
+        m_alignment(env.get<size_t>("BUFFER_ALIGNMENT", 0)),
+        m_maxSend(env.get<size_t>("MPI_MAX_SEND", 1UL << 30)) {}
 
-  public:
-  static auto mode() -> Mode { return instance().m_mode; }
+  [[nodiscard]] auto mode() const -> Mode { return m_mode; }
 
-  static auto getPinCore() -> int { return instance().m_pinCore; }
+  [[nodiscard]] auto pinCore() const -> int { return m_pinCore; }
 
-  static auto groupSize() -> unsigned int { return instance().m_groupSize; }
+  [[nodiscard]] auto groupSize() const -> unsigned int { return m_groupSize; }
 
-  static auto useAsyncCopy() -> bool { return instance().m_asyncCopy; }
+  [[nodiscard]] auto useAsyncCopy() const -> bool { return m_asyncCopy; }
 
-  static auto alignment() -> size_t { return instance().m_alignment; }
+  [[nodiscard]] auto alignment() const -> size_t { return m_alignment; }
 
-  static auto maxSend() -> size_t { return instance().env.get<size_t>("MPI_MAX_SEND", 1UL << 30); }
+  [[nodiscard]] auto maxSend() const -> size_t { return m_maxSend; }
 
-  static void setMode(Mode mode) { instance().m_mode = mode; }
-
-  static void setPinCore(int pinCore) { instance().m_pinCore = pinCore; }
-
-  static void setUseAsyncCopy(bool useAsyncCopy) { instance().m_asyncCopy = useAsyncCopy; }
-
-  static void setGroupSize(unsigned int groupSize) {
-    if (Config::mode() == Mode::MPI) {
-      instance().m_groupSize = groupSize;
-    }
+  auto setMode(Mode mode) -> Config& {
+    m_mode = mode;
+    return *this;
   }
 
-  static void setAlignment(size_t alignment) { instance().m_alignment = alignment; }
+  auto setPinCore(int pinCore) -> Config& {
+    m_pinCore = pinCore;
+    return *this;
+  }
 
-  private:
-  static auto instance() -> Config& {
-    static Config config;
-    return config;
+  auto setGroupSize(unsigned int groupSize) -> Config& {
+    m_groupSize = groupSize;
+    return *this;
+  }
+
+  auto setUseAsyncCopy(bool useAsyncCopy) -> Config& {
+    m_asyncCopy = useAsyncCopy;
+    return *this;
+  }
+
+  auto setAlignment(size_t alignment) -> Config& {
+    m_alignment = alignment;
+    return *this;
+  }
+
+  auto setMaxSend(size_t maxSend) -> Config& {
+    m_maxSend = maxSend;
+    return *this;
   }
 
   static auto str2mode(const std::string& mode) -> Mode {

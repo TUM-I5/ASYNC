@@ -42,7 +42,7 @@ class LargeBuffer : public CxxTest::GlobalFixture {
 
   public:
   auto setUpWorld() -> bool override {
-    m_size = (3 * async::Config::maxSend()) / 2 + 2;
+    m_size = (3 * async::Config{}.maxSend()) / 2 + 2;
     return true;
   }
 

@@ -7,47 +7,42 @@
 
 #include "async/Config.h"
 
-/**
- * @todo Reset the config after each test
- */
 class TestConfig : public CxxTest::TestSuite {
   public:
-  static void testMode() {
-    TS_ASSERT_EQUALS(async::Config::mode(), async::Mode::Sync);
+  static void testDefaults() {
+    const async::Config config;
 
-    async::Config::setMode(async::Mode::Thread);
-    TS_ASSERT_EQUALS(async::Config::mode(), async::Mode::Thread);
+    TS_ASSERT_EQUALS(config.mode(), async::Mode::Sync);
+    TS_ASSERT_EQUALS(config.pinCore(), -1);
+    TS_ASSERT_EQUALS(config.groupSize(), 1);
+    TS_ASSERT_EQUALS(config.useAsyncCopy(), true);
+    TS_ASSERT_EQUALS(config.alignment(), 0);
   }
 
-  static void testGetPinCore() {
-    TS_ASSERT_EQUALS(async::Config::getPinCore(), -1);
+  static void testSetters() {
+    async::Config config;
 
-    async::Config::setPinCore(0);
-    TS_ASSERT_EQUALS(async::Config::getPinCore(), 0);
+    config.setMode(async::Mode::Thread).setPinCore(0).setGroupSize(4).setAlignment(2048);
+
+    TS_ASSERT_EQUALS(config.mode(), async::Mode::Thread);
+    TS_ASSERT_EQUALS(config.pinCore(), 0);
+    TS_ASSERT_EQUALS(config.groupSize(), 4);
+    TS_ASSERT_EQUALS(config.alignment(), 2048);
   }
 
-  static void testGroupSize() {
-    TS_ASSERT_EQUALS(async::Config::groupSize(), 1);
+  static void testIndependence() {
+    async::Config first;
+    const async::Config second;
 
-    async::Config::setGroupSize(4);
-    TS_ASSERT_EQUALS(async::Config::groupSize(), 1);
+    first.setAlignment(4096);
 
-    async::Config::setMode(async::Mode::MPI);
-    async::Config::setGroupSize(4);
-    TS_ASSERT_EQUALS(async::Config::groupSize(), 4);
+    TS_ASSERT_EQUALS(first.alignment(), 4096);
+    TS_ASSERT_EQUALS(second.alignment(), 0);
   }
 
-  static void testUseAsyncCopy() {
-    TS_ASSERT_EQUALS(async::Config::useAsyncCopy(), true);
-
-    async::Config::setUseAsyncCopy(false);
-    TS_ASSERT_EQUALS(async::Config::useAsyncCopy(), false);
-  }
-
-  static void testAlignment() {
-    TS_ASSERT_EQUALS(async::Config::alignment(), 0);
-
-    async::Config::setAlignment(2048);
-    TS_ASSERT_EQUALS(async::Config::alignment(), 2048);
+  static void testModeParsing() {
+    TS_ASSERT_EQUALS(async::Config::str2mode("thread"), async::Mode::Thread);
+    TS_ASSERT_EQUALS(async::Config::str2mode("SYNC"), async::Mode::Sync);
+    TS_ASSERT_EQUALS(async::Config::str2mode("nonsense"), async::Mode::Sync);
   }
 };

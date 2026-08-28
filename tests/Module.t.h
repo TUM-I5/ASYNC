@@ -18,8 +18,16 @@
 #include "async/Module.h"
 
 struct Param {
-  int step;
+  int step{0};
 };
+
+/**
+ * The settings the test binary runs with (the mode is chosen through the environment)
+ */
+inline auto testConfig() -> const async::Config& {
+  static const async::Config Config;
+  return Config;
+}
 
 class Module : private async::Module<Module, Param, Param> {
   public:
@@ -123,7 +131,7 @@ class BufferModule : private async::Module<BufferModule, Param, Param> {
 
     call(param);
 
-    if (async::Config::mode() == async::Mode::MPI) {
+    if (testConfig().mode() == async::Mode::MPI) {
       // Set the params on non-executors
       execInit(param);
       execInternal(param, false);
@@ -194,7 +202,7 @@ class ResizeBufferModule : private async::Module<ResizeBufferModule, Param, Para
     param.step = 0;
     call(param);
 
-    if (async::Config::mode() == async::Mode::MPI) {
+    if (testConfig().mode() == async::Mode::MPI) {
       // Set the params on non-executors
       execInternal(param, false);
     }
@@ -212,7 +220,7 @@ class ResizeBufferModule : private async::Module<ResizeBufferModule, Param, Para
     param.step = 1;
     call(param);
 
-    if (async::Config::mode() == async::Mode::MPI) {
+    if (testConfig().mode() == async::Mode::MPI) {
       // Set the params on non-executors
       execInternal(param, false);
     }
@@ -283,7 +291,7 @@ class RemoveBufferModule : private async::Module<RemoveBufferModule, Param, Para
 
     call(param);
 
-    if (async::Config::mode() == async::Mode::MPI) {
+    if (testConfig().mode() == async::Mode::MPI) {
       // Set the params on non-executors
       execInit(param);
       exec(param);
@@ -330,7 +338,7 @@ class TestModule : public CxxTest::TestSuite {
 #endif // USE_MPI
 
     const unsigned int groupSize = dispatcher.groupSize();
-    if (async::Config::mode() == async::Mode::MPI) {
+    if (testConfig().mode() == async::Mode::MPI) {
       TS_ASSERT_EQUALS(groupSize, 64); // the default
     } else {
       TS_ASSERT_EQUALS(groupSize, 1);
@@ -347,7 +355,7 @@ class TestModule : public CxxTest::TestSuite {
     } else {
       TS_ASSERT(dispatcher.isExecutor());
 
-      if (async::Config::mode() == async::Mode::MPI) {
+      if (testConfig().mode() == async::Mode::MPI) {
         TS_ASSERT_EQUALS(m_rank + 1, m_size);
       } else {
         TS_FAIL("No executors in SYNC and THREAD mode!");
@@ -364,7 +372,7 @@ class TestModule : public CxxTest::TestSuite {
     TS_ASSERT(module.mTearDown);
 
     // disabled; might fail for pre-pinned threads
-    // if (async::Config::mode() == async::Mode::Thread) {
+    // if (testConfig().mode() == async::Mode::Thread) {
     //   TS_ASSERT_EQUALS(module.mCpu, get_nprocs() - 1);
     // }
   }
@@ -385,7 +393,7 @@ class TestModule : public CxxTest::TestSuite {
     const unsigned int cloneBufferSize = sizeof(int);
     const unsigned int cloneSyncBufferSize = sizeof(long);
 
-    if (dispatcher.isExecutor() && async::Config::mode() == async::Mode::MPI) {
+    if (dispatcher.isExecutor() && testConfig().mode() == async::Mode::MPI) {
       initBufferSize *= m_size - 1;
       bufferSize *= m_size - 1;
     }
@@ -411,7 +419,7 @@ class TestModule : public CxxTest::TestSuite {
 
     unsigned int bufferSize = sizeof(int);
 
-    if (dispatcher.isExecutor() && async::Config::mode() == async::Mode::MPI) {
+    if (dispatcher.isExecutor() && testConfig().mode() == async::Mode::MPI) {
       bufferSize *= m_size - 1;
     }
 
@@ -436,7 +444,7 @@ class TestModule : public CxxTest::TestSuite {
 
     unsigned int buffer1Size = sizeof(int);
 
-    if (dispatcher.isExecutor() && async::Config::mode() == async::Mode::MPI) {
+    if (dispatcher.isExecutor() && testConfig().mode() == async::Mode::MPI) {
       buffer1Size *= m_size - 1;
     }
 
@@ -451,7 +459,7 @@ class TestModule : public CxxTest::TestSuite {
     async::Dispatcher dispatcher;
 
     const unsigned int groupSize = dispatcher.groupSize();
-    if (async::Config::mode() == async::Mode::MPI) {
+    if (testConfig().mode() == async::Mode::MPI) {
       TS_ASSERT_EQUALS(groupSize, 64); // the default
     } else {
       TS_ASSERT_EQUALS(groupSize, 1);

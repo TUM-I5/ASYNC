@@ -24,10 +24,13 @@ class Dispatcher {
   MPI_Comm m_comm{MPI_COMM_WORLD};
 #endif // USE_MPI
 
+  Config m_config;
+
   unsigned int m_groupSize;
 
   public:
-  Dispatcher() : m_groupSize(Config::groupSize()) {}
+  explicit Dispatcher(Config config = Config{})
+      : m_config(config), m_groupSize(m_config.groupSize()) {}
 
   ~Dispatcher() {
     // Delete all modules so we can create a new dispatcher
@@ -48,10 +51,10 @@ class Dispatcher {
    * Use this to overwrite the group size set from the environment variable
    *
    * @param groupSize The group size (excl. the MPI executor)
-   * @deprecated Use {@link Config::setGroupSize}
+   * @deprecated Use {@link Config::setGroupSize} on the config passed to the constructor
    */
   void setGroupSize(unsigned int groupSize) {
-    if (Config::mode() == Mode::MPI) {
+    if (m_config.mode() == Mode::MPI) {
       m_groupSize = groupSize;
     }
   }
@@ -70,12 +73,17 @@ class Dispatcher {
       module->setScheduler(m_scheduler);
     }
 
-    if (Config::mode() == Mode::MPI) {
+    if (m_config.mode() == Mode::MPI) {
       // Initialize the scheduler
       m_scheduler.setCommunicator(m_comm, m_groupSize);
     }
 #endif // USE_MPI
   }
+
+  /**
+   * @return The settings this dispatcher and its modules were created with
+   */
+  [[nodiscard]] auto config() const -> const Config& { return m_config; }
 
   /**
    * @return The groups size (or 1 for synchronous and asynchnchronous thread mode)

@@ -32,20 +32,20 @@ class Module : public ModuleBase {
   std::unique_ptr<async::as::Base<Executor, InitParameter, Parameter>> m_async;
 
   public:
-  Module() {
-    switch (Config::mode()) {
+  explicit Module(Config config = Config{}) {
+    switch (config.mode()) {
     case Mode::Sync:
-      m_async = std::make_unique<async::as::Sync<Executor, InitParameter, Parameter>>();
+      m_async = std::make_unique<async::as::Sync<Executor, InitParameter, Parameter>>(config);
       break;
     case Mode::Thread:
-      m_async = std::make_unique<async::as::Thread<Executor, InitParameter, Parameter>>();
+      m_async = std::make_unique<async::as::Thread<Executor, InitParameter, Parameter>>(config);
       break;
     case Mode::MPI:
 #ifdef USE_MPI
-      if (Config::useAsyncCopy()) {
-        m_async = std::make_unique<async::as::MPIAsync<Executor, InitParameter, Parameter>>();
+      if (config.useAsyncCopy()) {
+        m_async = std::make_unique<async::as::MPIAsync<Executor, InitParameter, Parameter>>(config);
       } else {
-        m_async = std::make_unique<async::as::MPI<Executor, InitParameter, Parameter>>();
+        m_async = std::make_unique<async::as::MPI<Executor, InitParameter, Parameter>>(config);
       }
 #else  // USE_MPI
       logError() << "Asynchronous MPI is not supported.";

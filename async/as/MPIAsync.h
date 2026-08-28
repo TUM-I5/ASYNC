@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "MPIBase.h"
+#include "async/Config.h"
 #include "async/ExecInfo.h"
 #include "async/as/Base.h"
 #include "async/as/MPIScheduler.h"
@@ -50,7 +51,8 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
   std::vector<MPI_Request> m_asyncRequests;
 
   public:
-  MPIAsync() {
+  explicit MPIAsync(Config config = Config{})
+      : MPIBase<Executor, InitParameter, Parameter>(config) {
     // One request always required for the parameters
     m_asyncRequests.push_back(MPI_REQUEST_NULL);
   }

@@ -44,7 +44,8 @@ class Thread : public ThreadBase<Executor, InitParameter, Parameter> {
   std::vector<BufInfo> m_buffer;
 
   public:
-  Thread() = default;
+  explicit Thread(Config config = Config{})
+      : ThreadBase<Executor, InitParameter, Parameter>(config) {}
 
   ~Thread() override = default;
 
@@ -56,7 +57,7 @@ class Thread : public ThreadBase<Executor, InitParameter, Parameter> {
     ThreadBase<Executor, InitParameter, Parameter>::getAffinity(oldCpuMask);
     const int numCores = CPU_COUNT(&(oldCpuMask.set)); // Number of cores we have available
 
-    int core = async::Config::getPinCore();
+    int core = Base<Executor, InitParameter, Parameter>::config().pinCore();
     if (core < 0) {
       core = numCores + core;
     }

@@ -56,13 +56,13 @@ class Base : public async::ExecInfo {
   /** Already cleanup everything? */
   bool m_finalized{false};
 
-  /** Aligment of buffers (might be requested for I/O back-ends) */
-  const size_t mAlignment;
+  /** The settings this object was created with */
+  Config m_config;
 
   Parameter m_lastParameters;
 
   protected:
-  Base() : m_executor(nullptr), mAlignment(async::Config::alignment()) {}
+  explicit Base(Config config) : m_executor(nullptr), m_config(config) {}
 
   public:
   ~Base() override { finalizeInternal(); }
@@ -162,6 +162,10 @@ class Base : public async::ExecInfo {
   virtual void finalize() { finalizeInternal(); }
 
   protected:
+  [[nodiscard]] auto config() const -> const Config& { return m_config; }
+
+  [[nodiscard]] auto alignment() const -> size_t { return m_config.alignment(); }
+
   auto executor() -> Executor& { return *m_executor; }
 
   auto addBufferInternal(const void* origin, size_t size, bool allocate = true) -> unsigned int {
@@ -171,7 +175,7 @@ class Base : public async::ExecInfo {
     buffer.origin = origin;
 
     if ((size != 0U) && allocate) {
-      if (mAlignment > 0) {
+      if (alignment() > 0) {
         buffer.buffer = allocateAlignedBuffer(size);
       } else {
         buffer.buffer = malloc(size);
@@ -199,7 +203,7 @@ class Base : public async::ExecInfo {
     async::ExecInfo::resizeBufferInternal(id, size);
 
     if (size && m_buffer[id].buffer) {
-      if (mAlignment > 0) {
+      if (alignment() > 0) {
         freeBuffer(m_buffer[id].buffer);
         m_buffer[id].buffer = allocateAlignedBuffer(size);
       } else {
@@ -255,23 +259,23 @@ class Base : public async::ExecInfo {
    * Compute the allocated size depending on the requested size
    */
   auto allocSize(size_t size) -> size_t {
-    // Make the allocated buffer size a multiple of m_alignment
-    size_t allocBufferSize = (size + mAlignment - 1) / mAlignment;
-    allocBufferSize *= mAlignment;
+    // Make the allocated buffer size a multiple of the requested alignment
+    size_t allocBufferSize = (size + alignment() - 1) / alignment();
+    allocBufferSize *= alignment();
 
     return allocBufferSize;
   }
 
   /**
-   * Allocate a buffer aligned to mAlignment (which has to be non-zero)
+   * Allocate a buffer aligned to the configured alignment (which has to be non-zero)
    */
   auto allocateAlignedBuffer(size_t size) -> void* {
     // (the aligned operator new only accepts powers of two)
-    if ((mAlignment & (mAlignment - 1)) != 0) {
-      logError() << "The buffer alignment has to be a power of two, but it is" << mAlignment;
+    if ((alignment() & (alignment() - 1)) != 0) {
+      logError() << "The buffer alignment has to be a power of two, but it is" << alignment();
     }
 
-    void* buffer = ::operator new(allocSize(size), std::align_val_t(mAlignment), std::nothrow);
+    void* buffer = ::operator new(allocSize(size), std::align_val_t(alignment()), std::nothrow);
     if (buffer == nullptr) {
       logError() << "Could not allocate buffer";
     }
@@ -282,8 +286,8 @@ class Base : public async::ExecInfo {
    * Free a buffer allocated by addBufferInternal or resizeBufferInternal
    */
   void freeBuffer(void* buffer) {
-    if (mAlignment > 0) {
-      ::operator delete(buffer, std::align_val_t(mAlignment));
+    if (alignment() > 0) {
+      ::operator delete(buffer, std::align_val_t(alignment()));
     } else {
       free(buffer);
     }

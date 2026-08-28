@@ -7,6 +7,7 @@
 #define ASYNC_AS_SYNC_H
 
 #include "Base.h"
+#include "async/Config.h"
 #include "async/ExecInfo.h"
 #include <cstddef>
 
@@ -18,7 +19,7 @@ namespace async::as {
 template <class Executor, typename InitParameter, typename Parameter>
 class Sync : public Base<Executor, InitParameter, Parameter> {
   public:
-  Sync() = default;
+  explicit Sync(Config config = Config{}) : Base<Executor, InitParameter, Parameter>(config) {}
 
   ~Sync() override = default;
 

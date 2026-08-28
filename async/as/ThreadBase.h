@@ -15,6 +15,7 @@
 
 #include "Base.h"
 #include "Pin.h"
+#include "async/Config.h"
 
 namespace async::as {
 
@@ -77,7 +78,8 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
   bool m_waiting{false};
 
   protected:
-  ThreadBase() : m_asyncThread(pthread_self()) {
+  explicit ThreadBase(Config config)
+      : Base<Executor, InitParameter, Parameter>(config), m_asyncThread(pthread_self()) {
 #ifndef __APPLE__
     pthread_spin_init(&m_writerLock, PTHREAD_PROCESS_PRIVATE);
     pthread_spin_init(&m_initBufferLock, PTHREAD_PROCESS_PRIVATE);
