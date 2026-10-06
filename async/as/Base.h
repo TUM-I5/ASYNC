@@ -12,6 +12,10 @@
 #include <type_traits>
 #include <vector>
 
+#ifdef _WIN32
+#include <malloc.h>
+#endif
+
 #include "Pin.h"
 #include "utils/logger.h"
 
@@ -125,7 +129,7 @@ class Base : public async::ExecInfo {
     assert(id < numBuffers());
 
     m_buffer[id].origin = nullptr;
-    free(m_buffer[id].buffer);
+    freeBuffer(m_buffer[id].buffer);
     m_buffer[id].buffer = nullptr;
     async::ExecInfo::removeBufferInternal(id);
   }
@@ -171,11 +175,7 @@ class Base : public async::ExecInfo {
 
     if ((size != 0U) && allocate) {
       if (mAlignment > 0) {
-        const size_t allocBufferSize = allocSize(size);
-        const int ret = posix_memalign(&buffer.buffer, mAlignment, allocBufferSize);
-        if (ret != 0) {
-          logError() << "Could not allocate buffer" << ret;
-        }
+        buffer.buffer = allocateAlignedBuffer(size);
       } else {
         buffer.buffer = malloc(size);
       }
@@ -203,12 +203,8 @@ class Base : public async::ExecInfo {
 
     if (size && m_buffer[id].buffer) {
       if (mAlignment > 0) {
-        const size_t allocBufferSize = allocSize(size);
-        free(m_buffer[id].buffer);
-        const int ret = posix_memalign(&m_buffer[id].buffer, mAlignment, allocBufferSize);
-        if (ret != 0) {
-          logError() << "Could not allocate buffer" << ret;
-        }
+        freeBuffer(m_buffer[id].buffer);
+        m_buffer[id].buffer = allocateAlignedBuffer(size);
       } else {
         m_buffer[id].buffer = realloc(m_buffer[id].buffer, size);
       }
@@ -248,7 +244,7 @@ class Base : public async::ExecInfo {
 
     for (unsigned int i = 0; i < m_buffer.size(); i++) {
       m_buffer[i].origin = nullptr;
-      free(m_buffer[i].buffer);
+      freeBuffer(m_buffer[i].buffer);
       m_buffer[i].buffer = nullptr;
       async::ExecInfo::removeBufferInternal(i);
     }
@@ -267,6 +263,41 @@ class Base : public async::ExecInfo {
     allocBufferSize *= mAlignment;
 
     return allocBufferSize;
+  }
+
+  /**
+   * Allocate a buffer aligned to mAlignment (which has to be non-zero)
+   */
+  auto allocateAlignedBuffer(size_t size) -> void* {
+    const size_t allocBufferSize = allocSize(size);
+#ifdef _WIN32
+    // Windows has no posix_memalign; and its aligned allocations need to be freed with
+    // _aligned_free (cf. freeBuffer)
+    void* buffer = _aligned_malloc(allocBufferSize, mAlignment);
+    if (buffer == nullptr) {
+      logError() << "Could not allocate buffer";
+    }
+#else
+    void* buffer = nullptr;
+    const int ret = posix_memalign(&buffer, mAlignment, allocBufferSize);
+    if (ret != 0) {
+      logError() << "Could not allocate buffer" << ret;
+    }
+#endif
+    return buffer;
+  }
+
+  /**
+   * Free a buffer allocated by addBufferInternal or resizeBufferInternal
+   */
+  void freeBuffer(void* buffer) {
+#ifdef _WIN32
+    if (mAlignment > 0) {
+      _aligned_free(buffer);
+      return;
+    }
+#endif
+    free(buffer);
   }
 
   template <typename E, typename P>
