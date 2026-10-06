@@ -12,11 +12,11 @@
 #include "utils/logger.h"
 #include <cassert>
 #include <cstring>
-#include <sched.h>
 #include <vector>
-#ifndef __APPLE__
+#ifdef __linux__
+#include <sched.h>
 #include <sys/sysinfo.h>
-#endif // __APPLE__
+#endif // __linux__
 
 #include "ThreadBase.h"
 #include "async/Config.h"
@@ -50,7 +50,7 @@ class Thread : public ThreadBase<Executor, InitParameter, Parameter> {
 
   void setExecutor(Executor& executor) override {
     ThreadBase<Executor, InitParameter, Parameter>::setExecutor(executor);
-#ifndef __APPLE__
+#ifdef __linux__
 
     CpuMask oldCpuMask{};
     ThreadBase<Executor, InitParameter, Parameter>::getAffinity(oldCpuMask);
@@ -88,7 +88,7 @@ class Thread : public ThreadBase<Executor, InitParameter, Parameter> {
     CPU_SET(realCore, &cpuMask);
 
     ThreadBase<Executor, InitParameter, Parameter>::setAffinity(CpuMask{cpuMask});
-#endif // __APPLE__
+#endif // __linux__
   }
 
   auto addSyncBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned int override {

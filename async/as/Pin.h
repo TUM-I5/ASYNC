@@ -7,24 +7,26 @@
 
 #include <pthread.h>
 
-#ifndef __APPLE__
+// affinity masks are a Linux interface (cpu_set_t, pthread_*affinity_np); elsewhere (e.g. macOS
+// or Windows), the mask stays empty and pinning is not done
+#ifdef __linux__
 #include <sched.h>
 #endif
 
 namespace async::as {
 struct CpuMask {
-#ifndef __APPLE__
+#ifdef __linux__
   cpu_set_t set;
-#endif // __APPLE__
+#endif // __linux__
 
   void getaffinity_np([[maybe_unused]] pthread_t thread) {
-#ifndef __APPLE__
+#ifdef __linux__
     pthread_getaffinity_np(thread, sizeof(cpu_set_t), &set);
 #endif
   }
 
   void setaffinity_np([[maybe_unused]] pthread_t thread) const {
-#ifndef __APPLE__
+#ifdef __linux__
     pthread_setaffinity_np(thread, sizeof(cpu_set_t), &set);
 #endif
   }
