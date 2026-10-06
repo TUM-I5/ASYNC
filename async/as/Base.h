@@ -9,12 +9,9 @@
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
+#include <new>
 #include <type_traits>
 #include <vector>
-
-#ifdef _WIN32
-#include <malloc.h>
-#endif
 
 #include "Pin.h"
 #include "utils/logger.h"
@@ -269,21 +266,15 @@ class Base : public async::ExecInfo {
    * Allocate a buffer aligned to mAlignment (which has to be non-zero)
    */
   auto allocateAlignedBuffer(size_t size) -> void* {
-    const size_t allocBufferSize = allocSize(size);
-#ifdef _WIN32
-    // Windows has no posix_memalign; and its aligned allocations need to be freed with
-    // _aligned_free (cf. freeBuffer)
-    void* buffer = _aligned_malloc(allocBufferSize, mAlignment);
+    // (the aligned operator new only accepts powers of two)
+    if ((mAlignment & (mAlignment - 1)) != 0) {
+      logError() << "The buffer alignment has to be a power of two, but it is" << mAlignment;
+    }
+
+    void* buffer = ::operator new(allocSize(size), std::align_val_t(mAlignment), std::nothrow);
     if (buffer == nullptr) {
       logError() << "Could not allocate buffer";
     }
-#else
-    void* buffer = nullptr;
-    const int ret = posix_memalign(&buffer, mAlignment, allocBufferSize);
-    if (ret != 0) {
-      logError() << "Could not allocate buffer" << ret;
-    }
-#endif
     return buffer;
   }
 
@@ -291,13 +282,11 @@ class Base : public async::ExecInfo {
    * Free a buffer allocated by addBufferInternal or resizeBufferInternal
    */
   void freeBuffer(void* buffer) {
-#ifdef _WIN32
     if (mAlignment > 0) {
-      _aligned_free(buffer);
-      return;
+      ::operator delete(buffer, std::align_val_t(mAlignment));
+    } else {
+      free(buffer);
     }
-#endif
-    free(buffer);
   }
 
   template <typename E, typename P>
