@@ -9,6 +9,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
+#include <new>
 #include <type_traits>
 #include <vector>
 
@@ -125,7 +126,7 @@ class Base : public async::ExecInfo {
     assert(id < numBuffers());
 
     m_buffer[id].origin = nullptr;
-    free(m_buffer[id].buffer);
+    freeBuffer(m_buffer[id].buffer);
     m_buffer[id].buffer = nullptr;
     async::ExecInfo::removeBufferInternal(id);
   }
@@ -171,11 +172,7 @@ class Base : public async::ExecInfo {
 
     if ((size != 0U) && allocate) {
       if (mAlignment > 0) {
-        const size_t allocBufferSize = allocSize(size);
-        const int ret = posix_memalign(&buffer.buffer, mAlignment, allocBufferSize);
-        if (ret != 0) {
-          logError() << "Could not allocate buffer" << ret;
-        }
+        buffer.buffer = allocateAlignedBuffer(size);
       } else {
         buffer.buffer = malloc(size);
       }
@@ -203,12 +200,8 @@ class Base : public async::ExecInfo {
 
     if (size && m_buffer[id].buffer) {
       if (mAlignment > 0) {
-        const size_t allocBufferSize = allocSize(size);
-        free(m_buffer[id].buffer);
-        const int ret = posix_memalign(&m_buffer[id].buffer, mAlignment, allocBufferSize);
-        if (ret != 0) {
-          logError() << "Could not allocate buffer" << ret;
-        }
+        freeBuffer(m_buffer[id].buffer);
+        m_buffer[id].buffer = allocateAlignedBuffer(size);
       } else {
         m_buffer[id].buffer = realloc(m_buffer[id].buffer, size);
       }
@@ -248,7 +241,7 @@ class Base : public async::ExecInfo {
 
     for (unsigned int i = 0; i < m_buffer.size(); i++) {
       m_buffer[i].origin = nullptr;
-      free(m_buffer[i].buffer);
+      freeBuffer(m_buffer[i].buffer);
       m_buffer[i].buffer = nullptr;
       async::ExecInfo::removeBufferInternal(i);
     }
@@ -267,6 +260,33 @@ class Base : public async::ExecInfo {
     allocBufferSize *= mAlignment;
 
     return allocBufferSize;
+  }
+
+  /**
+   * Allocate a buffer aligned to mAlignment (which has to be non-zero)
+   */
+  auto allocateAlignedBuffer(size_t size) -> void* {
+    // (the aligned operator new only accepts powers of two)
+    if ((mAlignment & (mAlignment - 1)) != 0) {
+      logError() << "The buffer alignment has to be a power of two, but it is" << mAlignment;
+    }
+
+    void* buffer = ::operator new(allocSize(size), std::align_val_t(mAlignment), std::nothrow);
+    if (buffer == nullptr) {
+      logError() << "Could not allocate buffer";
+    }
+    return buffer;
+  }
+
+  /**
+   * Free a buffer allocated by addBufferInternal or resizeBufferInternal
+   */
+  void freeBuffer(void* buffer) {
+    if (mAlignment > 0) {
+      ::operator delete(buffer, std::align_val_t(mAlignment));
+    } else {
+      free(buffer);
+    }
   }
 
   template <typename E, typename P>
