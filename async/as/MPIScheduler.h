@@ -224,6 +224,15 @@ class MPIScheduler {
   /** What the configuration has set up, over all groups */
   ExecutorLayout m_layout;
 
+  /** Whether groups that share memory may aggregate in shared windows */
+  bool m_allowSharedMemory{true};
+
+  /** Whether this group aggregates in shared windows */
+  bool m_sharedMemory{false};
+
+  /** Set while the executor shuts down modules without their ranks */
+  bool m_killing{false};
+
   /** The "COMM_WORLD" communicator (communicator without executors) */
   MPI_Comm m_commWorld;
 
@@ -476,6 +485,17 @@ class MPIScheduler {
     // always the first m_numComputeRanks ones
     m_numComputeRanks = executorExclusive ? m_groupSize - 1 : m_groupSize;
 
+    // A group whose ranks all share memory can aggregate in shared windows
+    m_sharedMemory = false;
+    if (m_allowSharedMemory) {
+      MPI_Comm sharedComm = MPI_COMM_NULL;
+      MPI_Comm_split_type(groupComm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &sharedComm);
+      int sharedSize = 0;
+      MPI_Comm_size(sharedComm, &sharedSize);
+      MPI_Comm_free(&sharedComm);
+      m_sharedMemory = sharedSize == m_groupSize;
+    }
+
     if (m_pollIntervalUs < 0) {
       // An exclusive executor owns its rank and can spin; a co-located one
       // shares its cores with the computation and has to step back
@@ -521,6 +541,28 @@ class MPIScheduler {
    * work. A negative value selects the default for the current layout.
    */
   void setPollIntervalUs(long pollIntervalUs) { m_pollIntervalUs = pollIntervalUs; }
+
+  /**
+   * Whether groups whose ranks share memory may aggregate in shared windows;
+   * has to be set before the communicator
+   */
+  void setAllowSharedMemory(bool allow) { m_allowSharedMemory = allow; }
+
+  /**
+   * @return Whether this group aggregates in shared windows
+   */
+  [[nodiscard]] auto sharedMemory() const -> bool { return m_sharedMemory; }
+
+  /**
+   * @return Whether the executor shuts the modules down without their ranks,
+   *  which then take no part in it
+   */
+  [[nodiscard]] auto killing() const -> bool { return m_killing; }
+
+  /**
+   * @return Whether the dispatcher is gone, together with the group
+   */
+  [[nodiscard]] auto finalized() const -> bool { return m_finalized; }
 
   /**
    * Called on every rank when the dispatcher starts the executors; modules
@@ -983,6 +1025,7 @@ class MPIScheduler {
    * Shut down everything that is left on the executor side
    */
   void killCalls() {
+    m_killing = true;
     for (auto& call : m_asyncCalls) {
       if (call != nullptr) {
         call->finalizeInternal();

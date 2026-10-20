@@ -87,6 +87,7 @@ class TestMPI : public CxxTest::TestSuite {
     m_chunkSteps = 0;
 
     m_scheduler = new async::as::MPIScheduler();
+    m_scheduler->setAllowSharedMemory(async::Config{}.sharedMemory());
     m_scheduler->setCommunicator(MPI_COMM_WORLD, 2);
   }
 
@@ -142,6 +143,18 @@ class TestMPI : public CxxTest::TestSuite {
         }
       }
     }
+  }
+
+  /**
+   * The groups are {0, 1, 2} and {3, 4} in every variant, with an executor
+   * of their own each, rank 2 and 4
+   */
+  void testGroups() {
+    const bool executor = m_rank == 2 || m_rank == 4;
+    TS_ASSERT_EQUALS(m_scheduler->isExecutor(), executor);
+    TS_ASSERT_EQUALS(m_scheduler->isCompute(), !executor);
+    TS_ASSERT_EQUALS(m_scheduler->groupRank(), m_rank < 3 ? m_rank : m_rank - 3);
+    TS_ASSERT_EQUALS(m_scheduler->sharedMemory(), async::Config{}.sharedMemory());
   }
 
   void testInit() {

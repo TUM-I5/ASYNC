@@ -114,4 +114,9 @@ if( USE_MPI )
         "ASYNC_MODE=NODE" "ASYNC_MPI_COPY=1" "ASYNC_EXECUTOR_EXCLUSIVE=1" )
     # a group of one rank, which is its own executor
     add_cxx_test_run( TestModuleMPISingle TestModule 1 "ASYNC_MODE=NODE" "ASYNC_MPI_COPY=1" )
+    # messages instead of shared windows
+    add_cxx_test_run( TestModuleMPINoShared TestModule 3
+        "ASYNC_MODE=NODE" "ASYNC_MPI_COPY=1" "ASYNC_SHARED_MEMORY=0" )
+    add_cxx_test_run( TestModuleMPINoSharedSyncCopy TestModule 3
+        "ASYNC_MODE=NODE" "ASYNC_MPI_COPY=0" "ASYNC_SHARED_MEMORY=0" )
 endif( USE_MPI )

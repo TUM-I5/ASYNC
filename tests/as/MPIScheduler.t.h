@@ -216,6 +216,23 @@ class TestMPIScheduler : public CxxTest::TestSuite {
     TS_ASSERT_EQUALS(scheduler.layout().executors, 1);
   }
 
+  /** Shared memory can be turned off, which leaves the messages */
+  void testNoSharedMemory() const {
+    async::as::MPIScheduler scheduler;
+    scheduler.setAllowSharedMemory(false);
+    scheduler.setCommunicator(MPI_COMM_WORLD, async::GroupLayout{});
+
+    TS_ASSERT(!scheduler.sharedMemory());
+  }
+
+  /** A group whose ranks all share memory aggregates in shared windows by default */
+  void testSharedMemory() const {
+    async::as::MPIScheduler scheduler;
+    scheduler.setCommunicator(MPI_COMM_WORLD, async::GroupLayout{});
+
+    TS_ASSERT(scheduler.sharedMemory());
+  }
+
   /** Executors that only collect: the application loses one rank per node */
   void testExclusiveNodes() const {
     const int node = m_rank / 3;

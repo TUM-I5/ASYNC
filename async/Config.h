@@ -109,6 +109,7 @@ class Config {
   size_t m_alignment;
   size_t m_maxSend;
   long m_pollIntervalUs;
+  bool m_sharedMemory;
 
   public:
   Config() : Config(utils::Env{"ASYNC_"}) {}
@@ -119,7 +120,8 @@ class Config {
         m_asyncCopy(env.get<bool>("MPI_COPY", true)),
         m_alignment(env.get<size_t>("BUFFER_ALIGNMENT", 0)),
         m_maxSend(env.get<size_t>("MPI_MAX_SEND", 1UL << 30)),
-        m_pollIntervalUs(env.get<long>("POLL_INTERVAL_US", -1)) {}
+        m_pollIntervalUs(env.get<long>("POLL_INTERVAL_US", -1)),
+        m_sharedMemory(env.get<bool>("SHARED_MEMORY", true)) {}
 
   [[nodiscard]] auto mode() const -> Mode { return m_mode; }
 
@@ -146,6 +148,13 @@ class Config {
    * the computation.
    */
   [[nodiscard]] auto pollIntervalUs() const -> long { return m_pollIntervalUs; }
+
+  /**
+   * Whether a group whose ranks share memory aggregates in shared memory
+   * windows, which every rank writes its part of the output into directly,
+   * rather than through messages
+   */
+  [[nodiscard]] auto sharedMemory() const -> bool { return m_sharedMemory; }
 
   auto setMode(Mode mode) -> Config& {
     m_mode = mode;
@@ -187,6 +196,11 @@ class Config {
 
   auto setPollIntervalUs(long pollIntervalUs) -> Config& {
     m_pollIntervalUs = pollIntervalUs;
+    return *this;
+  }
+
+  auto setSharedMemory(bool sharedMemory) -> Config& {
+    m_sharedMemory = sharedMemory;
     return *this;
   }
 

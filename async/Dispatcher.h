@@ -88,6 +88,7 @@ class Dispatcher {
 
       // Initialize the scheduler
       m_scheduler.setPollIntervalUs(m_config.pollIntervalUs());
+      m_scheduler.setAllowSharedMemory(m_config.sharedMemory());
       m_scheduler.setCommunicator(m_comm, m_groupLayout);
 
       // Only the executors run the modules

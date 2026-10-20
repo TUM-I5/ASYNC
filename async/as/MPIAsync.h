@@ -84,7 +84,9 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
    */
   auto addBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned override {
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone, false);
-    const auto id = MPIBase<Executor, InitParameter, Parameter>::addBufferLocal(buffer, size, true);
+    // (a buffer in a shared window needs no staging copy: this rank writes its part directly)
+    const auto id = MPIBase<Executor, InitParameter, Parameter>::addBufferLocal(
+        buffer, size, !MPIBase<Executor, InitParameter, Parameter>::shared());
 
     BufInfo bufInfo{};
     bufInfo.sync = false;
@@ -135,6 +137,13 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
   }
 
   auto managedBuffer(unsigned int id) -> void* override {
+    if (MPIBase<Executor, InitParameter, Parameter>::shared()) {
+      // what the application writes there is in the aggregate already
+      return MPIBase<Executor, InitParameter, Parameter>::localOrigin(id) == nullptr
+                 ? MPIBase<Executor, InitParameter, Parameter>::sharedOwn(id)
+                 : nullptr;
+    }
+
     if (MPIBase<Executor, InitParameter, Parameter>::scheduler().isColocated()) {
       return MPIBase<Executor, InitParameter, Parameter>::localManagedBuffer(id);
     }
@@ -163,7 +172,7 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
 
     assert(id < (Base<Executor, InitParameter, Parameter>::numBuffers()));
 
-    if (m_buffer[id].sync ||
+    if (m_buffer[id].sync || MPIBase<Executor, InitParameter, Parameter>::shared() ||
         MPIBase<Executor, InitParameter, Parameter>::scheduler().isColocated()) {
       MPIBase<Executor, InitParameter, Parameter>::sendBuffer(id, size);
       return;
@@ -199,6 +208,8 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
   void call(const Parameter& parameters) override {
     iSendAllBuffers();
 
+    MPIBase<Executor, InitParameter, Parameter>::publishWindows();
+
     // Send parameters
     m_paramBuffer = parameters;
     m_asyncRequests[0] = MPIBase<Executor, InitParameter, Parameter>::scheduler().iSendParam(
@@ -214,7 +225,7 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
   [[nodiscard]] auto requestsFor(const BufInfo& bufInfo, size_t size) const -> std::size_t {
     // a co-located executor rank copies its own contribution into the aggregation buffer, so it
     // never sends one
-    if (bufInfo.sync || size == 0 ||
+    if (bufInfo.sync || size == 0 || MPIBase<Executor, InitParameter, Parameter>::shared() ||
         MPIBase<Executor, InitParameter, Parameter>::scheduler().isColocated() ||
         (bufInfo.clone &&
          MPIBase<Executor, InitParameter, Parameter>::scheduler().groupRank() != 0)) {

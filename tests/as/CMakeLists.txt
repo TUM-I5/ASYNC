@@ -13,7 +13,11 @@ if( USE_MPI )
     add_cxx_test_executable( TestMPIScheduler ${CMAKE_CURRENT_SOURCE_DIR}/MPIScheduler.t.h )
     add_cxx_test_run( TestMPIScheduler TestMPIScheduler 5 )
 
-    # The groups of the low-level tests are {0, 1, 2} and {3, 4}
+    # The groups of the low-level tests are {0, 1, 2} and {3, 4}. They aggregate
+    # in shared windows (the default), and through messages.
+    set( mpi_test_variants "" "NoShared" )
+    set( mpi_test_env_ "" )
+    set( mpi_test_env_NoShared "ASYNC_SHARED_MEMORY=0" )
     foreach( copy 0 1 )
         if( copy )
             set( executable TestMPIAsync )
@@ -23,6 +27,9 @@ if( USE_MPI )
         add_cxx_test_executable( ${executable} ${CMAKE_CURRENT_SOURCE_DIR}/MPI.t.h )
         target_compile_definitions( ${executable} PRIVATE ASYNC_MPI_COPY=${copy} )
 
-        add_cxx_test_run( ${executable} ${executable} 5 "ASYNC_MPI_MAX_SEND=1048576" )
+        foreach( variant IN LISTS mpi_test_variants )
+            add_cxx_test_run( ${executable}${variant} ${executable} 5
+                "ASYNC_MPI_MAX_SEND=1048576" ${mpi_test_env_${variant}} )
+        endforeach()
     endforeach()
 endif( USE_MPI )

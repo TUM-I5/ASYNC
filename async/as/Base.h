@@ -54,6 +54,8 @@ class Base : public async::ExecInfo {
      * soon as the buffer holds anything
      */
     bool allocate;
+    /** Memory that somebody else owns (a shared window), never freed here */
+    bool external;
   };
 
   /** The executor for the asynchronous call */
@@ -139,8 +141,7 @@ class Base : public async::ExecInfo {
     assert(id < numBuffers());
 
     m_buffer[id].origin = nullptr;
-    freeBuffer(m_buffer[id].buffer);
-    m_buffer[id].buffer = nullptr;
+    releaseBuffer(id);
     async::ExecInfo::removeBufferInternal(id);
   }
 
@@ -227,7 +228,7 @@ class Base : public async::ExecInfo {
 
     async::ExecInfo::resizeBufferInternal(id, size);
 
-    if ((size != 0U) && m_buffer[id].allocate) {
+    if ((size != 0U) && m_buffer[id].allocate && !m_buffer[id].external) {
       if (m_buffer[id].buffer == nullptr) {
         // the buffer has been empty so far
         m_buffer[id].buffer = allocateBuffer(size);
@@ -273,8 +274,7 @@ class Base : public async::ExecInfo {
 
     for (unsigned int i = 0; i < m_buffer.size(); i++) {
       m_buffer[i].origin = nullptr;
-      freeBuffer(m_buffer[i].buffer);
-      m_buffer[i].buffer = nullptr;
+      releaseBuffer(i);
       async::ExecInfo::removeBufferInternal(i);
     }
 
@@ -282,7 +282,30 @@ class Base : public async::ExecInfo {
     return true;
   }
 
+  /**
+   * Let a buffer use memory that somebody else owns; it is neither resized
+   * nor freed here
+   */
+  void setExternalBufferInternal(unsigned int id, void* buffer) {
+    assert(id < numBuffers());
+
+    releaseBuffer(id);
+    m_buffer[id].buffer = buffer;
+    m_buffer[id].external = true;
+  }
+
   private:
+  /**
+   * Free the memory of a buffer, unless somebody else owns it
+   */
+  void releaseBuffer(unsigned int id) {
+    if (!m_buffer[id].external) {
+      freeBuffer(m_buffer[id].buffer);
+    }
+    m_buffer[id].buffer = nullptr;
+    m_buffer[id].external = false;
+  }
+
   /**
    * Compute the allocated size depending on the requested size
    */
