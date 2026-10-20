@@ -240,7 +240,9 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
       } else if (async->m_initBuffer.has_value()) {
         // Touch the memory on this thread
         const unsigned int id = async->m_initBuffer.value();
-        memset(async->bufferInternal(id), 0, async->bufferSize(id));
+        if (async->bufferSize(id) > 0) {
+          memset(async->bufferInternal(id), 0, async->bufferSize(id));
+        }
         async->m_initBuffer = {};
 
         // Done

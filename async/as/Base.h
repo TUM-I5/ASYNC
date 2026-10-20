@@ -49,6 +49,11 @@ class Base : public async::ExecInfo {
     const void* origin;
     /** The buffer on the executor */
     void* buffer;
+    /**
+     * Whether the memory of the buffer is allocated here; it is allocated as
+     * soon as the buffer holds anything
+     */
+    bool allocate;
   };
 
   /** The executor for the asynchronous call */
@@ -181,16 +186,8 @@ class Base : public async::ExecInfo {
 
     BufInfo buffer{};
     buffer.origin = origin;
-
-    if ((size != 0U) && allocate) {
-      if (alignment() > 0) {
-        buffer.buffer = allocateAlignedBuffer(size);
-      } else {
-        buffer.buffer = malloc(size);
-      }
-    } else {
-      buffer.buffer = nullptr;
-    }
+    buffer.allocate = allocate;
+    buffer.buffer = ((size != 0U) && allocate) ? allocateBuffer(size) : nullptr;
 
     m_buffer.push_back(buffer);
     assert(m_buffer.size() == numBuffers());
@@ -210,8 +207,11 @@ class Base : public async::ExecInfo {
 
     async::ExecInfo::resizeBufferInternal(id, size);
 
-    if (size && m_buffer[id].buffer) {
-      if (alignment() > 0) {
+    if ((size != 0U) && m_buffer[id].allocate) {
+      if (m_buffer[id].buffer == nullptr) {
+        // the buffer has been empty so far
+        m_buffer[id].buffer = allocateBuffer(size);
+      } else if (alignment() > 0) {
         freeBuffer(m_buffer[id].buffer);
         m_buffer[id].buffer = allocateAlignedBuffer(size);
       } else {
@@ -275,6 +275,17 @@ class Base : public async::ExecInfo {
   }
 
   /**
+   * Allocate a buffer, aligned if an alignment is configured
+   */
+  auto allocateBuffer(size_t size) -> void* {
+    if (alignment() > 0) {
+      return allocateAlignedBuffer(size);
+    }
+
+    return checkAllocation(malloc(size));
+  }
+
+  /**
    * Allocate a buffer aligned to the configured alignment (which has to be non-zero)
    */
   auto allocateAlignedBuffer(size_t size) -> void* {
@@ -283,7 +294,11 @@ class Base : public async::ExecInfo {
       logError() << "The buffer alignment has to be a power of two, but it is" << alignment();
     }
 
-    void* buffer = ::operator new(allocSize(size), std::align_val_t(alignment()), std::nothrow);
+    return checkAllocation(
+        ::operator new(allocSize(size), std::align_val_t(alignment()), std::nothrow));
+  }
+
+  static auto checkAllocation(void* buffer) -> void* {
     if (buffer == nullptr) {
       logError() << "Could not allocate buffer";
     }

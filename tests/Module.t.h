@@ -5,6 +5,7 @@
 
 #include "async/ExecInfo.h"
 #include <array>
+#include <cstddef>
 #ifdef USE_MPI
 #include <mpi.h>
 #endif // USE_MPI
@@ -316,6 +317,61 @@ class RemoveBufferModule : private async::Module<RemoveBufferModule, Param, Para
 };
 
 /**
+ * A buffer that holds nothing at first (e.g. on a rank without data for an
+ * output) and grows later
+ */
+class GrowBufferModule : private async::Module<GrowBufferModule, Param, Param> {
+  public:
+  static constexpr std::size_t Values = 4;
+  static constexpr int Value = 7;
+
+  bool mExecuted{false};
+  std::size_t mBufferSize{0};
+  bool mValid{false};
+
+  GrowBufferModule() = default;
+
+  void run() {
+    init();
+
+    const auto data = std::array<int, Values>{Value, Value, Value, Value};
+    addBuffer(data.data(), 0);
+
+    auto param = Param{0};
+    callInit(param);
+    wait();
+
+    resizeBuffer(0, data.data(), Values * sizeof(int));
+    sendBuffer(0);
+
+    param.step = 1;
+    call(param);
+    wait();
+
+    finalize();
+  }
+
+  void execInit(const Param& param) {}
+
+  void exec(const async::ExecInfo& info, const Param& param) {
+    if (param.step != 1) {
+      return;
+    }
+    mExecuted = true;
+    mBufferSize = info.bufferSize(0);
+    const auto* values = static_cast<const int*>(info.buffer(0));
+    mValid = values != nullptr;
+    for (std::size_t i = 0; mValid && i < mBufferSize / sizeof(int); i++) {
+      mValid = values[i] == Value;
+    }
+  }
+
+  void setUp() override { setExecutor(*this); }
+
+  void tearDown() override {}
+};
+
+/**
  * Test for {@link Dispatcher} and {@link Module} since
  * they work closely together.
  */
@@ -449,6 +505,29 @@ class TestModule : public CxxTest::TestSuite {
     TS_ASSERT_EQUALS(module.mBuffer0Size, 0);
     TS_ASSERT_EQUALS(module.mBuffer1Size, buffer1Size);
     TS_ASSERT_EQUALS(module.mManagedBufferSize, 0);
+  }
+
+  void testGrowEmptyBuffer() const {
+    async::Dispatcher dispatcher;
+
+    GrowBufferModule module;
+
+    dispatcher.init();
+
+    if (dispatcher.dispatch()) {
+      module.run();
+    }
+
+    const bool executes = testConfig().mode() != async::Mode::MPI || dispatcher.isExecutor();
+    const auto contributors = testConfig().mode() == async::Mode::MPI ? m_size - 1 : 1;
+
+    dispatcher.finalize();
+
+    if (executes) {
+      TS_ASSERT(module.mExecuted);
+      TS_ASSERT_EQUALS(module.mBufferSize, contributors * GrowBufferModule::Values * sizeof(int));
+      TS_ASSERT(module.mValid);
+    }
   }
 
   static void testModulesActiveDisabled() {
