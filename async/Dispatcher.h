@@ -92,6 +92,7 @@ class Dispatcher {
 
       // Only the executors run the modules
       MPI_Comm_split(m_comm, m_scheduler.isExecutor() ? 0 : MPI_UNDEFINED, 0, &m_execComm);
+      m_scheduler.determineOrder(m_execComm);
     } else {
       // Every rank runs its own executor
       MPI_Comm_dup(m_comm, &m_execComm);
@@ -112,6 +113,20 @@ class Dispatcher {
    * @return The group layout that will be used in MPI mode
    */
   [[nodiscard]] auto groupLayout() const -> const GroupLayout& { return m_groupLayout; }
+
+  /**
+   * @return What {@link init} has set up; only the mode outside the MPI mode
+   */
+  [[nodiscard]] auto layout() const -> ExecutorLayout {
+#ifdef USE_MPI
+    if (m_config.mode() == Mode::MPI) {
+      return m_scheduler.layout();
+    }
+#endif // USE_MPI
+    ExecutorLayout layout;
+    layout.mode = m_config.mode();
+    return layout;
+  }
 
 #ifdef USE_MPI
   [[nodiscard]] auto groupComm() const -> MPI_Comm { return m_scheduler.groupComm(); }

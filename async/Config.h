@@ -51,6 +51,43 @@ struct GroupLayout {
 };
 
 /**
+ * What the dispatcher has set up, for the application to report.
+ *
+ * Outside the MPI mode every rank executes for itself, and only the mode is
+ * filled in.
+ */
+struct ExecutorLayout {
+  Mode mode{Mode::Sync};
+
+  /** Number of executors over all nodes */
+  int executors{0};
+
+  /** Number of nodes */
+  int nodes{0};
+
+  /** Executors on each node, after MAX_GROUP_RANKS has had its say */
+  unsigned int executorsPerNode{0};
+
+  /** Whole nodes that share one set of executors */
+  unsigned int groupNodes{0};
+
+  /** Whether the executors are barred from the computation */
+  bool exclusive{false};
+
+  /** The fewest and the most ranks an executor collects the output of */
+  int minGroupRanks{0};
+  int maxGroupRanks{0};
+
+  /**
+   * Whether the executors, taken in their order, hold the output of the ranks
+   * that compute in the order of those ranks: every group is a run of
+   * consecutive ranks. Data that one rank numbers for all, like the indices
+   * of points in a mesh, only stays valid across the aggregate if this holds.
+   */
+  bool rankOrdered{true};
+};
+
+/**
  * The settings of a single {@link Dispatcher} and of the {@link Module}s
  * attached to it.
  *

@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -220,6 +221,9 @@ class MPIScheduler {
   /** Number of ranks of the group that take part in the computation */
   int m_numComputeRanks{0};
 
+  /** What the configuration has set up, over all groups */
+  ExecutorLayout m_layout;
+
   /** The "COMM_WORLD" communicator (communicator without executors) */
   MPI_Comm m_commWorld;
 
@@ -368,11 +372,28 @@ class MPIScheduler {
    *  share one set of executors
    */
   void setCommunicator(MPI_Comm comm, const GroupLayout& layout) {
-    int rank = 0;
-    MPI_Comm_rank(comm, &rank);
-
     MPI_Comm nodeComm = MPI_COMM_NULL;
     MPI_Comm_split_type(comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &nodeComm);
+
+    setCommunicator(comm, nodeComm, layout);
+
+    MPI_Comm_free(&nodeComm);
+  }
+
+  /**
+   * Set the MPI configuration, forming the groups along the boundaries of
+   * the given nodes.
+   *
+   * @param comm The MPI communicator that should be used
+   * @param nodeComm The ranks of comm that share a node with this one (the
+   *  shared-memory split, except where a test or an application wants to
+   *  draw the boundaries itself)
+   * @param layout How many executors to place per node, and how many nodes
+   *  share one set of executors
+   */
+  void setCommunicator(MPI_Comm comm, MPI_Comm nodeComm, const GroupLayout& layout) {
+    int rank = 0;
+    MPI_Comm_rank(comm, &rank);
 
     int nodeRank = 0;
     int nodeSize = 0;
@@ -408,7 +429,6 @@ class MPIScheduler {
 
     MPI_Comm groupComm = MPI_COMM_NULL;
     MPI_Comm_split(comm, static_cast<int>(groupId), rank, &groupComm);
-    MPI_Comm_free(&nodeComm);
 
     MPI_Comm_rank(groupComm, &m_groupRank);
     MPI_Comm_size(groupComm, &m_groupSize);
@@ -422,6 +442,12 @@ class MPIScheduler {
     }
 
     setCommunicator(comm, groupComm, m_groupRank == m_executorRank, layout.exclusive);
+
+    int nodes = nodeId + 1;
+    MPI_Allreduce(MPI_IN_PLACE, &nodes, 1, MPI_INT, MPI_MAX, comm);
+    m_layout.nodes = nodes;
+    m_layout.executorsPerNode = executorsPerNode;
+    m_layout.groupNodes = groupNodes;
   }
 
   /**
@@ -463,6 +489,19 @@ class MPIScheduler {
       logError() << "There exists more than one executor in the subgroup.";
     }
 
+    // what came out of it, over all groups
+    std::array<int, 3> counts{isExecutor ? 1 : 0,
+                              isExecutor ? m_numComputeRanks : std::numeric_limits<int>::max(),
+                              isExecutor ? m_numComputeRanks : 0};
+    MPI_Allreduce(MPI_IN_PLACE, counts.data(), 1, MPI_INT, MPI_SUM, comm);
+    MPI_Allreduce(MPI_IN_PLACE, &counts[1], 1, MPI_INT, MPI_MIN, comm);
+    MPI_Allreduce(MPI_IN_PLACE, &counts[2], 1, MPI_INT, MPI_MAX, comm);
+    m_layout.mode = Mode::MPI;
+    m_layout.executors = counts[0];
+    m_layout.exclusive = executorExclusive;
+    m_layout.minGroupRanks = counts[1];
+    m_layout.maxGroupRanks = counts[2];
+
     if (executorExclusive) {
       // Create the new comm world communicator
       MPI_Comm_split(comm, (m_isExecutor ? 1 : 0), 0, &m_commWorld);
@@ -490,6 +529,48 @@ class MPIScheduler {
   void setDispatched() { m_dispatched = true; }
 
   [[nodiscard]] auto groupRank() const -> int { return m_groupRank; }
+
+  /**
+   * @return What has been set up, over all groups
+   */
+  [[nodiscard]] auto layout() const -> const ExecutorLayout& { return m_layout; }
+
+  /**
+   * Find out whether the executors hold the output in the rank order of the
+   * ranks that compute.
+   *
+   * @param execComm The communicator over the executors, ordered like them
+   */
+  void determineOrder(MPI_Comm execComm) {
+    // where the output of this group starts in the order of the executors
+    long groupOffset = 0;
+    if (m_isExecutor) {
+      long computeRanks = m_numComputeRanks;
+      int execRank = 0;
+      MPI_Comm_rank(execComm, &execRank);
+      MPI_Exscan(&computeRanks, &groupOffset, 1, MPI_LONG, MPI_SUM, execComm);
+      if (execRank == 0) {
+        // MPI_Exscan leaves the result undefined on the first rank
+        groupOffset = 0;
+      }
+    }
+    MPI_Bcast(&groupOffset, 1, MPI_LONG, m_executorRank, m_privateGroupComm);
+
+    // the compute ranks of a group are its first ranks, in their order
+    int ordered = 1;
+    if (m_isCompute) {
+      int computeRank = 0;
+      MPI_Comm_rank(m_commWorld, &computeRank);
+      ordered = (groupOffset + m_groupRank == computeRank) ? 1 : 0;
+    }
+    MPI_Allreduce(MPI_IN_PLACE, &ordered, 1, MPI_INT, MPI_LAND, m_privateGroupComm);
+    // the executors speak for their groups, which partition the communicator
+    if (m_isExecutor) {
+      MPI_Allreduce(MPI_IN_PLACE, &ordered, 1, MPI_INT, MPI_LAND, execComm);
+    }
+    MPI_Bcast(&ordered, 1, MPI_INT, m_executorRank, m_privateGroupComm);
+    m_layout.rankOrdered = ordered != 0;
+  }
 
   [[nodiscard]] auto isExecutor() const -> bool { return m_isExecutor; }
 
