@@ -103,6 +103,9 @@ add_serial_cxx_test_run( TestDispatcher TestDispatcher )
 add_cxx_test_executable( TestModule ${CMAKE_CURRENT_SOURCE_DIR}/Module.t.h )
 add_serial_cxx_test_run( TestModuleSync TestModule "ASYNC_MODE=SYNC" )
 add_serial_cxx_test_run( TestModuleThread TestModule "ASYNC_MODE=THREAD" )
+# AUTO settles on NODE where ranks share a node and every node holds consecutive ranks, and on
+# THREAD otherwise; ASYNC_TEST_AUTO_MODE is what the tests expect
+add_serial_cxx_test_run( TestModuleAuto TestModule "ASYNC_MODE=AUTO" "ASYNC_TEST_AUTO_MODE=THREAD" )
 if( USE_MPI )
     # executors that compute as well (the default) and exclusive ones, each with and without the
     # asynchronous copy
@@ -130,4 +133,13 @@ if( USE_MPI )
         endif()
         add_cxx_test_run( TestModuleMPINodes${variant} TestModule 4 ${environment} )
     endforeach()
+    # AUTO on a single machine, on two nodes of consecutive ranks, on nodes of a single rank each,
+    # and on nodes the ranks are dealt to round-robin
+    add_cxx_test_run( TestModuleAutoNode TestModule 3 "ASYNC_MODE=AUTO" "ASYNC_TEST_AUTO_MODE=NODE" )
+    add_cxx_test_run( TestModuleAutoNodes TestModule 4 "ASYNC_MODE=AUTO" "ASYNC_GROUP_NODES=2"
+        "ASYNC_TEST_NODE_RANKS=2" "ASYNC_TEST_AUTO_MODE=NODE" )
+    add_cxx_test_run( TestModuleAutoSingleRanks TestModule 3 "ASYNC_MODE=AUTO"
+        "ASYNC_TEST_NODE_RANKS=1" "ASYNC_TEST_AUTO_MODE=THREAD" )
+    add_cxx_test_run( TestModuleAutoRoundRobin TestModule 4 "ASYNC_MODE=AUTO"
+        "ASYNC_TEST_ROUND_ROBIN_NODES=2" "ASYNC_TEST_AUTO_MODE=THREAD" )
 endif( USE_MPI )

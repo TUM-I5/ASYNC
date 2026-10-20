@@ -8,6 +8,7 @@
 
 #ifdef USE_MPI
 #include "async/as/MPIScheduler.h"
+#include <array>
 #include <mpi.h>
 #endif // USE_ASYNC_MPI
 
@@ -65,6 +66,13 @@ class Dispatcher {
 #endif
 
   /**
+   * Use this to overwrite the mode set from the environment variables, e.g.
+   * to settle AUTO on SYNC where the application leaves no room for the
+   * threads of ASYNC. Has to be called before {@link init}.
+   */
+  void setMode(Mode mode) { m_config.setMode(mode); }
+
+  /**
    * Use this to overwrite the group layout set from the environment variables
    */
   void setGroupLayout(const GroupLayout& groupLayout) { m_groupLayout = groupLayout; }
@@ -82,8 +90,16 @@ class Dispatcher {
    * {@link setGroupSize}
    */
   void init() {
-#ifdef USE_MPI
+    if (m_config.mode() == Mode::Auto) {
+      m_config.setMode(chooseMode());
+    }
+
     const auto& modules = ModuleBase::modules();
+    for (const auto& module : modules) {
+      module->setMode(m_config.mode());
+    }
+
+#ifdef USE_MPI
     // Set the scheduler for all modules
     for (const auto& module : modules) {
       module->setScheduler(m_scheduler);
@@ -122,7 +138,8 @@ class Dispatcher {
   }
 
   /**
-   * @return The settings this dispatcher and its modules were created with
+   * @return The settings this dispatcher and its modules were created with;
+   *  after {@link init}, with the mode AUTO has settled on
    */
   [[nodiscard]] auto config() const -> const Config& { return m_config; }
 
@@ -230,7 +247,8 @@ class Dispatcher {
    * mode it requires executors that compute as well, since an exclusive
    * executor never creates the module.
    */
-  void attach([[maybe_unused]] ModuleBase& module) {
+  void attach(ModuleBase& module) {
+    module.setMode(m_config.mode());
 #ifdef USE_MPI
     module.setScheduler(m_scheduler);
     module.setComm(m_execComm);
@@ -255,6 +273,52 @@ class Dispatcher {
       MPI_Comm_free(&m_execComm);
       m_execComm = MPI_COMM_NULL;
     }
+#endif // USE_MPI
+  }
+
+  private:
+  /**
+   * The mode AUTO settles on: NODE where ranks share a node, every node holds
+   * consecutive ranks, and MPI lets several threads call it; THREAD
+   * otherwise. With consecutive ranks on every node, the executors hold the
+   * output in the order of the ranks, as with a thread on every rank.
+   */
+  [[nodiscard]] auto chooseMode() const -> Mode {
+#ifdef USE_MPI
+    MPI_Comm nodeComm = m_nodeComm;
+    if (nodeComm == MPI_COMM_NULL) {
+      MPI_Comm_split_type(m_comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &nodeComm);
+    }
+
+    int rank = 0;
+    int nodeRank = 0;
+    int nodeSize = 0;
+    MPI_Comm_rank(m_comm, &rank);
+    MPI_Comm_rank(nodeComm, &nodeRank);
+    MPI_Comm_size(nodeComm, &nodeSize);
+
+    // the ranks of a node are consecutive if every one of them counts from the same first rank
+    std::array<int, 2> first{rank - nodeRank, -(rank - nodeRank)};
+    MPI_Allreduce(MPI_IN_PLACE, first.data(), 2, MPI_INT, MPI_MIN, nodeComm);
+    if (nodeComm != m_nodeComm) {
+      MPI_Comm_free(&nodeComm);
+    }
+
+    int provided = MPI_THREAD_SINGLE;
+    MPI_Query_thread(&provided);
+
+    // what has to hold everywhere, and whether some node has several ranks; all as minima
+    std::array<int, 3> criteria{(first[0] == -first[1]) ? 1 : 0,
+                                (provided >= MPI_THREAD_MULTIPLE) ? 1 : 0,
+                                (nodeSize > 1) ? 0 : 1};
+    MPI_Allreduce(MPI_IN_PLACE, criteria.data(), 3, MPI_INT, MPI_MIN, m_comm);
+    const bool consecutive = criteria[0] != 0;
+    const bool multiple = criteria[1] != 0;
+    const bool shared = criteria[2] == 0;
+
+    return (shared && consecutive && multiple) ? Mode::MPI : Mode::Thread;
+#else  // USE_MPI
+    return Mode::Thread;
 #endif // USE_MPI
   }
 };

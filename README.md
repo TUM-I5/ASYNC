@@ -60,6 +60,12 @@ along another dimension than its leading one has to be put together from them.
   node, which runs the executors for all of them: it holds the buffers of its
   group one after another, in the order of the ranks. `MPI` is accepted as a
   deprecated name for it. The mode requires `MPI_THREAD_MULTIPLE`.
+- `AUTO` lets `Dispatcher::init()` choose: `NODE` where ranks share a node,
+  every node holds consecutive ranks and MPI provides `MPI_THREAD_MULTIPLE`,
+  `THREAD` otherwise. Whether the threads of ASYNC have room at all is for the
+  application to know; where they have none, it settles `AUTO` on `SYNC` with
+  `Dispatcher::setMode()` beforehand. A module created with `AUTO` takes the
+  mode of the dispatcher, in `init()`, or in `attach()` if it comes later.
 
 In `NODE` mode, the executor rank computes as well by default, and
 coordinates its group from a thread of its own; `Dispatcher::setAffinity`
@@ -84,7 +90,7 @@ An `async::Config` reads its defaults from environment variables. Their prefix
 is `ASYNC_` unless the application chooses a chain of its own, as in
 `utils::Env{"MYAPP_ASYNC_", "ASYNC_"}`; setters override every value.
 
-- `MODE`: `SYNC` (default), `THREAD` or `NODE`.
+- `MODE`: `SYNC` (default), `THREAD`, `NODE` or `AUTO`.
 - `PIN_CORE`: the core of the executor thread in `THREAD` mode, counted
   among the cores the rank may use; negative values count from the end
   (default -1).

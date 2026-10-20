@@ -36,10 +36,22 @@ inline auto testConfig() -> const async::Config& {
 }
 
 /**
+ * The mode the tests run in: the one the environment sets, or for AUTO, the
+ * one the dispatcher is expected to settle on (ASYNC_TEST_AUTO_MODE)
+ */
+inline auto testMode() -> async::Mode {
+  if (testConfig().mode() != async::Mode::Auto) {
+    return testConfig().mode();
+  }
+  const char* expected = std::getenv("ASYNC_TEST_AUTO_MODE");
+  return async::Config::str2mode(expected == nullptr ? "THREAD" : expected);
+}
+
+/**
  * Whether this rank runs the executor callbacks
  */
 inline auto executes(const async::Dispatcher& dispatcher) -> bool {
-  return testConfig().mode() != async::Mode::MPI || dispatcher.isExecutor();
+  return testMode() != async::Mode::MPI || dispatcher.isExecutor();
 }
 
 /**
@@ -48,7 +60,7 @@ inline auto executes(const async::Dispatcher& dispatcher) -> bool {
  * as a group spans.
  */
 inline auto contributors(int size) -> int {
-  if (testConfig().mode() != async::Mode::MPI) {
+  if (testMode() != async::Mode::MPI) {
     return 1;
   }
   return testConfig().groupLayout().exclusive ? size - 1 : size;
@@ -58,21 +70,20 @@ inline auto contributors(int size) -> int {
  * The first rank whose buffers the executor of this rank holds: the group
  * starts with the first rank, and every other executor holds its own rank
  */
-inline auto firstContributor(int rank) -> int {
-  return testConfig().mode() == async::Mode::MPI ? 0 : rank;
-}
+inline auto firstContributor(int rank) -> int { return testMode() == async::Mode::MPI ? 0 : rank; }
 
 /**
  * Whether modules can be attached after the dispatcher started the executors
  */
 inline auto lateModules() -> bool {
-  return testConfig().mode() != async::Mode::MPI || !testConfig().groupLayout().exclusive;
+  return testMode() != async::Mode::MPI || !testConfig().groupLayout().exclusive;
 }
 
 /**
- * Node boundaries for a dispatcher: ASYNC_TEST_NODE_RANKS consecutive ranks
- * form a node, so that a single machine can stand in for several nodes.
- * Without it, a node is what shares memory.
+ * Node boundaries for a dispatcher, so that a single machine can stand in for
+ * several nodes: ASYNC_TEST_NODE_RANKS consecutive ranks form a node, or the
+ * ranks are dealt round-robin to ASYNC_TEST_ROUND_ROBIN_NODES nodes. Without
+ * either, a node is what shares memory.
  */
 class TestNodes {
   public:
@@ -80,10 +91,13 @@ class TestNodes {
 #ifdef USE_MPI
     const char* ranks = std::getenv("ASYNC_TEST_NODE_RANKS");
     const int nodeRanks = ranks == nullptr ? 0 : std::atoi(ranks);
-    if (nodeRanks > 0) {
+    const char* nodes = std::getenv("ASYNC_TEST_ROUND_ROBIN_NODES");
+    const int roundRobinNodes = nodes == nullptr ? 0 : std::atoi(nodes);
+    if (nodeRanks > 0 || roundRobinNodes > 0) {
       int rank = 0;
       MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-      MPI_Comm_split(MPI_COMM_WORLD, rank / nodeRanks, rank, &m_comm);
+      const int node = nodeRanks > 0 ? rank / nodeRanks : rank % roundRobinNodes;
+      MPI_Comm_split(MPI_COMM_WORLD, node, rank, &m_comm);
       dispatcher.setNodeCommunicator(m_comm);
     }
 #endif // USE_MPI
@@ -442,7 +456,8 @@ class OrderModule : private async::Module<OrderModule, Param, Param> {
   public:
   static constexpr int Steps = 2;
 
-  /** The ranks whose contributions the executor holds */
+  /** The ranks whose contributions the executor holds, from mFirst on */
+  int mFirst{0};
   int mContributors{1};
 
   std::array<std::size_t, Steps> mSize{};
@@ -505,7 +520,7 @@ class OrderModule : private async::Module<OrderModule, Param, Param> {
     bool ordered = values != nullptr && managed != nullptr;
     std::size_t value = 0;
     std::size_t managedValue = 0;
-    for (int rank = 0; ordered && rank < mContributors; rank++) {
+    for (int rank = mFirst; ordered && rank < mFirst + mContributors; rank++) {
       const int count = param.step == 0 ? rank + 1 : 2;
       for (int i = 0; i < count; i++) {
         ordered = ordered && values[value++] == (param.step == 0 ? rank : 100 + rank);
@@ -699,7 +714,7 @@ class TestModule : public CxxTest::TestSuite {
       TS_ASSERT(!dispatcher.isCompute());
     }
 
-    if (testConfig().mode() == async::Mode::MPI) {
+    if (testMode() == async::Mode::MPI) {
       // the executor is the last rank of the group
       TS_ASSERT_EQUALS(dispatcher.isExecutor(), m_rank + 1 == m_size);
     } else {
@@ -716,7 +731,7 @@ class TestModule : public CxxTest::TestSuite {
       TS_ASSERT(module.mExec);
 #ifdef USE_MPI
       // one executor for the group in MPI mode, otherwise every rank runs its own
-      TS_ASSERT_EQUALS(module.mExecCommSize, testConfig().mode() == async::Mode::MPI ? 1 : m_size);
+      TS_ASSERT_EQUALS(module.mExecCommSize, testMode() == async::Mode::MPI ? 1 : m_size);
 #endif // USE_MPI
     }
     TS_ASSERT(module.mTearDown);
@@ -830,6 +845,7 @@ class TestModule : public CxxTest::TestSuite {
     const TestNodes nodes(dispatcher);
 
     OrderModule module;
+    module.mFirst = firstContributor(m_rank);
     module.mContributors = contributors(m_size);
 
     dispatcher.init();
@@ -843,10 +859,12 @@ class TestModule : public CxxTest::TestSuite {
     dispatcher.finalize();
 
     if (executor) {
+      const auto first = static_cast<std::size_t>(module.mFirst);
       const auto group = static_cast<std::size_t>(module.mContributors);
-      // 1 + 2 + ... + group values at first, then two (three) values each
-      TS_ASSERT_EQUALS(module.mSize[0], group * (group + 1) / 2 * sizeof(int));
-      TS_ASSERT_EQUALS(module.mManagedSize[0], group * (group + 1) / 2 * sizeof(int));
+      // first + 1 + ... + first + group values at first, then two (three) values each
+      const auto values = group * first + group * (group + 1) / 2;
+      TS_ASSERT_EQUALS(module.mSize[0], values * sizeof(int));
+      TS_ASSERT_EQUALS(module.mManagedSize[0], values * sizeof(int));
       TS_ASSERT_EQUALS(module.mSize[1], 2 * group * sizeof(int));
       TS_ASSERT_EQUALS(module.mManagedSize[1], 3 * group * sizeof(int));
       TS_ASSERT(module.mOrdered[0]);
@@ -856,8 +874,8 @@ class TestModule : public CxxTest::TestSuite {
       std::array<std::vector<std::size_t>, OrderModule::Steps> parts;
       std::array<std::vector<std::size_t>, OrderModule::Steps> managedParts;
       for (std::size_t i = 0; i < group; i++) {
-        parts[0].push_back((i + 1) * sizeof(int));
-        managedParts[0].push_back((i + 1) * sizeof(int));
+        parts[0].push_back((first + i + 1) * sizeof(int));
+        managedParts[0].push_back((first + i + 1) * sizeof(int));
         parts[1].push_back(2 * sizeof(int));
         managedParts[1].push_back(3 * sizeof(int));
       }
@@ -913,8 +931,8 @@ class TestModule : public CxxTest::TestSuite {
       module.run();
     }
 
-    const bool pinned = testConfig().mode() == async::Mode::Thread ||
-                        (testConfig().mode() == async::Mode::MPI && dispatcher.isExecutor());
+    const bool pinned = testMode() == async::Mode::Thread ||
+                        (testMode() == async::Mode::MPI && dispatcher.isExecutor());
 
     dispatcher.finalize();
 
@@ -1042,5 +1060,72 @@ class TestModule : public CxxTest::TestSuite {
         TS_ASSERT(used.mExec);
       }
     }
+  }
+
+  /**
+   * AUTO settles on the mode the layout of the ranks calls for, and a module
+   * created with it before takes that mode
+   */
+  void testAutoMode() const {
+    if (testConfig().mode() != async::Mode::Auto) {
+      return;
+    }
+
+    async::Dispatcher dispatcher;
+    const TestNodes nodes(dispatcher);
+
+    Module module;
+
+    dispatcher.init();
+
+    TS_ASSERT_EQUALS(dispatcher.config().mode(), testMode());
+    TS_ASSERT_EQUALS(dispatcher.layout().mode, testMode());
+
+    if (dispatcher.dispatch()) {
+      module.run();
+    }
+
+    const bool executor = executes(dispatcher);
+
+    dispatcher.finalize();
+
+    if (executor) {
+      TS_ASSERT(module.mExec);
+#ifdef USE_MPI
+      TS_ASSERT_EQUALS(module.mExecCommSize, testMode() == async::Mode::MPI ? 1 : m_size);
+#endif // USE_MPI
+    }
+  }
+
+  /**
+   * The application can settle AUTO itself, as one that leaves no room for
+   * the threads of ASYNC does
+   */
+  void testModeOverride() const {
+    if (testConfig().mode() != async::Mode::Auto) {
+      return;
+    }
+
+    async::Dispatcher dispatcher;
+    const TestNodes nodes(dispatcher);
+    dispatcher.setMode(async::Mode::Sync);
+
+    Module module;
+
+    dispatcher.init();
+
+    TS_ASSERT_EQUALS(dispatcher.config().mode(), async::Mode::Sync);
+    TS_ASSERT_EQUALS(dispatcher.layout().mode, async::Mode::Sync);
+
+    // every rank computes, and executes for itself
+    TS_ASSERT(dispatcher.dispatch());
+    module.run();
+
+    dispatcher.finalize();
+
+    TS_ASSERT(module.mExec);
+#ifdef USE_MPI
+    TS_ASSERT_EQUALS(module.mExecCommSize, m_size);
+#endif // USE_MPI
   }
 };

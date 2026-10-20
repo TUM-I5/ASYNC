@@ -8,6 +8,8 @@
 
 #include <vector>
 
+#include "Config.h"
+
 #ifdef USE_MPI
 #include "async/as/MPIScheduler.h"
 #include <mpi.h>
@@ -77,6 +79,11 @@ class ModuleBase {
     static std::vector<ModuleBase*> moduleList;
     return moduleList;
   }
+
+  /**
+   * Take the mode of the dispatcher, if this module was created with AUTO.
+   */
+  virtual void setMode(Mode mode) = 0;
 
 #ifdef USE_MPI
   /**

@@ -17,8 +17,11 @@ namespace async {
 
 /**
  * The asynchnchronous mode that should be used
+ *
+ * Auto leaves the choice between Thread and MPI to {@link Dispatcher::init},
+ * which settles it from how the ranks sit on the nodes.
  */
-enum class Mode { Sync, Thread, MPI };
+enum class Mode { Sync, Thread, MPI, Auto };
 
 /**
  * How the compute ranks are grouped around the executors in MPI mode.
@@ -223,7 +226,7 @@ class Config {
   }
 
   /**
-   * Parse a mode name: SYNC, THREAD or NODE.
+   * Parse a mode name: SYNC, THREAD, NODE or AUTO.
    *
    * NODE is the mode that hands the output of the ranks of a node to an
    * executor there; MPI is a deprecated name for it.
@@ -234,6 +237,9 @@ class Config {
 
     if (strMode == "THREAD") {
       return Mode::Thread;
+    }
+    if (strMode == "AUTO") {
+      return Mode::Auto;
     }
     if (strMode == "NODE" || strMode == "MPI") {
 #ifdef USE_MPI
