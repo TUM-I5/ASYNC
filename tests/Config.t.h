@@ -50,5 +50,10 @@ class TestConfig : public CxxTest::TestSuite {
     TS_ASSERT_EQUALS(async::Config::str2mode("thread"), async::Mode::Thread);
     TS_ASSERT_EQUALS(async::Config::str2mode("SYNC"), async::Mode::Sync);
     TS_ASSERT_EQUALS(async::Config::str2mode("nonsense"), async::Mode::Sync);
+#ifdef USE_MPI
+    TS_ASSERT_EQUALS(async::Config::str2mode("node"), async::Mode::MPI);
+    // the deprecated name
+    TS_ASSERT_EQUALS(async::Config::str2mode("MPI"), async::Mode::MPI);
+#endif // USE_MPI
   }
 };

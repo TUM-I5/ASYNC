@@ -67,14 +67,14 @@ if( USE_MPI )
     add_mpi_cxx_test( TestModuleMPI ${CMAKE_CURRENT_SOURCE_DIR}/Module.t.h 3 )
     set_tests_properties( TestModuleMPI PROPERTIES ENVIRONMENT "ASYNC_MODE=MPI;ASYNC_MPI_COPY=0" )
     add_mpi_cxx_test( TestModuleMPIAsync ${CMAKE_CURRENT_SOURCE_DIR}/Module.t.h 3 )
-    set_tests_properties( TestModuleMPIAsync PROPERTIES ENVIRONMENT "ASYNC_MODE=MPI;ASYNC_MPI_COPY=1" )
+    set_tests_properties( TestModuleMPIAsync PROPERTIES ENVIRONMENT "ASYNC_MODE=NODE;ASYNC_MPI_COPY=1" )
     add_mpi_cxx_test( TestModuleMPIExclusive ${CMAKE_CURRENT_SOURCE_DIR}/Module.t.h 3 )
     set_tests_properties( TestModuleMPIExclusive PROPERTIES ENVIRONMENT
-        "ASYNC_MODE=MPI;ASYNC_MPI_COPY=0;ASYNC_EXECUTOR_EXCLUSIVE=1" )
+        "ASYNC_MODE=NODE;ASYNC_MPI_COPY=0;ASYNC_EXECUTOR_EXCLUSIVE=1" )
     add_mpi_cxx_test( TestModuleMPIAsyncExclusive ${CMAKE_CURRENT_SOURCE_DIR}/Module.t.h 3 )
     set_tests_properties( TestModuleMPIAsyncExclusive PROPERTIES ENVIRONMENT
-        "ASYNC_MODE=MPI;ASYNC_MPI_COPY=1;ASYNC_EXECUTOR_EXCLUSIVE=1" )
+        "ASYNC_MODE=NODE;ASYNC_MPI_COPY=1;ASYNC_EXECUTOR_EXCLUSIVE=1" )
     # a group of one rank, which is its own executor
     add_mpi_cxx_test( TestModuleMPISingle ${CMAKE_CURRENT_SOURCE_DIR}/Module.t.h 1 )
-    set_tests_properties( TestModuleMPISingle PROPERTIES ENVIRONMENT "ASYNC_MODE=MPI;ASYNC_MPI_COPY=1" )
+    set_tests_properties( TestModuleMPISingle PROPERTIES ENVIRONMENT "ASYNC_MODE=NODE;ASYNC_MPI_COPY=1" )
 endif( USE_MPI )

@@ -171,6 +171,12 @@ class Config {
     return layout;
   }
 
+  /**
+   * Parse a mode name: SYNC, THREAD or NODE.
+   *
+   * NODE is the mode that hands the output of the ranks of a node to an
+   * executor there; MPI is a deprecated name for it.
+   */
   static auto str2mode(const std::string& mode) -> Mode {
     std::string strMode(mode);
     utils::StringUtils::toUpper(strMode);
@@ -178,16 +184,18 @@ class Config {
     if (strMode == "THREAD") {
       return Mode::Thread;
     }
-    if (strMode == "MPI") {
+    if (strMode == "NODE" || strMode == "MPI") {
 #ifdef USE_MPI
+      if (strMode == "MPI") {
+        logWarning() << "The ASYNC mode MPI is deprecated; it is called NODE.";
+      }
       return Mode::MPI;
 #else  // USE_MPI
-      logError() << "Asynchronous MPI is not supported without MPI";
+      logError() << "The ASYNC mode" << strMode << "requires MPI.";
 #endif // USE_MPI
     }
     if (strMode != "SYNC") {
-      logWarning() << "Unknown mode" << utils::nospace << strMode
-                   << "for ASYNC output. Using synchronous mode.";
+      logWarning() << "Unknown ASYNC mode" << strMode << "- the output is written synchronously.";
     }
     return Mode::Sync;
   }
