@@ -318,7 +318,7 @@ class MPIScheduler {
     std::vector<std::byte> param;
     /** The module to register (RegisterTag) */
     Scheduled* scheduled{nullptr};
-    /** Stop at once instead of waiting for the modules to finish (ShutdownTag) */
+    /** Whether this rank leaves modules behind, which the executor then shuts down (ShutdownTag) */
     bool kill{false};
     std::shared_ptr<bool> done;
   };
@@ -769,7 +769,28 @@ class MPIScheduler {
     // Whether the dispatcher is done (only ever set where the executor computes as well)
     bool shutdown = false;
 
+    // Modules that ranks leave behind are shut down once every rank of the group is done: it has
+    // ended, with the kill switch or the shutdown of the own compute thread as the last thing it
+    // hands over, or it has finalized every module. Until then, what it sent may still be on the
+    // way; arriving after the loop, it would reach whatever communicator takes the place of the
+    // freed one.
+    bool killing = false;
+    std::vector<char> ended(m_groupSize, 0);
+    std::vector<std::size_t> finalizes(m_groupSize, 0);
+    const auto everybodyDone = [&]() {
+      for (int rank = 0; rank < m_groupSize; rank++) {
+        const bool computes = rank != m_executorRank || m_isCompute;
+        if (computes && ended[rank] == 0 && finalizes[rank] < m_asyncCalls.size()) {
+          return false;
+        }
+      }
+      return true;
+    };
+
     const auto done = [&]() {
+      if (killing) {
+        return everybodyDone();
+      }
       const bool allFinalized = finalized == m_asyncCalls.size();
       return m_executorExclusive ? allFinalized : (shutdown && allFinalized);
     };
@@ -790,11 +811,8 @@ class MPIScheduler {
         if (pollNext(local, message, status)) {
           if (local.tag == ShutdownTag) {
             shutdown = true;
-            if (local.kill) {
-              killCalls();
-              finishLoop();
-              return;
-            }
+            ended[m_groupRank] = 1;
+            killing = killing || local.kill;
             break;
           }
 
@@ -812,10 +830,14 @@ class MPIScheduler {
           }
 
           switch (tag) {
+          case FinalizeTag:
+            finalizes[m_groupRank]++;
+            bufferId = local.bufferId;
+            call.ready++;
+            break;
           case RegisterTag:
           case RemoveTag:
           case WaitTag:
-          case FinalizeTag:
             bufferId = local.bufferId;
             call.ready++;
             break;
@@ -851,14 +873,11 @@ class MPIScheduler {
           }
         } else {
           if (status.MPI_TAG == KillTag) {
-            // Dummy recv
-            assert(status.MPI_SOURCE == 0);
+            // the rank leaves modules behind, and sends nothing after this
             MPI_Mrecv(nullptr, 0, MPI_BYTE, &message, MPI_STATUS_IGNORE);
-
-            // Stop everything immediately (probably some finalizes were missing)
-            killCalls();
-            finishLoop();
-            return;
+            ended[status.MPI_SOURCE] = 1;
+            killing = true;
+            break;
           }
 
           tag = status.MPI_TAG - NumStaticTags;
@@ -916,9 +935,14 @@ class MPIScheduler {
               call.asyncReady++;
             }
             break;
+          case FinalizeTag:
+            MPI_Mrecv(nullptr, 0, MPI_BYTE, &message, MPI_STATUS_IGNORE);
+
+            finalizes[status.MPI_SOURCE]++;
+            call.ready++;
+            break;
           case RegisterTag:
           case WaitTag:
-          case FinalizeTag:
             MPI_Mrecv(nullptr, 0, MPI_BYTE, &message, MPI_STATUS_IGNORE);
 
             call.ready++;
@@ -1002,6 +1026,10 @@ class MPIScheduler {
       }
     }
 
+    if (killing) {
+      // stop all that is left
+      killCalls();
+    }
     finishLoop();
   }
 
@@ -1027,24 +1055,18 @@ class MPIScheduler {
       return;
     }
 
-    // Only the first rank of a group decides whether modules are left, so that
-    // exactly one kill switch reaches the executor
-    const bool kill = m_liveCalls > 0 && m_groupRank == 0;
+    // A rank that leaves modules behind says so with the kill switch, the last thing it sends; the
+    // executor shuts them down once every rank of its group is done
+    const bool kill = m_liveCalls > 0;
 
     if (m_loopThreadRunning) {
-      if (m_liveCalls > 0 && !kill) {
-        logWarning() << "ASYNC:" << m_liveCalls
-                     << "module(s) of this rank are not finalized; the executor waits for them.";
-      }
-
-      // The loop thread ends once all modules are finalized, or at once with
-      // the kill switch
+      // The loop thread ends once all modules are finalized, or with the
+      // kill switch of every rank that leaves modules behind
       LocalRequest request;
       request.tag = ShutdownTag;
       request.kill = kill;
       submitLocal(std::move(request), false);
-    } else if (kill && m_privateGroupComm != MPI_COMM_NULL) {
-      // Some async calls are left, -> send the kill switch
+    } else if (kill && m_isCompute && m_privateGroupComm != MPI_COMM_NULL) {
       MPI_Ssend(nullptr, 0, MPI_BYTE, m_executorRank, KillTag, m_privateGroupComm);
     }
 

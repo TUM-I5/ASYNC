@@ -871,4 +871,34 @@ class TestModule : public CxxTest::TestSuite {
 
     dispatcher.finalize();
   }
+
+  /**
+   * Dispatchers one after another that leave a module behind: what the ranks
+   * sent the executor of one may not reach the next one, whose communicators
+   * can take the place of the freed ones
+   */
+  void testModulesLeftBehind() const {
+    constexpr int Dispatchers = 4;
+    for (int i = 0; i < Dispatchers; i++) {
+      async::Dispatcher dispatcher;
+      const TestNodes nodes(dispatcher);
+
+      Module used;
+      const Module left;
+
+      dispatcher.init();
+
+      if (dispatcher.dispatch()) {
+        used.run();
+      }
+
+      const bool executor = executes(dispatcher);
+
+      dispatcher.finalize();
+
+      if (executor) {
+        TS_ASSERT(used.mExec);
+      }
+    }
+  }
 };
