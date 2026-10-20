@@ -15,6 +15,7 @@
 
 #include <pthread.h>
 #include <sched.h>
+#include <vector>
 
 #include "async/Config.h"
 #include "async/Dispatcher.h"
@@ -384,6 +385,91 @@ class GrowBufferModule : private async::Module<GrowBufferModule, Param, Param> {
 };
 
 /**
+ * Every rank contributes values of its own, as many as differ from rank to
+ * rank: the aggregate has to hold them in the order of the ranks, through a
+ * resize, for a buffer of the application and for one ASYNC manages
+ */
+class OrderModule : private async::Module<OrderModule, Param, Param> {
+  public:
+  static constexpr int Steps = 2;
+
+  /** The ranks whose contributions the executor holds */
+  int mContributors{1};
+
+  std::array<std::size_t, Steps> mSize{};
+  std::array<std::size_t, Steps> mManagedSize{};
+  std::array<bool, Steps> mOrdered{};
+
+  OrderModule() = default;
+
+  void run(int rank) {
+    init();
+
+    // first rank + 1 values of the rank, then two values 100 + rank
+    std::vector<int> values(rank + 1, rank);
+    addBuffer(values.data(), values.size() * sizeof(int));
+    addBuffer(nullptr, values.size() * sizeof(int));
+
+    auto param = Param{0};
+    callInit(param);
+    wait();
+
+    auto* managed = managedBuffer<int*>(1);
+    for (int i = 0; i <= rank; i++) {
+      managed[i] = 1000 + rank;
+    }
+    sendBuffer(0);
+    sendBuffer(1);
+    call(param);
+    wait();
+
+    const std::vector<int> other(2, 100 + rank);
+    resizeBuffer(0, other.data(), other.size() * sizeof(int));
+    resizeBuffer(1, nullptr, 3 * sizeof(int));
+    managed = managedBuffer<int*>(1);
+    for (int i = 0; i < 3; i++) {
+      managed[i] = 2000 + rank;
+    }
+    sendBuffer(0);
+    sendBuffer(1);
+    param.step = 1;
+    call(param);
+    wait();
+
+    finalize();
+  }
+
+  void execInit(const Param& param) {}
+
+  void exec(const async::ExecInfo& info, const Param& param) {
+    mSize.at(param.step) = info.bufferSize(0);
+    mManagedSize.at(param.step) = info.bufferSize(1);
+
+    const auto* values = static_cast<const int*>(info.buffer(0));
+    const auto* managed = static_cast<const int*>(info.buffer(1));
+    bool ordered = values != nullptr && managed != nullptr;
+    std::size_t value = 0;
+    std::size_t managedValue = 0;
+    for (int rank = 0; ordered && rank < mContributors; rank++) {
+      const int count = param.step == 0 ? rank + 1 : 2;
+      for (int i = 0; i < count; i++) {
+        ordered = ordered && values[value++] == (param.step == 0 ? rank : 100 + rank);
+      }
+      const int managedCount = param.step == 0 ? rank + 1 : 3;
+      for (int i = 0; i < managedCount; i++) {
+        ordered = ordered && managed[managedValue++] == (param.step == 0 ? 1000 : 2000) + rank;
+      }
+    }
+    mOrdered.at(param.step) = ordered && value * sizeof(int) == info.bufferSize(0) &&
+                              managedValue * sizeof(int) == info.bufferSize(1);
+  }
+
+  void setUp() override { setExecutor(*this); }
+
+  void tearDown() override {}
+};
+
+/**
  * Pins the executor thread to a core, as an application does with the cores
  * its computation leaves free
  */
@@ -593,6 +679,34 @@ class TestModule : public CxxTest::TestSuite {
       TS_ASSERT(module.mExecuted);
       TS_ASSERT_EQUALS(module.mBufferSize, group * GrowBufferModule::Values * sizeof(int));
       TS_ASSERT(module.mValid);
+    }
+  }
+
+  void testOrder() const {
+    async::Dispatcher dispatcher;
+
+    OrderModule module;
+    module.mContributors = contributors(m_size);
+
+    dispatcher.init();
+
+    if (dispatcher.dispatch()) {
+      module.run(m_rank);
+    }
+
+    const bool executor = executes(dispatcher);
+
+    dispatcher.finalize();
+
+    if (executor) {
+      const auto group = static_cast<std::size_t>(module.mContributors);
+      // 1 + 2 + ... + group values at first, then two (three) values each
+      TS_ASSERT_EQUALS(module.mSize[0], group * (group + 1) / 2 * sizeof(int));
+      TS_ASSERT_EQUALS(module.mManagedSize[0], group * (group + 1) / 2 * sizeof(int));
+      TS_ASSERT_EQUALS(module.mSize[1], 2 * group * sizeof(int));
+      TS_ASSERT_EQUALS(module.mManagedSize[1], 3 * group * sizeof(int));
+      TS_ASSERT(module.mOrdered[0]);
+      TS_ASSERT(module.mOrdered[1]);
     }
   }
 

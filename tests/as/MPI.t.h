@@ -9,7 +9,9 @@
 #include <cstddef>
 #include <mpi.h>
 
+#include <chrono>
 #include <pthread.h>
+#include <thread>
 #include <vector>
 
 #include <cxxtest/GlobalFixture.h>
@@ -787,6 +789,52 @@ class TestMPI : public CxxTest::TestSuite {
 
       async1.wait();
       async2.wait();
+    }
+  }
+
+  /**
+   * A contribution that comes late: the executor has to wait for it, and so
+   * does a rank that hands on the parts of its node
+   */
+  void testLateContribution() {
+    Executor<TestMPI> executor(this);
+
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async;
+    async.setScheduler(*m_scheduler);
+
+    async.setExecutor(executor);
+    m_async = &async;
+
+    const int steps = 2;
+    if (m_scheduler->isExecutor()) {
+      m_scheduler->loop();
+
+      // the value of every step from every compute rank of the group
+      const auto contributors = static_cast<std::size_t>(m_scheduler->numComputeRanks());
+      TS_ASSERT_EQUALS(m_buffers.size(), steps * contributors);
+      for (std::size_t i = 0; i < m_buffers.size(); i++) {
+        TS_ASSERT_EQUALS(m_buffers[i], static_cast<int>(i / contributors) + 1);
+      }
+    } else {
+      int value = 0;
+      async.addBuffer(&value, sizeof(int));
+
+      async.wait();
+
+      const Parameter parameter;
+      for (int step = 1; step <= steps; step++) {
+        if (m_rank == 0) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        value = step;
+        async.sendBuffer(0, sizeof(int));
+        async.call(parameter);
+
+        // what the rank sent is out of its hands
+        value = -1;
+
+        async.wait();
+      }
     }
   }
 
