@@ -15,14 +15,14 @@
 #include <cxxtest/GlobalFixture.h>
 #include <cxxtest/TestSuite.h>
 
-#ifdef ASYNC_MPI_COPY
+#if ASYNC_MPI_COPY
 #include "async/as/MPIAsync.h"
 #else // ASYNC_MPI_COPY
 #include "async/as/MPI.h"
 #endif // ASYNC_MPI_COPY
 #include "Executor.h"
 
-#ifdef ASYNC_MPI_COPY
+#if ASYNC_MPI_COPY
 template <class Executor, typename InitParameter, typename Parameter>
 struct MPITest {
   using Type = async::as::MPIAsync<Executor, InitParameter, Parameter>;
