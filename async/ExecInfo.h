@@ -27,14 +27,12 @@ class ExecInfo {
 
   std::vector<BufferOrigin*> m_bufferOrigin;
 
-  HostBufferOrigin* m_hostBuffer;
-
 #ifdef USE_MPI
   MPI_Comm m_comm{MPI_COMM_NULL};
 #endif // USE_MPI
 
   public:
-  ExecInfo() : m_hostBuffer(new HostBufferOrigin()) {}
+  ExecInfo() = default;
 
   virtual ~ExecInfo() = default;
 
@@ -84,7 +82,7 @@ class ExecInfo {
 
   void addBufferInternal(size_t size) {
     m_bufferSize.push_back(size);
-    m_bufferOrigin.push_back(m_hostBuffer);
+    m_bufferOrigin.push_back(&hostBufferOrigin());
   }
 
   void resizeBufferInternal(unsigned int id, size_t size) {
@@ -95,6 +93,16 @@ class ExecInfo {
   void removeBufferInternal(unsigned int id) {
     assert(id < numBuffers());
     m_bufferSize[id] = 0;
+  }
+
+  private:
+  /**
+   * The origin of all buffers in host memory; it holds no state, so one
+   * instance serves every buffer
+   */
+  static auto hostBufferOrigin() -> HostBufferOrigin& {
+    static HostBufferOrigin origin;
+    return origin;
   }
 };
 
