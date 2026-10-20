@@ -75,6 +75,9 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
   /** Shutdown the thread */
   bool m_shutdown{false};
 
+  /** Whether the thread runs, i.e. the executor has been set */
+  bool m_started{false};
+
   bool m_waiting{false};
 
   protected:
@@ -127,11 +130,20 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
     if (pthread_create(&m_asyncThread, nullptr, asyncThread, this) != 0) {
       logError() << "ASYNC: Failed to start asynchronous thread";
     }
+    m_started = true;
   }
 
   void getAffinity(CpuMask& cpuMask) { cpuMask.getaffinity_np(m_asyncThread); }
 
-  void setAffinity(const CpuMask& cpuMask) { cpuMask.setaffinity_np(m_asyncThread); }
+  /**
+   * Pin the executor thread. Before the executor is set there is no such
+   * thread, and the call does nothing.
+   */
+  void setAffinity(const CpuMask& cpuMask) {
+    if (m_started) {
+      cpuMask.setaffinity_np(m_asyncThread);
+    }
+  }
 
   auto isAffinityNecessary() -> bool override { return true; }
 
@@ -202,6 +214,11 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
 
   void finalize() override {
     if (!Base<Executor, InitParameter, Parameter>::finalizeInternal()) {
+      return;
+    }
+
+    if (!m_started) {
+      // a module that was never set up has no thread to stop
       return;
     }
 
