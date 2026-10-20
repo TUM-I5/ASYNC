@@ -38,6 +38,16 @@ struct GroupLayout {
 
   /** Upper bound on the compute ranks per executor (0: unbounded) */
   unsigned int maxGroupRanks{0};
+
+  /**
+   * Whether an executor rank is barred from the computation.
+   *
+   * An exclusive executor costs a whole rank and splits the application's
+   * communicator, which forces every collective in the application onto the
+   * reduced communicator. A co-located executor avoids both, at the price of
+   * running its coordination and writer threads next to the computation.
+   */
+  bool exclusive{false};
 };
 
 /**
@@ -148,6 +158,7 @@ class Config {
     layout.executorsPerNode = env.get<unsigned int>("EXECUTORS_PER_NODE", 1);
     layout.groupNodes = env.get<unsigned int>("GROUP_NODES", 1);
     layout.maxGroupRanks = env.get<unsigned int>("MAX_GROUP_RANKS", 0);
+    layout.exclusive = env.get<bool>("EXECUTOR_EXCLUSIVE", false);
 
     const auto legacy = env.getOptional<unsigned int>("GROUP_SIZE");
     if (legacy.has_value()) {

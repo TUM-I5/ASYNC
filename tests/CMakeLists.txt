@@ -62,8 +62,19 @@ set_tests_properties( TestModuleSync PROPERTIES ENVIRONMENT "ASYNC_MODE=SYNC" )
 add_serial_cxx_test( TestModuleThread ${CMAKE_CURRENT_SOURCE_DIR}/Module.t.h )
 set_tests_properties( TestModuleThread PROPERTIES ENVIRONMENT "ASYNC_MODE=THREAD" )
 if( USE_MPI )
+    # executors that compute as well (the default) and exclusive ones, each with and without the
+    # asynchronous copy
     add_mpi_cxx_test( TestModuleMPI ${CMAKE_CURRENT_SOURCE_DIR}/Module.t.h 3 )
     set_tests_properties( TestModuleMPI PROPERTIES ENVIRONMENT "ASYNC_MODE=MPI;ASYNC_MPI_COPY=0" )
     add_mpi_cxx_test( TestModuleMPIAsync ${CMAKE_CURRENT_SOURCE_DIR}/Module.t.h 3 )
     set_tests_properties( TestModuleMPIAsync PROPERTIES ENVIRONMENT "ASYNC_MODE=MPI;ASYNC_MPI_COPY=1" )
+    add_mpi_cxx_test( TestModuleMPIExclusive ${CMAKE_CURRENT_SOURCE_DIR}/Module.t.h 3 )
+    set_tests_properties( TestModuleMPIExclusive PROPERTIES ENVIRONMENT
+        "ASYNC_MODE=MPI;ASYNC_MPI_COPY=0;ASYNC_EXECUTOR_EXCLUSIVE=1" )
+    add_mpi_cxx_test( TestModuleMPIAsyncExclusive ${CMAKE_CURRENT_SOURCE_DIR}/Module.t.h 3 )
+    set_tests_properties( TestModuleMPIAsyncExclusive PROPERTIES ENVIRONMENT
+        "ASYNC_MODE=MPI;ASYNC_MPI_COPY=1;ASYNC_EXECUTOR_EXCLUSIVE=1" )
+    # a group of one rank, which is its own executor
+    add_mpi_cxx_test( TestModuleMPISingle ${CMAKE_CURRENT_SOURCE_DIR}/Module.t.h 1 )
+    set_tests_properties( TestModuleMPISingle PROPERTIES ENVIRONMENT "ASYNC_MODE=MPI;ASYNC_MPI_COPY=1" )
 endif( USE_MPI )

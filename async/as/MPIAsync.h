@@ -65,7 +65,7 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
   auto addSyncBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned override {
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone);
     const unsigned int id =
-        Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, false);
+        MPIBase<Executor, InitParameter, Parameter>::addBufferLocal(buffer, size, false);
 
     // We directly send sync buffers
     BufInfo bufInfo{};
@@ -84,7 +84,7 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
    */
   auto addBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned override {
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone, false);
-    const auto id = Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size);
+    const auto id = MPIBase<Executor, InitParameter, Parameter>::addBufferLocal(buffer, size, true);
 
     BufInfo bufInfo{};
     bufInfo.sync = false;
@@ -134,6 +134,14 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
     return Base<Executor, InitParameter, Parameter>::bufferInternal(id);
   }
 
+  auto managedBuffer(unsigned int id) -> void* override {
+    if (MPIBase<Executor, InitParameter, Parameter>::scheduler().isColocated()) {
+      return MPIBase<Executor, InitParameter, Parameter>::localManagedBuffer(id);
+    }
+
+    return Base<Executor, InitParameter, Parameter>::managedBuffer(id);
+  }
+
   /**
    * Wait for an asynchronous call to finish
    */
@@ -155,7 +163,8 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
 
     assert(id < (Base<Executor, InitParameter, Parameter>::numBuffers()));
 
-    if (m_buffer[id].sync) {
+    if (m_buffer[id].sync ||
+        MPIBase<Executor, InitParameter, Parameter>::scheduler().isColocated()) {
       MPIBase<Executor, InitParameter, Parameter>::sendBuffer(id, size);
       return;
     }
@@ -203,7 +212,10 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
    * The number of chunks this rank sends for a buffer of the given size
    */
   [[nodiscard]] auto requestsFor(const BufInfo& bufInfo, size_t size) const -> std::size_t {
+    // a co-located executor rank copies its own contribution into the aggregation buffer, so it
+    // never sends one
     if (bufInfo.sync || size == 0 ||
+        MPIBase<Executor, InitParameter, Parameter>::scheduler().isColocated() ||
         (bufInfo.clone &&
          MPIBase<Executor, InitParameter, Parameter>::scheduler().groupRank() != 0)) {
       return 0;

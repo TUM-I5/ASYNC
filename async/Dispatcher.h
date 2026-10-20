@@ -13,6 +13,7 @@
 
 #include "Config.h"
 #include "ModuleBase.h"
+#include "async/as/Pin.h"
 #include "utils/logger.h"
 
 namespace async {
@@ -136,20 +137,42 @@ class Dispatcher {
   }
 
   /**
+   * @return True if the process takes part in the computation
+   */
+  [[nodiscard]] auto isCompute() const -> bool {
+#ifdef USE_MPI
+    return m_scheduler.isCompute();
+#else  // USE_MPI
+    return true;
+#endif // USE_MPI
+  }
+
+  /**
    * This function will not return for MPI executors until all executors have been
    * finalized. The function has to be called after all async {@link Module}s have
    * been created.
    *
-   * @return False if this rank is an MPI executor that does not contribute to the
-   *  computation.
+   * @return False if this rank is an MPI executor that does not contribute to
+   *  the computation. Co-located executors return true and coordinate their
+   *  group on a thread of their own.
    */
   auto dispatch() -> bool {
 #ifdef USE_MPI
+    if (m_config.mode() == Mode::MPI) {
+      m_scheduler.setDispatched();
+    }
+
     if (m_scheduler.isExecutor()) {
       const auto& modules = ModuleBase::modules();
       // Initialize the executor modules
       for (const auto& module : modules) {
-        module->setUp();
+        module->setUpOnce();
+      }
+
+      if (m_scheduler.isCompute()) {
+        // Coordinate the group on a thread of its own and go on computing
+        m_scheduler.startLoopThread();
+        return true;
       }
 
       // Run the executor loop
@@ -164,6 +187,32 @@ class Dispatcher {
 #endif // USE_MPI
 
     return true;
+  }
+
+  /**
+   * Bring a module that was created after {@link init} into the fold; it is
+   * set up with its own init() afterwards.
+   *
+   * After {@link dispatch}, this is a collective operation of the ranks that
+   * compute: they have to attach the same modules in the same order. In MPI
+   * mode it requires executors that compute as well, since an exclusive
+   * executor never creates the module.
+   */
+  void attach([[maybe_unused]] ModuleBase& module) {
+#ifdef USE_MPI
+    module.setScheduler(m_scheduler);
+    module.setComm(m_execComm);
+#endif // USE_MPI
+  }
+
+  /**
+   * Affinity for the thread that coordinates the group on a co-located
+   * executor rank. Has to be set before {@link dispatch}.
+   */
+  void setAffinity([[maybe_unused]] const as::CpuMask& mask) {
+#ifdef USE_MPI
+    m_scheduler.setAffinity(mask);
+#endif // USE_MPI
   }
 
   void finalize() {

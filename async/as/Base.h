@@ -160,6 +160,26 @@ class Base : public async::ExecInfo {
   }
 
   /**
+   * The memory this rank contributes to a buffer.
+   *
+   * Differs from {@link buffer} where the buffer slot describes an aggregate
+   * rather than the memory of this rank alone.
+   */
+  [[nodiscard]] virtual auto localBuffer(unsigned int id) const -> const void* {
+    return buffer(id);
+  }
+
+  /**
+   * The size this rank contributes to a buffer.
+   *
+   * Differs from {@link bufferSize} where the buffer slot describes an
+   * aggregate rather than the memory of this rank alone.
+   */
+  [[nodiscard]] virtual auto localBufferSize(unsigned int id) const -> size_t {
+    return async::ExecInfo::bufferSize(id);
+  }
+
+  /**
    * @param size The size that should be transfered
    */
   virtual void sendBuffer(unsigned int id, size_t size) = 0;

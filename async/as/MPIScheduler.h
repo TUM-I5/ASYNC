@@ -10,17 +10,25 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <deque>
 #include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <pthread.h>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "async/Config.h"
+#include "async/as/Pin.h"
 #include "utils/logger.h"
 
 namespace async::as {
@@ -89,6 +97,19 @@ template <class Executor, typename InitParameter, typename Parameter>
 class MPIAsync;
 class MPIScheduler;
 
+/**
+ * The contribution of a co-located executor rank to one of its own buffers.
+ *
+ * Where the executor takes part in the computation, its data never travels
+ * over MPI. The scheduler hands it to the executor side directly instead.
+ */
+struct LocalBuffer {
+  const void* origin{nullptr};
+  size_t size{0};
+  bool clone{false};
+  bool valid{false};
+};
+
 class Scheduled {
   friend class MPIScheduler;
 
@@ -133,10 +154,11 @@ class Scheduled {
 
   /**
    * @param sync True if the buffer is send sychronized
+   * @param local The contribution of the executor rank itself
    */
-  virtual void addBufferInternal(bool sync) = 0;
+  virtual void addBufferInternal(bool sync, const LocalBuffer& local) = 0;
 
-  virtual void resizeBufferInternal(unsigned int id) = 0;
+  virtual void resizeBufferInternal(unsigned int id, const LocalBuffer& local) = 0;
 
   virtual void removeBufferInternal(unsigned int id) = 0;
 
@@ -159,6 +181,9 @@ class Scheduled {
  *
  * @warning Only one instance of this class should be created
  */
+// (the members are grouped by what they are for; there is only one instance, so its padding does
+// not matter)
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 class MPIScheduler {
   template <class Executor, typename InitParameter, typename Parameter>
   friend class MPIBase;
@@ -187,13 +212,36 @@ class MPIScheduler {
   bool m_isExecutor{false};
 
   /** True of this task is a compute rank */
-  bool m_isCompute{};
+  bool m_isCompute{true};
+
+  /** True if the executor of this group is barred from the computation */
+  bool m_executorExclusive{true};
+
+  /** Number of ranks of the group that take part in the computation */
+  int m_numComputeRanks{0};
 
   /** The "COMM_WORLD" communicator (communicator without executors) */
   MPI_Comm m_commWorld;
 
-  /** All async objects */
+  /**
+   * All async objects, by id.
+   *
+   * On an executor that computes as well, the loop thread owns this list once
+   * it runs: later modules reach it through the local queue.
+   */
   std::vector<Scheduled*> m_asyncCalls;
+
+  /** The id the next module gets; the same sequence on every rank of a group */
+  int m_nextId{0};
+
+  /** Modules this rank computes for and has not finalized yet */
+  int m_liveCalls{0};
+
+  /**
+   * Whether the dispatcher has started the executors. A module that comes
+   * later registers with the loop of its executor, which is running by then.
+   */
+  bool m_dispatched{false};
 
   /** Managed buffer counters for each size */
   std::map<size_t, unsigned int> m_managedBufferCounter;
@@ -217,7 +265,56 @@ class MPIScheduler {
   bool m_finalized{false};
 
   /** Sleep between two probes of an idle executor, in microseconds */
-  long m_pollIntervalUs{0};
+  long m_pollIntervalUs{-1};
+
+  /** The thread running {@link loop} while the main thread computes */
+  pthread_t m_loopThread{};
+
+  bool m_loopThreadRunning{false};
+
+  std::optional<CpuMask> m_loopAffinity;
+
+  /**
+   * Requests that the compute thread of a co-located executor rank hands to
+   * the loop thread instead of sending them to itself.
+   *
+   * Everything the protocol does on the group communicator has to be issued
+   * once per rank. On a rank that is both executor and compute rank, the loop
+   * thread issues it, on behalf of both roles.
+   */
+  struct LocalRequest {
+    int tag{0};
+    int id{0};
+    bool sync{true};
+    unsigned int bufferId{0};
+    const void* origin{nullptr};
+    size_t size{0};
+    bool clone{false};
+    std::vector<std::byte> param;
+    /** The module to register (RegisterTag) */
+    Scheduled* scheduled{nullptr};
+    /** Stop at once instead of waiting for the modules to finish (ShutdownTag) */
+    bool kill{false};
+    std::shared_ptr<bool> done;
+  };
+
+  std::mutex m_localMutex;
+
+  std::condition_variable m_localDone;
+
+  std::deque<LocalRequest> m_localQueue;
+
+  /** Size of the queue, so that the poll loop can skip the lock */
+  std::atomic<int> m_localPending{0};
+
+  std::shared_ptr<bool> m_pendingLocal;
+
+  /** The operation the outstanding local request belongs to */
+  int m_pendingId{-1};
+  int m_pendingTag{-1};
+
+  /** Set once the loop thread is gone; local requests return right away from then on */
+  bool m_loopDone{false};
 
   public:
   MPIScheduler()
@@ -318,13 +415,13 @@ class MPIScheduler {
 
     m_executorRank = m_groupSize - 1;
 
-    if (m_groupSize < 2) {
+    if (layout.exclusive && m_groupSize < 2) {
       logError() << "ASYNC: A group of" << m_groupSize
-                 << "rank(s) leaves no rank for the computation. Lower EXECUTORS_PER_NODE or"
-                 << "raise MAX_GROUP_RANKS.";
+                 << "rank(s) leaves no rank for the computation. Lower EXECUTORS_PER_NODE,"
+                 << "raise MAX_GROUP_RANKS, or let the executor compute as well.";
     }
 
-    setCommunicator(comm, groupComm, m_groupRank == m_executorRank, true);
+    setCommunicator(comm, groupComm, m_groupRank == m_executorRank, layout.exclusive);
   }
 
   /**
@@ -347,6 +444,17 @@ class MPIScheduler {
     // Is an executor?
     m_isExecutor = isExecutor;
     m_isCompute = !(executorExclusive && isExecutor);
+    m_executorExclusive = executorExclusive;
+
+    // The executor is the last rank of the group, so the compute ranks are
+    // always the first m_numComputeRanks ones
+    m_numComputeRanks = executorExclusive ? m_groupSize - 1 : m_groupSize;
+
+    if (m_pollIntervalUs < 0) {
+      // An exclusive executor owns its rank and can spin; a co-located one
+      // shares its cores with the computation and has to step back
+      m_pollIntervalUs = executorExclusive ? 0 : DefaultPollIntervalUs;
+    }
 
     int executorCount = isExecutor ? 1 : 0;
     MPI_Allreduce(MPI_IN_PLACE, &executorCount, 1, MPI_INT, MPI_SUM, groupComm);
@@ -362,8 +470,10 @@ class MPIScheduler {
       // Create the public group communicator (excl. the executor)
       MPI_Comm_split(m_privateGroupComm, (m_isExecutor ? MPI_UNDEFINED : 0), 0, &m_groupComm);
     } else {
-      m_commWorld = comm;
-      m_privateGroupComm = groupComm;
+      // Everybody computes: the application keeps its communicator, and the
+      // compute ranks of the group are all of it
+      MPI_Comm_dup(comm, &m_commWorld);
+      MPI_Comm_dup(groupComm, &m_groupComm);
     }
   }
 
@@ -371,147 +481,276 @@ class MPIScheduler {
    * How long the executor sleeps between two probes once it has run out of
    * work. A negative value selects the default for the current layout.
    */
-  void setPollIntervalUs(long pollIntervalUs) {
-    m_pollIntervalUs = pollIntervalUs < 0 ? 0 : pollIntervalUs;
-  }
+  void setPollIntervalUs(long pollIntervalUs) { m_pollIntervalUs = pollIntervalUs; }
+
+  /**
+   * Called on every rank when the dispatcher starts the executors; modules
+   * attached afterwards register with the running executor
+   */
+  void setDispatched() { m_dispatched = true; }
 
   [[nodiscard]] auto groupRank() const -> int { return m_groupRank; }
 
   [[nodiscard]] auto isExecutor() const -> bool { return m_isExecutor; }
+
+  /**
+   * @return True if this rank takes part in the computation
+   */
+  [[nodiscard]] auto isCompute() const -> bool { return m_isCompute; }
+
+  /**
+   * @return True if this rank is an executor and a compute rank at once
+   */
+  [[nodiscard]] auto isColocated() const -> bool { return m_isExecutor && m_isCompute; }
+
+  /**
+   * @return The number of ranks of this group that take part in the computation
+   */
+  [[nodiscard]] auto numComputeRanks() const -> int { return m_numComputeRanks; }
+
+  /**
+   * Affinity for the loop thread of a co-located executor. Has to be set
+   * before {@link startLoopThread}.
+   */
+  void setAffinity(const CpuMask& mask) { m_loopAffinity = mask; }
 
   [[nodiscard]] auto commWorld() const -> MPI_Comm { return m_commWorld; }
 
   [[nodiscard]] auto groupComm() const -> MPI_Comm { return m_groupComm; }
 
   /**
-   * Should be called on the executor to start the execution loop
+   * Should be called on the executor to start the execution loop.
+   *
+   * On an exclusive executor this returns once all modules have been
+   * finalized. A co-located executor runs it on {@link startLoopThread}
+   * instead, so that the calling thread can go on computing; there it returns
+   * once the dispatcher is finalized and all modules are.
    */
   void loop() {
     if (!m_isExecutor) {
       return;
     }
 
-    // Save ready tasks for each call
-    std::vector<unsigned int> readyTasks(m_asyncCalls.size());
-    std::vector<unsigned int> asyncReadyTasks(m_asyncCalls.size());
-
-    // Distinguish between init and param tag (required for asynchronous copies)
-    std::vector<int> lastTag(m_asyncCalls.size());
+    /** What has arrived of the operation a module is on */
+    struct CallState {
+      unsigned int ready{0};
+      unsigned int asyncReady{0};
+      /** Distinguishes between init and param tag (required for asynchronous copies) */
+      int lastTag{0};
+      /** The contribution of this rank, where it computes as well */
+      LocalBuffer local;
+    };
+    std::vector<CallState> calls(m_asyncCalls.size());
+    const auto state = [&calls](int id) -> CallState& {
+      if (id >= static_cast<int>(calls.size())) {
+        calls.resize(id + 1);
+      }
+      return calls[id];
+    };
+    const auto known = [this](int id) {
+      return id >= 0 && id < static_cast<int>(m_asyncCalls.size()) && m_asyncCalls[id] != nullptr;
+    };
+    const auto bufferChunks = [this, &known](int id) -> unsigned int {
+      // (a module whose registration is still under way has no buffers yet)
+      return known(id) ? m_asyncCalls[id]->numBufferChunks() : 0;
+    };
 
     // Number of finalized aync calls
     unsigned int finalized = 0;
 
-    while (finalized < m_asyncCalls.size()) {
-      MPI_Status status;
+    // Whether the dispatcher is done (only ever set where the executor computes as well)
+    bool shutdown = false;
+
+    const auto done = [&]() {
+      const bool allFinalized = finalized == m_asyncCalls.size();
+      return m_executorExclusive ? allFinalized : (shutdown && allFinalized);
+    };
+
+    while (!done()) {
       int id = 0;
       int tag = 0;
 
       int sync = 0;              // Required for add tag
       unsigned int bufferId = 0; // Required for remove tag and buffer tag
 
-      do {
+      bool complete = false;
+      while (!complete) {
+        LocalRequest local;
+        MPI_Status status;
         MPI_Message message = MPI_MESSAGE_NULL;
-        probe(MPI_ANY_SOURCE, MPI_ANY_TAG, message, status);
 
-        if (status.MPI_TAG == KillTag) {
-          // Dummy recv
-          assert(status.MPI_SOURCE == 0);
-          MPI_Mrecv(nullptr, 0, MPI_BYTE, &message, MPI_STATUS_IGNORE);
-
-          // Stop everything immediately (probably some finalizes were missing)
-          for (auto& call : m_asyncCalls) {
-            if (call != nullptr) {
-              call->finalizeInternal();
-              call = nullptr;
+        if (pollNext(local, message, status)) {
+          if (local.tag == ShutdownTag) {
+            shutdown = true;
+            if (local.kill) {
+              killCalls();
+              finishLoop();
+              return;
             }
+            break;
           }
-          return;
+
+          id = local.id;
+          tag = local.tag;
+          auto& call = state(id);
+
+          if (tag == RegisterTag) {
+            if (id >= static_cast<int>(m_asyncCalls.size())) {
+              m_asyncCalls.resize(id + 1, nullptr);
+            }
+            m_asyncCalls[id] = local.scheduled;
+          } else if (!known(id)) {
+            logError() << "ASYNC: Invalid id" << id << "handed over locally";
+          }
+
+          switch (tag) {
+          case RegisterTag:
+          case RemoveTag:
+          case WaitTag:
+          case FinalizeTag:
+            bufferId = local.bufferId;
+            call.ready++;
+            break;
+          case AddTag:
+            sync = static_cast<int>(local.sync);
+            call.local = LocalBuffer{local.origin, local.size, local.clone, true};
+            call.ready++;
+            break;
+          case ResizeTag:
+            bufferId = local.bufferId;
+            call.local = LocalBuffer{local.origin, local.size, local.clone, true};
+            call.ready++;
+            break;
+          case InitTag:
+          case ParamTag:
+            memcpy(m_asyncCalls[id]->paramBuffer(), local.param.data(), local.param.size());
+
+            call.lastTag = tag;
+            if (m_asyncCalls[id]->useAsyncCopy()) {
+              call.asyncReady++;
+            } else {
+              call.ready++;
+            }
+            break;
+          default:
+            logError() << "ASYNC: Unknown tag" << tag << "handed over locally";
+          }
+
+          if (local.done) {
+            m_pendingLocal = std::move(local.done);
+            m_pendingId = id;
+            m_pendingTag = tag;
+          }
+        } else {
+          if (status.MPI_TAG == KillTag) {
+            // Dummy recv
+            assert(status.MPI_SOURCE == 0);
+            MPI_Mrecv(nullptr, 0, MPI_BYTE, &message, MPI_STATUS_IGNORE);
+
+            // Stop everything immediately (probably some finalizes were missing)
+            killCalls();
+            finishLoop();
+            return;
+          }
+
+          tag = status.MPI_TAG - NumStaticTags;
+          id = tag / NumTags;
+          tag = tag % NumTags;
+
+          // a registration may arrive from another rank before the one of this rank
+          if (tag != RegisterTag && !known(id)) {
+            logError() << "ASYNC: Invalid id" << id << "received";
+          }
+
+          auto& call = state(id);
+          int size = 0;
+          void* buf = nullptr;
+
+          switch (tag) {
+          case AddTag:
+            MPI_Mrecv(&sync, 1, MPI_INT, &message, MPI_STATUS_IGNORE);
+
+            call.ready++;
+            break;
+          case ResizeTag:
+          case RemoveTag:
+            MPI_Mrecv(&bufferId, 1, MPI_UNSIGNED, &message, MPI_STATUS_IGNORE);
+
+            call.ready++;
+            break;
+          case InitTag:
+          case ParamTag:
+            MPI_Get_count(&status, MPI_BYTE, &size);
+            MPI_Mrecv(m_asyncCalls[id]->paramBuffer(), size, MPI_BYTE, &message, MPI_STATUS_IGNORE);
+
+            call.lastTag = tag;
+            if (m_asyncCalls[id]->useAsyncCopy()) {
+              call.asyncReady++;
+            } else {
+              call.ready++;
+            }
+            break;
+          case BufferTag:
+            // Select a buffer
+            MPI_Mrecv(&bufferId, 1, MPI_UNSIGNED, &message, MPI_STATUS_IGNORE);
+
+            // Probe buffer receive from some source/tag
+            probe(status.MPI_SOURCE, status.MPI_TAG, message, status);
+
+            // Get the size that is received
+            MPI_Get_count(&status, MPI_BYTE, &size);
+
+            // Receive the buffer
+            buf = m_asyncCalls[id]->getBufferPos(bufferId, status.MPI_SOURCE, size);
+            MPI_Mrecv(buf, size, MPI_BYTE, &message, MPI_STATUS_IGNORE);
+
+            if (m_asyncCalls[id]->useAsyncCopy(bufferId)) {
+              call.asyncReady++;
+            }
+            break;
+          case RegisterTag:
+          case WaitTag:
+          case FinalizeTag:
+            MPI_Mrecv(nullptr, 0, MPI_BYTE, &message, MPI_STATUS_IGNORE);
+
+            call.ready++;
+            break;
+          default:
+            logError() << "ASYNC: Unknown tag" << tag << "received";
+          }
         }
 
-        tag = status.MPI_TAG - NumStaticTags;
-        id = tag / NumTags;
-        tag = tag % NumTags;
+        const auto& call = state(id);
+        complete =
+            static_cast<int>(call.ready) >= m_numComputeRanks ||
+            call.asyncReady >= static_cast<unsigned int>(m_numComputeRanks) + bufferChunks(id);
+      }
 
-        if (id > static_cast<int>(m_asyncCalls.size()) || m_asyncCalls[id] == nullptr) {
-          logError() << "ASYNC: Invalid id" << id << "received";
-        }
+      if (!complete) {
+        // the dispatcher has been finalized; see whether that was the last thing to wait for
+        continue;
+      }
 
-        int size = 0;
-        void* buf = nullptr;
-
-        switch (tag) {
-        case AddTag:
-          MPI_Mrecv(&sync, 1, MPI_INT, &message, MPI_STATUS_IGNORE);
-
-          readyTasks[id]++;
-          break;
-        case ResizeTag:
-          MPI_Mrecv(&bufferId, 1, MPI_UNSIGNED, &message, MPI_STATUS_IGNORE);
-
-          readyTasks[id]++;
-          break;
-        case RemoveTag:
-          MPI_Mrecv(&bufferId, 1, MPI_UNSIGNED, &message, MPI_STATUS_IGNORE);
-
-          readyTasks[id]++;
-          break;
-        case InitTag:
-        case ParamTag:
-          MPI_Get_count(&status, MPI_BYTE, &size);
-          MPI_Mrecv(m_asyncCalls[id]->paramBuffer(), size, MPI_BYTE, &message, MPI_STATUS_IGNORE);
-
-          lastTag[id] = tag;
-          if (m_asyncCalls[id]->useAsyncCopy()) {
-            asyncReadyTasks[id]++;
-          } else {
-            readyTasks[id]++;
-          }
-          break;
-        case BufferTag:
-          // Select a buffer
-          MPI_Mrecv(&bufferId, 1, MPI_UNSIGNED, &message, MPI_STATUS_IGNORE);
-
-          // Probe buffer receive from some source/tag
-          probe(status.MPI_SOURCE, status.MPI_TAG, message, status);
-
-          // Get the size that is received
-          MPI_Get_count(&status, MPI_BYTE, &size);
-
-          // Receive the buffer
-          buf = m_asyncCalls[id]->getBufferPos(bufferId, status.MPI_SOURCE, size);
-          MPI_Mrecv(buf, size, MPI_BYTE, &message, MPI_STATUS_IGNORE);
-
-          if (m_asyncCalls[id]->useAsyncCopy(bufferId)) {
-            asyncReadyTasks[id]++;
-          }
-          break;
-        case WaitTag:
-        case FinalizeTag:
-          MPI_Mrecv(nullptr, 0, MPI_BYTE, &message, MPI_STATUS_IGNORE);
-
-          readyTasks[id]++;
-          break;
-        default:
-          logError() << "ASYNC: Unknown tag" << tag << "received";
-        }
-
-      } while ((static_cast<int>(readyTasks[id]) < m_groupSize - 1) &&
-               (asyncReadyTasks[id] < m_groupSize - 1 + m_asyncCalls[id]->numBufferChunks()));
-
+      auto& call = state(id);
       if (tag == BufferTag) {
-        assert(lastTag[id] == InitTag || lastTag[id] == ParamTag);
+        assert(call.lastTag == InitTag || call.lastTag == ParamTag);
 
-        tag = lastTag[id];
+        tag = call.lastTag;
       }
 
       switch (tag) {
+      case RegisterTag:
+        // the other ranks of the group wait for this, so that nothing about the module can reach
+        // the loop before the module itself
+        MPI_Barrier(m_privateGroupComm);
+        break;
       case AddTag:
         MPI_Barrier(m_privateGroupComm);
-        m_asyncCalls[id]->addBufferInternal(sync != 0);
+        m_asyncCalls[id]->addBufferInternal(sync != 0, call.local);
         break;
       case ResizeTag:
         MPI_Barrier(m_privateGroupComm);
-        m_asyncCalls[id]->resizeBufferInternal(bufferId);
+        m_asyncCalls[id]->resizeBufferInternal(bufferId, call.local);
         break;
       case RemoveTag:
         MPI_Barrier(m_privateGroupComm);
@@ -545,11 +784,33 @@ class MPIScheduler {
         logError() << "ASYNC: Unknown tag" << tag;
       }
 
-      if (static_cast<int>(readyTasks[id]) >= m_groupSize - 1) {
-        readyTasks[id] = 0;
+      call.local = LocalBuffer{};
+      completeLocal(id, tag);
+
+      if (static_cast<int>(call.ready) >= m_numComputeRanks) {
+        call.ready = 0;
       } else {
-        asyncReadyTasks[id] = 0;
+        call.asyncReady = 0;
       }
+    }
+
+    finishLoop();
+  }
+
+  /**
+   * Run {@link loop} on a thread of its own, so that this rank can compute
+   * while it coordinates the group.
+   */
+  void startLoopThread() {
+    assert(isColocated());
+
+    if (pthread_create(&m_loopThread, nullptr, loopThread, this) != 0) {
+      logError() << "ASYNC: Failed to start the executor coordination thread";
+    }
+    m_loopThreadRunning = true;
+
+    if (m_loopAffinity.has_value()) {
+      m_loopAffinity.value().setaffinity_np(m_loopThread);
     }
   }
 
@@ -558,9 +819,30 @@ class MPIScheduler {
       return;
     }
 
-    if (!m_asyncCalls.empty() && m_groupRank == 0) {
+    // Only the first rank of a group decides whether modules are left, so that
+    // exactly one kill switch reaches the executor
+    const bool kill = m_liveCalls > 0 && m_groupRank == 0;
+
+    if (m_loopThreadRunning) {
+      if (m_liveCalls > 0 && !kill) {
+        logWarning() << "ASYNC:" << m_liveCalls
+                     << "module(s) of this rank are not finalized; the executor waits for them.";
+      }
+
+      // The loop thread ends once all modules are finalized, or at once with
+      // the kill switch
+      LocalRequest request;
+      request.tag = ShutdownTag;
+      request.kill = kill;
+      submitLocal(std::move(request), false);
+    } else if (kill && m_privateGroupComm != MPI_COMM_NULL) {
       // Some async calls are left, -> send the kill switch
       MPI_Ssend(nullptr, 0, MPI_BYTE, m_executorRank, KillTag, m_privateGroupComm);
+    }
+
+    if (m_loopThreadRunning) {
+      pthread_join(m_loopThread, nullptr);
+      m_loopThreadRunning = false;
     }
 
     if (m_privateGroupComm != MPI_COMM_NULL) {
@@ -577,6 +859,145 @@ class MPIScheduler {
   }
 
   private:
+  static const long DefaultPollIntervalUs = 1000;
+
+  static auto loopThread(void* scheduler) -> void* {
+    reinterpret_cast<MPIScheduler*>(scheduler)->loop();
+    return nullptr;
+  }
+
+  /**
+   * Hand a request to the loop thread of this rank.
+   *
+   * @param blocking Whether to return only once the loop thread has carried
+   *  the request out, which is what the group protocol expects everywhere it
+   *  would otherwise synchronize on the group communicator
+   */
+  void submitLocal(LocalRequest request, bool blocking) {
+    std::shared_ptr<bool> done;
+    if (blocking) {
+      done = std::make_shared<bool>(false);
+      request.done = done;
+    }
+
+    {
+      const std::scoped_lock lock(m_localMutex);
+      if (m_loopDone) {
+        // the executor side has been shut down already, together with everything on it
+        return;
+      }
+      m_localQueue.push_back(std::move(request));
+      m_localPending.fetch_add(1, std::memory_order_release);
+    }
+
+    if (!blocking) {
+      return;
+    }
+
+    std::unique_lock<std::mutex> lock(m_localMutex);
+    m_localDone.wait(lock, [this, &done]() { return *done || m_loopDone; });
+  }
+
+  /**
+   * Shut down everything that is left on the executor side
+   */
+  void killCalls() {
+    for (auto& call : m_asyncCalls) {
+      if (call != nullptr) {
+        call->finalizeInternal();
+        call = nullptr;
+      }
+    }
+  }
+
+  /**
+   * Leave the loop: nothing that the compute thread of this rank hands over
+   * any more is carried out, and nothing it waits for stays pending
+   */
+  void finishLoop() {
+    completeLocal();
+    {
+      const std::scoped_lock lock(m_localMutex);
+      m_loopDone = true;
+      m_localQueue.clear();
+      m_localPending.store(0, std::memory_order_release);
+    }
+    m_localDone.notify_all();
+  }
+
+  auto nextLocalRequest(LocalRequest& request) -> bool {
+    if (m_localPending.load(std::memory_order_acquire) == 0) {
+      return false;
+    }
+
+    const std::scoped_lock lock(m_localMutex);
+
+    if (m_localQueue.empty()) {
+      return false;
+    }
+
+    request = std::move(m_localQueue.front());
+    m_localQueue.pop_front();
+    m_localPending.fetch_sub(1, std::memory_order_release);
+    return true;
+  }
+
+  /**
+   * Wait for the next thing to do, from either transport.
+   *
+   * @return True if a request of the local compute thread was taken, false if
+   *  an MPI message was matched
+   */
+  auto pollNext(LocalRequest& request, MPI_Message& message, MPI_Status& status) -> bool {
+    Backoff backoff(m_pollIntervalUs);
+
+    while (true) {
+      if (nextLocalRequest(request)) {
+        return true;
+      }
+
+      int flag = 0;
+      MPI_Improbe(MPI_ANY_SOURCE, MPI_ANY_TAG, m_privateGroupComm, &flag, &message, &status);
+
+      if (flag != 0) {
+        return false;
+      }
+
+      backoff.pause();
+    }
+  }
+
+  /**
+   * Release the compute thread of this rank once its request has been carried
+   * out.
+   *
+   * The loop collects the messages of several operations before it acts on
+   * one of them, so an outstanding local request only belongs to the
+   * operation it was issued for.
+   */
+  void completeLocal(int id, int tag) {
+    if (!m_pendingLocal || m_pendingId != id || m_pendingTag != tag) {
+      return;
+    }
+
+    completeLocal();
+  }
+
+  void completeLocal() {
+    if (!m_pendingLocal) {
+      return;
+    }
+
+    {
+      const std::scoped_lock lock(m_localMutex);
+      *m_pendingLocal = true;
+    }
+    m_localDone.notify_all();
+    m_pendingLocal.reset();
+    m_pendingId = -1;
+    m_pendingTag = -1;
+  }
+
   /**
    * Wait for a matching message without blocking inside MPI
    */
@@ -597,22 +1018,83 @@ class MPIScheduler {
 
   [[nodiscard]] auto groupSize() const -> int { return m_groupSize; }
 
+  /**
+   * Register a module and assign its id.
+   *
+   * Before the dispatcher starts the executors, every rank, the executors
+   * included, creates the same modules in the same order, so the ids agree by
+   * construction. A module that comes later only exists where the application
+   * runs; its registration then is a step of the group protocol, which an
+   * executor that computes as well carries out on behalf of its own rank.
+   */
   auto addScheduled(Scheduled* scheduled) -> int {
-    const int id = static_cast<int>(m_asyncCalls.size());
-    m_asyncCalls.push_back(scheduled);
+    const int id = m_nextId++;
+
+    const int* tagUpperBound = nullptr;
+    int flag = 0;
+    MPI_Comm_get_attr(MPI_COMM_WORLD, MPI_TAG_UB, static_cast<void*>(&tagUpperBound), &flag);
+    if (flag != 0 && (id + 1) * NumTags + NumStaticTags > *tagUpperBound) {
+      logError() << "ASYNC: Too many modules for the MPI tags of this implementation:" << id + 1;
+    }
 
     scheduled->allocParamBuffer();
+
+    if (m_isCompute) {
+      m_liveCalls++;
+    }
+
+    if (!m_dispatched) {
+      m_asyncCalls.push_back(scheduled);
+      return id;
+    }
+
+    if (m_executorExclusive) {
+      logError() << "ASYNC: A module was attached after the dispatcher started its executors. Only"
+                 << "executors that compute as well can take on such modules; leave"
+                 << "EXECUTOR_EXCLUSIVE unset.";
+    }
+
+    if (isColocated()) {
+      LocalRequest request;
+      request.tag = RegisterTag;
+      request.id = id;
+      request.scheduled = scheduled;
+
+      submitLocal(std::move(request), true);
+    } else {
+      MPI_Send(nullptr,
+               0,
+               MPI_BYTE,
+               m_executorRank,
+               id * NumTags + RegisterTag + NumStaticTags,
+               m_privateGroupComm);
+      MPI_Barrier(m_privateGroupComm);
+    }
 
     return id;
   }
 
-  void addBuffer(int id, unsigned int bufferId, bool sync = true) {
+  void addBuffer(
+      int id, unsigned int bufferId, bool sync, const void* origin, size_t size, bool clone) {
     assert(id >= 0);
 
     if (bufferId >= m_heapBufferIds.size()) {
       assert(bufferId == m_heapBufferIds.size()); // IDs always increment by 1
 
       m_heapBufferIds.push_back(bufferId);
+    }
+
+    if (isColocated()) {
+      LocalRequest request;
+      request.tag = AddTag;
+      request.id = id;
+      request.sync = sync;
+      request.origin = origin;
+      request.size = size;
+      request.clone = clone;
+
+      submitLocal(std::move(request), true);
+      return;
     }
 
     int syncInt = static_cast<int>(sync);
@@ -626,8 +1108,21 @@ class MPIScheduler {
     MPI_Barrier(m_privateGroupComm);
   }
 
-  void resizeBuffer(int id, unsigned int bufferId) {
+  void resizeBuffer(int id, unsigned int bufferId, const void* origin, size_t size, bool clone) {
     assert(id >= 0);
+
+    if (isColocated()) {
+      LocalRequest request;
+      request.tag = ResizeTag;
+      request.id = id;
+      request.bufferId = bufferId;
+      request.origin = origin;
+      request.size = size;
+      request.clone = clone;
+
+      submitLocal(std::move(request), true);
+      return;
+    }
 
     MPI_Send(&bufferId,
              1,
@@ -641,6 +1136,16 @@ class MPIScheduler {
 
   void removeBuffer(int id, unsigned int bufferId) {
     assert(id >= 0);
+
+    if (isColocated()) {
+      LocalRequest request;
+      request.tag = RemoveTag;
+      request.id = id;
+      request.bufferId = bufferId;
+
+      submitLocal(std::move(request), true);
+      return;
+    }
 
     MPI_Send(&bufferId,
              1,
@@ -702,6 +1207,11 @@ class MPIScheduler {
   void sendInitParam(int id, const Parameter& param) {
     assert(id >= 0);
 
+    if (isColocated()) {
+      submitLocal(paramRequest(InitTag, id, param), true);
+      return;
+    }
+
     // For simplification, we send the Parameter struct as a buffer
     // TODO find a nice way for hybrid systems
     MPI_Send(const_cast<Parameter*>(&param),
@@ -720,6 +1230,11 @@ class MPIScheduler {
   template <typename Parameter>
   void sendParam(int id, const Parameter& param) {
     assert(id >= 0);
+
+    if (isColocated()) {
+      submitLocal(paramRequest(ParamTag, id, param), true);
+      return;
+    }
 
     // For simplification, we send the Parameter struct as a buffer
     // TODO find a nice way for hybrid systems
@@ -742,6 +1257,12 @@ class MPIScheduler {
 
     MPI_Request request = MPI_REQUEST_NULL;
 
+    if (isColocated()) {
+      // Not waiting here is the whole point of the asynchronous copy mode
+      submitLocal(paramRequest(ParamTag, id, param), false);
+      return request;
+    }
+
     MPI_Isend(const_cast<Parameter*>(&param),
               sizeof(Parameter),
               MPI_BYTE,
@@ -757,6 +1278,15 @@ class MPIScheduler {
 
   void wait(int id) {
     assert(id >= 0);
+
+    if (isColocated()) {
+      LocalRequest request;
+      request.tag = WaitTag;
+      request.id = id;
+
+      submitLocal(std::move(request), true);
+      return;
+    }
 
     MPI_Send(nullptr,
              0,
@@ -779,16 +1309,36 @@ class MPIScheduler {
       return;
     }
 
+    m_liveCalls--;
+
+    if (isColocated()) {
+      LocalRequest request;
+      request.tag = FinalizeTag;
+      request.id = id;
+
+      // The executor side owns the buffers of this rank and finalizes the
+      // module once the whole group is done with it; wait for that
+      submitLocal(std::move(request), true);
+      return;
+    }
+
     MPI_Send(nullptr,
              0,
              MPI_BYTE,
              m_executorRank,
              id * NumTags + FinalizeTag + NumStaticTags,
              m_privateGroupComm);
+  }
 
-    // Remove one async call from the list (it does not matter which one,
-    // since we do not need this list on non-executors anyway
-    m_asyncCalls.pop_back();
+  template <typename Parameter>
+  auto paramRequest(int tag, int id, const Parameter& param) -> LocalRequest {
+    LocalRequest request;
+    request.tag = tag;
+    request.id = id;
+    request.param.resize(sizeof(Parameter));
+    memcpy(request.param.data(), &param, sizeof(Parameter));
+
+    return request;
   }
 
   void addManagedBuffer(size_t size) {
@@ -849,8 +1399,11 @@ class MPIScheduler {
   static const int ParamTag = 5;
   static const int WaitTag = 6;
   static const int FinalizeTag = 7;
+  static const int RegisterTag = 8;
   /** The number of tags required for each async module */
-  static const int NumTags = FinalizeTag + 1;
+  static const int NumTags = RegisterTag + 1;
+  /** Only ever handed over locally: the dispatcher is finalized */
+  static const int ShutdownTag = NumTags;
 };
 
 } // namespace async::as

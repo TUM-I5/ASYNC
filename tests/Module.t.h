@@ -6,6 +6,7 @@
 #include "async/ExecInfo.h"
 #include <array>
 #include <cstddef>
+#include <optional>
 #ifdef USE_MPI
 #include <mpi.h>
 #endif // USE_MPI
@@ -32,14 +33,38 @@ inline auto testConfig() -> const async::Config& {
   return Config;
 }
 
+/**
+ * Whether this rank runs the executor callbacks
+ */
+inline auto executes(const async::Dispatcher& dispatcher) -> bool {
+  return testConfig().mode() != async::Mode::MPI || dispatcher.isExecutor();
+}
+
+/**
+ * The number of ranks whose buffers the executor of this rank holds. The
+ * tests run on a single node, so all ranks form one group.
+ */
+inline auto contributors(int size) -> int {
+  if (testConfig().mode() != async::Mode::MPI) {
+    return 1;
+  }
+  return testConfig().groupLayout().exclusive ? size - 1 : size;
+}
+
+/**
+ * Whether modules can be attached after the dispatcher started the executors
+ */
+inline auto lateModules() -> bool {
+  return testConfig().mode() != async::Mode::MPI || !testConfig().groupLayout().exclusive;
+}
+
 class Module : private async::Module<Module, Param, Param> {
   public:
   bool mSetUp{false};
   bool mExecInit{false};
   bool mExec{false};
   bool mTearDown{false};
-
-  int mCpu{};
+  int mExecCommSize{0};
 
   Module() = default;
 
@@ -69,10 +94,11 @@ class Module : private async::Module<Module, Param, Param> {
     mExecInit = true;
   }
 
-  void exec(const Param& param) {
+  void exec(const async::ExecInfo& info, const Param& param) {
     mExec = true;
-
-    mCpu = sched_getcpu();
+#ifdef USE_MPI
+    MPI_Comm_size(info.comm(), &mExecCommSize);
+#endif // USE_MPI
   }
 
   void setUp() override {
@@ -85,14 +111,17 @@ class Module : private async::Module<Module, Param, Param> {
 
 class BufferModule : private async::Module<BufferModule, Param, Param> {
   public:
-  unsigned int mInitBufferSize{0};
-  unsigned int mBufferSize{0};
-  unsigned int mCloneBufferSize{0};
-  unsigned int mCloneSyncBufferSize{0};
-  int mBuffer{};
-  int mManagedBuffer{};
+  std::size_t mInitBufferSize{0};
+  std::size_t mBufferSize{0};
+  std::size_t mCloneBufferSize{0};
+  std::size_t mCloneSyncBufferSize{0};
+  std::size_t mBuffer2Size{0};
+  bool mValues{false};
+  bool mExec{false};
 
   BufferModule() = default;
+
+  void attachTo(async::Dispatcher& dispatcher) { dispatcher.attach(*this); }
 
   void run() {
     init();
@@ -134,53 +163,46 @@ class BufferModule : private async::Module<BufferModule, Param, Param> {
 
     call(param);
 
-    if (testConfig().mode() == async::Mode::MPI) {
-      // Set the params on non-executors
-      execInit(param);
-      execInternal(param, false);
-    }
-
     wait();
 
     finalize();
   }
 
-  void execInit(const Param& param) { mInitBufferSize = bufferSize(0); }
+  void execInit(const async::ExecInfo& info, const Param& param) {
+    mInitBufferSize = info.bufferSize(0);
+  }
 
-  void exec(const async::ExecInfo& info, const Param& param) { execInternal(param); }
+  void exec(const async::ExecInfo& info, const Param& param) {
+    mExec = true;
+    mBufferSize = info.bufferSize(1);
+    mCloneBufferSize = info.bufferSize(2);
+    mCloneSyncBufferSize = info.bufferSize(3);
+    mBuffer2Size = info.bufferSize(5);
+
+    mValues = allEqual(info, 1, 42) && allEqual(info, 4, 5) && allEqual(info, 5, 43);
+  }
 
   void setUp() override { setExecutor(*this); }
 
   void tearDown() override {}
 
   private:
-  void execInternal(const Param& param, bool isExecutor = true) {
-    mBufferSize = bufferSize(1);
-    for (unsigned int i = 0; i < mBufferSize / sizeof(int); i++) {
-      TS_ASSERT_EQUALS(42, *(static_cast<const int*>(buffer(1)) + i));
-    }
-    mCloneBufferSize = bufferSize(2);
-    mCloneSyncBufferSize = bufferSize(3);
-
-    const unsigned int bufferSize2 = bufferSize(5);
-    TS_ASSERT_EQUALS(bufferSize2, mBufferSize);
-    for (unsigned int i = 0; i < bufferSize2 / sizeof(int); i++) {
-      TS_ASSERT_EQUALS(43, *(static_cast<const int*>(buffer(5)) + i));
-    }
-
-    if (isExecutor) {
-      const unsigned int managedBufferSize = bufferSize(4);
-      for (unsigned int i = 0; i < managedBufferSize / sizeof(int); i++) {
-        TS_ASSERT_EQUALS(*(static_cast<const int*>(buffer(4)) + i), 5);
+  static auto allEqual(const async::ExecInfo& info, unsigned int id, int value) -> bool {
+    const auto* values = static_cast<const int*>(info.buffer(id));
+    for (std::size_t i = 0; i < info.bufferSize(id) / sizeof(int); i++) {
+      if (values[i] != value) {
+        return false;
       }
     }
+    return true;
   }
 };
 
 class ResizeBufferModule : private async::Module<ResizeBufferModule, Param, Param> {
   public:
-  std::array<unsigned int, 2> mBuffer0Size{};
-  std::array<unsigned int, 2> mBuffer1Size{};
+  std::array<std::size_t, 2> mBuffer0Size{};
+  std::array<std::size_t, 2> mBuffer1Size{};
+  std::array<bool, 2> mValues{};
 
   ResizeBufferModule() = default;
 
@@ -205,11 +227,6 @@ class ResizeBufferModule : private async::Module<ResizeBufferModule, Param, Para
     param.step = 0;
     call(param);
 
-    if (testConfig().mode() == async::Mode::MPI) {
-      // Set the params on non-executors
-      execInternal(param, false);
-    }
-
     wait();
 
     const auto buffer2 = std::array<int, 2>{4, 3};
@@ -223,51 +240,50 @@ class ResizeBufferModule : private async::Module<ResizeBufferModule, Param, Para
     param.step = 1;
     call(param);
 
-    if (testConfig().mode() == async::Mode::MPI) {
-      // Set the params on non-executors
-      execInternal(param, false);
-    }
-
     wait();
 
     finalize();
   }
 
-  void execInit(const Param& param) {}
+  void execInit(const async::ExecInfo& info, const Param& param) {}
 
-  void exec(const async::ExecInfo& info, const Param& param) { execInternal(param); }
+  void exec(const async::ExecInfo& info, const Param& param) {
+    mBuffer0Size.at(param.step) = info.bufferSize(0);
+    mBuffer1Size.at(param.step) = info.bufferSize(1);
+
+    const auto* buffer0 = static_cast<const int*>(info.buffer(0));
+    const auto* buffer1 = static_cast<const int*>(info.buffer(1));
+    bool valid = true;
+    switch (param.step) {
+    case 0:
+      for (std::size_t i = 0; i < info.bufferSize(0) / sizeof(int); i++) {
+        valid = valid && buffer0[i] == 42;
+      }
+      valid = valid && buffer1[0] == 1 && buffer1[1] == 2;
+      break;
+    case 1:
+      for (std::size_t i = 0; i < info.bufferSize(0) / sizeof(int); i += 2) {
+        valid = valid && buffer0[i] == 4 && buffer0[i + 1] == 3;
+      }
+      valid = valid && buffer1[0] == 1;
+      break;
+    default:
+      valid = false;
+      break;
+    }
+    mValues.at(param.step) = valid;
+  }
 
   void setUp() override { setExecutor(*this); }
 
   void tearDown() override {}
-
-  private:
-  void execInternal(const Param& param, bool isExecutor = true) {
-    mBuffer0Size.at(param.step) = bufferSize(0);
-    mBuffer1Size.at(param.step) = bufferSize(1);
-    switch (param.step) {
-    case 0:
-      TS_ASSERT_EQUALS(*static_cast<const int*>(buffer(0)), 42);
-      TS_ASSERT_EQUALS(*static_cast<const int*>(buffer(1)), 1);
-      TS_ASSERT_EQUALS(*(static_cast<const int*>(buffer(1)) + 1), 2);
-      break;
-    case 1:
-      TS_ASSERT_EQUALS(*static_cast<const int*>(buffer(0)), 4);
-      TS_ASSERT_EQUALS(*(static_cast<const int*>(buffer(0)) + 1), 3);
-      TS_ASSERT_EQUALS(*static_cast<const int*>(buffer(1)), 1);
-      break;
-    default:
-      TS_ASSERT(false);
-      break;
-    }
-  }
 };
 
 class RemoveBufferModule : private async::Module<RemoveBufferModule, Param, Param> {
   public:
-  unsigned int mBuffer0Size{42};
-  unsigned int mBuffer1Size{42};
-  unsigned int mManagedBufferSize{};
+  std::size_t mBuffer0Size{42};
+  std::size_t mBuffer1Size{42};
+  std::size_t mManagedBufferSize{};
 
   RemoveBufferModule() = default;
 
@@ -294,23 +310,17 @@ class RemoveBufferModule : private async::Module<RemoveBufferModule, Param, Para
 
     call(param);
 
-    if (testConfig().mode() == async::Mode::MPI) {
-      // Set the params on non-executors
-      execInit(param);
-      exec(param);
-    }
-
     wait();
 
     finalize();
   }
 
-  void execInit(const Param& param) {}
+  void execInit(const async::ExecInfo& info, const Param& param) {}
 
-  void exec(const Param& param) {
-    mBuffer0Size = bufferSize(0);
-    mBuffer1Size = bufferSize(1);
-    mManagedBufferSize = bufferSize(2);
+  void exec(const async::ExecInfo& info, const Param& param) {
+    mBuffer0Size = info.bufferSize(0);
+    mBuffer1Size = info.bufferSize(1);
+    mManagedBufferSize = info.bufferSize(2);
   }
 
   void setUp() override { setExecutor(*this); }
@@ -432,7 +442,7 @@ class AffinityModule : private async::Module<AffinityModule, Param, Param> {
  */
 class TestModule : public CxxTest::TestSuite {
   int m_rank{};
-  int m_size{};
+  int m_size{1};
 
   public:
   void setUp() override {
@@ -456,32 +466,35 @@ class TestModule : public CxxTest::TestSuite {
     dispatcher.init();
 
     if (dispatcher.dispatch()) {
-      TS_ASSERT(!dispatcher.isExecutor());
+      TS_ASSERT(dispatcher.isCompute());
 
       module.run();
     } else {
       TS_ASSERT(dispatcher.isExecutor());
-
-      if (testConfig().mode() == async::Mode::MPI) {
-        TS_ASSERT_EQUALS(m_rank + 1, m_size);
-      } else {
-        TS_FAIL("No executors in SYNC and THREAD mode!");
-      }
+      TS_ASSERT(!dispatcher.isCompute());
     }
+
+    if (testConfig().mode() == async::Mode::MPI) {
+      // the executor is the last rank of the group
+      TS_ASSERT_EQUALS(dispatcher.isExecutor(), m_rank + 1 == m_size);
+    } else {
+      TS_ASSERT(!dispatcher.isExecutor());
+    }
+
+    const bool executor = executes(dispatcher);
 
     dispatcher.finalize();
 
     TS_ASSERT(module.mSetUp);
-    if (dispatcher.isExecutor()) {
+    if (executor) {
       TS_ASSERT(module.mExecInit);
       TS_ASSERT(module.mExec);
+#ifdef USE_MPI
+      // one executor for the group in MPI mode, otherwise every rank runs its own
+      TS_ASSERT_EQUALS(module.mExecCommSize, testConfig().mode() == async::Mode::MPI ? 1 : m_size);
+#endif // USE_MPI
     }
     TS_ASSERT(module.mTearDown);
-
-    // disabled; might fail for pre-pinned threads
-    // if (testConfig().mode() == async::Mode::Thread) {
-    //   TS_ASSERT_EQUALS(module.mCpu, get_nprocs() - 1);
-    // }
   }
 
   void testBuffer() const {
@@ -495,22 +508,20 @@ class TestModule : public CxxTest::TestSuite {
       module.run();
     }
 
-    unsigned int initBufferSize = 2 * sizeof(int);
-    unsigned int bufferSize = sizeof(int);
-    const unsigned int cloneBufferSize = sizeof(int);
-    const unsigned int cloneSyncBufferSize = sizeof(long);
-
-    if (dispatcher.isExecutor() && testConfig().mode() == async::Mode::MPI) {
-      initBufferSize *= m_size - 1;
-      bufferSize *= m_size - 1;
-    }
+    const bool executor = executes(dispatcher);
+    const auto group = static_cast<std::size_t>(contributors(m_size));
 
     dispatcher.finalize();
 
-    TS_ASSERT_EQUALS(module.mInitBufferSize, initBufferSize);
-    TS_ASSERT_EQUALS(module.mBufferSize, bufferSize);
-    TS_ASSERT_EQUALS(module.mCloneBufferSize, cloneBufferSize);
-    TS_ASSERT_EQUALS(module.mCloneSyncBufferSize, cloneSyncBufferSize);
+    if (executor) {
+      TS_ASSERT(module.mExec);
+      TS_ASSERT_EQUALS(module.mInitBufferSize, 2 * sizeof(int) * group);
+      TS_ASSERT_EQUALS(module.mBufferSize, sizeof(int) * group);
+      TS_ASSERT_EQUALS(module.mCloneBufferSize, sizeof(int));
+      TS_ASSERT_EQUALS(module.mCloneSyncBufferSize, sizeof(long));
+      TS_ASSERT_EQUALS(module.mBuffer2Size, sizeof(int) * group);
+      TS_ASSERT(module.mValues);
+    }
   }
 
   void testResizeBuffer() const {
@@ -524,18 +535,19 @@ class TestModule : public CxxTest::TestSuite {
       module.run();
     }
 
-    unsigned int bufferSize = sizeof(int);
-
-    if (dispatcher.isExecutor() && testConfig().mode() == async::Mode::MPI) {
-      bufferSize *= m_size - 1;
-    }
+    const bool executor = executes(dispatcher);
+    const auto group = static_cast<std::size_t>(contributors(m_size));
 
     dispatcher.finalize();
 
-    TS_ASSERT_EQUALS(module.mBuffer0Size[0], bufferSize);
-    TS_ASSERT_EQUALS(module.mBuffer0Size[1], 2 * bufferSize);
-    TS_ASSERT_EQUALS(module.mBuffer1Size[0], 2 * sizeof(int));
-    TS_ASSERT_EQUALS(module.mBuffer1Size[1], sizeof(int));
+    if (executor) {
+      TS_ASSERT_EQUALS(module.mBuffer0Size[0], sizeof(int) * group);
+      TS_ASSERT_EQUALS(module.mBuffer0Size[1], 2 * sizeof(int) * group);
+      TS_ASSERT_EQUALS(module.mBuffer1Size[0], 2 * sizeof(int));
+      TS_ASSERT_EQUALS(module.mBuffer1Size[1], sizeof(int));
+      TS_ASSERT(module.mValues[0]);
+      TS_ASSERT(module.mValues[1]);
+    }
   }
 
   void testRemoveBuffer() const {
@@ -549,17 +561,16 @@ class TestModule : public CxxTest::TestSuite {
       module.run();
     }
 
-    unsigned int buffer1Size = sizeof(int);
-
-    if (dispatcher.isExecutor() && testConfig().mode() == async::Mode::MPI) {
-      buffer1Size *= m_size - 1;
-    }
+    const bool executor = executes(dispatcher);
+    const auto group = static_cast<std::size_t>(contributors(m_size));
 
     dispatcher.finalize();
 
-    TS_ASSERT_EQUALS(module.mBuffer0Size, 0);
-    TS_ASSERT_EQUALS(module.mBuffer1Size, buffer1Size);
-    TS_ASSERT_EQUALS(module.mManagedBufferSize, 0);
+    if (executor) {
+      TS_ASSERT_EQUALS(module.mBuffer0Size, 0);
+      TS_ASSERT_EQUALS(module.mBuffer1Size, sizeof(int) * group);
+      TS_ASSERT_EQUALS(module.mManagedBufferSize, 0);
+    }
   }
 
   void testGrowEmptyBuffer() const {
@@ -573,14 +584,14 @@ class TestModule : public CxxTest::TestSuite {
       module.run();
     }
 
-    const bool executes = testConfig().mode() != async::Mode::MPI || dispatcher.isExecutor();
-    const auto contributors = testConfig().mode() == async::Mode::MPI ? m_size - 1 : 1;
+    const bool executor = executes(dispatcher);
+    const auto group = static_cast<std::size_t>(contributors(m_size));
 
     dispatcher.finalize();
 
-    if (executes) {
+    if (executor) {
       TS_ASSERT(module.mExecuted);
-      TS_ASSERT_EQUALS(module.mBufferSize, contributors * GrowBufferModule::Values * sizeof(int));
+      TS_ASSERT_EQUALS(module.mBufferSize, group * GrowBufferModule::Values * sizeof(int));
       TS_ASSERT(module.mValid);
     }
   }
@@ -596,15 +607,81 @@ class TestModule : public CxxTest::TestSuite {
       module.run();
     }
 
-    const bool executes = testConfig().mode() == async::Mode::Thread ||
-                          (testConfig().mode() == async::Mode::MPI && dispatcher.isExecutor());
+    const bool pinned = testConfig().mode() == async::Mode::Thread ||
+                        (testConfig().mode() == async::Mode::MPI && dispatcher.isExecutor());
 
     dispatcher.finalize();
 
     // the thread that asked for the affinity keeps its own
     TS_ASSERT_EQUALS(module.mMainCpusBefore, module.mMainCpusAfter);
-    if (executes) {
+    if (pinned) {
       TS_ASSERT_EQUALS(module.mCpu, AffinityModule::Core);
+    }
+  }
+
+  /**
+   * A module created once the executors run, as an application does that
+   * sets up its output during the simulation
+   */
+  void testAttachAfterDispatch() const {
+    if (!lateModules()) {
+      return;
+    }
+
+    async::Dispatcher dispatcher;
+    dispatcher.init();
+
+    std::optional<BufferModule> module;
+    if (dispatcher.dispatch()) {
+      module.emplace();
+      module->attachTo(dispatcher);
+      module->run();
+    }
+
+    const bool executor = executes(dispatcher);
+    const auto group = static_cast<std::size_t>(contributors(m_size));
+
+    dispatcher.finalize();
+
+    if (executor) {
+      TS_ASSERT(module->mExec);
+      TS_ASSERT_EQUALS(module->mBufferSize, sizeof(int) * group);
+      TS_ASSERT(module->mValues);
+    }
+  }
+
+  /**
+   * A module that comes after all earlier ones are finalized: the executor
+   * has to keep running for it
+   */
+  void testAttachAfterFinalize() const {
+    if (!lateModules()) {
+      return;
+    }
+
+    async::Dispatcher dispatcher;
+
+    Module first;
+
+    dispatcher.init();
+
+    std::optional<BufferModule> second;
+    if (dispatcher.dispatch()) {
+      first.run();
+
+      second.emplace();
+      second->attachTo(dispatcher);
+      second->run();
+    }
+
+    const bool executor = executes(dispatcher);
+
+    dispatcher.finalize();
+
+    if (executor) {
+      TS_ASSERT(first.mExec);
+      TS_ASSERT(second->mExec);
+      TS_ASSERT(second->mValues);
     }
   }
 

@@ -12,7 +12,6 @@
 
 #include "MPIBase.h"
 #include "async/Config.h"
-#include "async/as/Base.h"
 
 namespace async::as {
 
@@ -28,7 +27,7 @@ class MPI : public MPIBase<Executor, InitParameter, Parameter> {
 
   auto addSyncBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned override {
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone);
-    return Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, false);
+    return MPIBase<Executor, InitParameter, Parameter>::addBufferLocal(buffer, size, false);
   }
 
   auto addBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned override {
@@ -37,30 +36,30 @@ class MPI : public MPIBase<Executor, InitParameter, Parameter> {
     }
 
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone);
-    return Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, false);
+    return MPIBase<Executor, InitParameter, Parameter>::addBufferLocal(buffer, size, false);
   }
 
   void resizeBuffer(unsigned int id, const void* buffer, size_t size) override {
-    if (Base<Executor, InitParameter, Parameter>::origin(id) == nullptr) {
+    if (MPIBase<Executor, InitParameter, Parameter>::localOrigin(id) == nullptr) {
       // Resize the managed buffer
       MPIBase<Executor, InitParameter, Parameter>::scheduler().resizeManagedBuffer(
-          Base<Executor, InitParameter, Parameter>::bufferSize(id), size);
+          MPIBase<Executor, InitParameter, Parameter>::localBufferSize(id), size);
     }
 
     MPIBase<Executor, InitParameter, Parameter>::resizeBuffer(id, buffer, size);
   }
 
   void removeBuffer(unsigned int id) override {
-    if (Base<Executor, InitParameter, Parameter>::origin(id) == nullptr) {
+    if (MPIBase<Executor, InitParameter, Parameter>::localOrigin(id) == nullptr) {
       MPIBase<Executor, InitParameter, Parameter>::scheduler().removeManagedBuffer(
-          Base<Executor, InitParameter, Parameter>::bufferSize(id));
+          MPIBase<Executor, InitParameter, Parameter>::localBufferSize(id));
     }
 
     MPIBase<Executor, InitParameter, Parameter>::removeBuffer(id);
   }
 
   auto managedBuffer(unsigned int id) -> void* override {
-    if (Base<Executor, InitParameter, Parameter>::origin(id) == nullptr) {
+    if (MPIBase<Executor, InitParameter, Parameter>::localOrigin(id) == nullptr) {
       return MPIBase<Executor, InitParameter, Parameter>::scheduler().managedBuffer();
     }
 
@@ -72,7 +71,7 @@ class MPI : public MPIBase<Executor, InitParameter, Parameter> {
       return MPIBase<Executor, InitParameter, Parameter>::buffer(id);
     }
 
-    return Base<Executor, InitParameter, Parameter>::origin(id);
+    return MPIBase<Executor, InitParameter, Parameter>::localOrigin(id);
   }
 
   /**

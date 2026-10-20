@@ -63,7 +63,7 @@ class Module : public ModuleBase {
     m_async->setAffinityIfNecessary(cpuMask);
   }
 
-  void init() { setUp(); }
+  void init() { setUpOnce(); }
 
   auto addSyncBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned int {
     return m_async->addSyncBuffer(buffer, size, clone);
@@ -81,7 +81,13 @@ class Module : public ModuleBase {
 
   [[nodiscard]] auto numBuffers() const -> std::size_t { return m_async->numBuffers(); }
 
-  [[nodiscard]] auto bufferSize(unsigned int id) const -> size_t { return m_async->bufferSize(id); }
+  /**
+   * The size this rank contributes to a buffer. Inside the executor
+   * callbacks, the ExecInfo argument describes what the executor holds.
+   */
+  [[nodiscard]] auto bufferSize(unsigned int id) const -> size_t {
+    return m_async->localBufferSize(id);
+  }
 
   [[nodiscard]] auto bufferOrigin(unsigned int id) const -> BufferOrigin& {
     return m_async->bufferOrigin(id);
@@ -92,7 +98,13 @@ class Module : public ModuleBase {
     return static_cast<T>(m_async->managedBuffer(id));
   }
 
-  [[nodiscard]] auto buffer(unsigned int id) const -> const void* { return m_async->buffer(id); }
+  /**
+   * The memory this rank contributes to a buffer. Inside the executor
+   * callbacks, the ExecInfo argument describes what the executor holds.
+   */
+  [[nodiscard]] auto buffer(unsigned int id) const -> const void* {
+    return m_async->localBuffer(id);
+  }
 
   /**
    * Sends the complete buffer
