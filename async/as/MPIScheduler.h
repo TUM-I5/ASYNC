@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <map>
 #include <thread>
 #include <vector>
@@ -204,10 +205,13 @@ class MPIScheduler {
    * A list of possible buffer ids
    *
    * With MPI_Isend we need to provide a memory location for buffer ids
-   * that is not on the stack. We can use this vector which contains:
+   * that is not on the stack. We can use this list which contains:
    * id[0] = 0, id[1] = 1, ...
+   *
+   * An id has to stay where it is until its send completes, also while other
+   * buffers are added, hence a deque.
    */
-  std::vector<unsigned int> m_heapBufferIds;
+  std::deque<unsigned int> m_heapBufferIds;
 
   /** Class is finalized? */
   bool m_finalized{false};
