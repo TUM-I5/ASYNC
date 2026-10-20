@@ -67,6 +67,10 @@ class TestMPI : public CxxTest::TestSuite {
 
   bool m_largeBufferTest{};
 
+  /** Sizes (per compute rank) of the steps of the chunked resize test */
+  std::vector<size_t> m_chunkSizes;
+  int m_chunkSteps{0};
+
   public:
   void setUp() override {
     MPI_Comm_rank(MPI_COMM_WORLD, &m_rank);
@@ -77,6 +81,8 @@ class TestMPI : public CxxTest::TestSuite {
     m_async = nullptr;
     m_buffers.clear();
     m_largeBufferTest = false;
+    m_chunkSizes.clear();
+    m_chunkSteps = 0;
 
     m_scheduler = new async::as::MPIScheduler();
     m_scheduler->setCommunicator(MPI_COMM_WORLD, 2);
@@ -94,7 +100,22 @@ class TestMPI : public CxxTest::TestSuite {
     m_values.push_back(value);
     pthread_spin_unlock(&m_valueLock);
 
-    if (m_largeBufferTest) {
+    if (!m_chunkSizes.empty()) {
+      if (value > 0) {
+        // step value holds a buffer of m_chunkSizes[value - 1] bytes per compute rank, all of them
+        // 'a' + value - 1
+        const auto perRank = m_chunkSizes.at(value - 1);
+        const auto total = m_async->bufferSize(0);
+        TS_ASSERT_EQUALS(total % perRank, 0);
+        const char* buf = reinterpret_cast<const char*>(m_async->buffer(0));
+        size_t wrong = 0;
+        for (size_t i = 0; i < total; i++) {
+          wrong += buf[i] != static_cast<char>('a' + value - 1) ? 1 : 0;
+        }
+        TS_ASSERT_EQUALS(wrong, 0);
+        m_chunkSteps++;
+      }
+    } else if (m_largeBufferTest) {
       // Group size without the communicator
       const int groupSize = static_cast<int>(m_async->bufferSize(0) / largeBuffer.size());
       TS_ASSERT_LESS_THAN_EQUALS(1, groupSize);
@@ -760,6 +781,47 @@ class TestMPI : public CxxTest::TestSuite {
       async.wait();
 
       delete[] buffer;
+    }
+  }
+
+  /**
+   * A buffer of several chunks that shrinks to fewer and grows again, which
+   * changes the number of sends the asynchronous copy needs per rank
+   */
+  void testResizeChunks() {
+    Executor<TestMPI> executor(this);
+
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async;
+    async.setScheduler(*m_scheduler);
+
+    async.setExecutor(executor);
+    m_async = &async;
+
+    const size_t maxSend = async::Config{}.maxSend();
+    m_chunkSizes = {(5 * maxSend) / 2, maxSend / 2, (3 * maxSend) / 2};
+
+    if (m_scheduler->isExecutor()) {
+      m_scheduler->loop();
+
+      TS_ASSERT_EQUALS(m_chunkSteps, 3);
+    } else {
+      std::vector<char> data(m_chunkSizes[0], 'a');
+      async.addBuffer(data.data(), data.size());
+
+      Parameter parameter;
+      async.callInit(parameter);
+      async.wait();
+
+      for (int step = 1; step <= 3; step++) {
+        const auto size = m_chunkSizes[step - 1];
+        data.assign(size, static_cast<char>('a' + step - 1));
+        async.resizeBuffer(0, data.data(), size);
+        async.sendBuffer(0, size);
+
+        parameter.value = step;
+        async.call(parameter);
+        async.wait();
+      }
     }
   }
 

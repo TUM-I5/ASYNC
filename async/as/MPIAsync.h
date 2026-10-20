@@ -33,6 +33,9 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
     /** A sychnronized buffer */
     bool sync;
 
+    /** Only the first rank of the group sends a clone buffer */
+    bool clone;
+
     /**
      * The number of asynchronous request required for this buffer.
      *
@@ -67,6 +70,7 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
     // We directly send sync buffers
     BufInfo bufInfo{};
     bufInfo.sync = true;
+    bufInfo.clone = clone;
     bufInfo.requests = 0;
     m_buffer.push_back(bufInfo);
 
@@ -82,18 +86,11 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone, false);
     const auto id = Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size);
 
-    // Initialize the requests
-    std::size_t requests = 0;
-    if (size > 0 &&
-        (!clone || MPIBase<Executor, InitParameter, Parameter>::scheduler().groupRank() == 0)) {
-      requests = (size + MPIBase<Executor, InitParameter, Parameter>::maxSend() - 1) /
-                 MPIBase<Executor, InitParameter, Parameter>::maxSend();
-      m_asyncRequests.insert(m_asyncRequests.end(), requests * 2, MPI_REQUEST_NULL);
-    }
-
     BufInfo bufInfo{};
     bufInfo.sync = false;
-    bufInfo.requests = requests;
+    bufInfo.clone = clone;
+    bufInfo.requests = requestsFor(bufInfo, size);
+    m_asyncRequests.insert(m_asyncRequests.end(), bufInfo.requests * 2, MPI_REQUEST_NULL);
     m_buffer.push_back(bufInfo);
 
     assert(m_buffer.size() == (Base<Executor, InitParameter, Parameter>::numBuffers()));
@@ -104,19 +101,17 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
   void resizeBuffer(unsigned int id, const void* buffer, size_t size) override {
     assert(id < m_buffer.size());
 
-    auto requests = m_buffer[id].requests;
-    if (requests > 0) {
-      m_buffer[id].requests = (size + MPIBase<Executor, InitParameter, Parameter>::maxSend() - 1) /
-                              MPIBase<Executor, InitParameter, Parameter>::maxSend();
-
-      requests = m_buffer[id].requests - requests;
+    // (the requests are not tied to a position in the list; only their number matters)
+    const auto oldRequests = m_buffer[id].requests;
+    const auto newRequests = requestsFor(m_buffer[id], size);
+    if (newRequests > oldRequests) {
+      m_asyncRequests.insert(
+          m_asyncRequests.end(), (newRequests - oldRequests) * 2, MPI_REQUEST_NULL);
+    } else {
+      m_asyncRequests.erase(m_asyncRequests.end() - (oldRequests - newRequests) * 2,
+                            m_asyncRequests.end());
     }
-
-    if (requests > 0) {
-      m_asyncRequests.insert(m_asyncRequests.end(), requests * 2, MPI_REQUEST_NULL);
-    } else if (requests < 0) {
-      m_asyncRequests.erase(m_asyncRequests.end() + requests * 2, m_asyncRequests.end());
-    }
+    m_buffer[id].requests = newRequests;
 
     MPIBase<Executor, InitParameter, Parameter>::resizeBuffer(id, buffer, size);
   }
@@ -203,6 +198,20 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
 
   private:
   [[nodiscard]] auto useAsyncCopy() const -> bool override { return true; }
+
+  /**
+   * The number of chunks this rank sends for a buffer of the given size
+   */
+  [[nodiscard]] auto requestsFor(const BufInfo& bufInfo, size_t size) const -> std::size_t {
+    if (bufInfo.sync || size == 0 ||
+        (bufInfo.clone &&
+         MPIBase<Executor, InitParameter, Parameter>::scheduler().groupRank() != 0)) {
+      return 0;
+    }
+
+    return (size + MPIBase<Executor, InitParameter, Parameter>::maxSend() - 1) /
+           MPIBase<Executor, InitParameter, Parameter>::maxSend();
+  }
 
   /**
    * Sends all buffers asynchronously
