@@ -6,6 +6,7 @@
 #ifndef EXECUTOR_H
 #define EXECUTOR_H
 
+#include <atomic>
 #include <sched.h>
 
 struct Parameter {
@@ -19,7 +20,8 @@ class Executor {
   private:
   Test& m_test;
 
-  int m_schedCpu{};
+  /** (several modules may share one executor, each from a thread of its own) */
+  std::atomic<int> m_schedCpu{};
 
   public:
   Executor(Test* test) : m_test(*test) {}

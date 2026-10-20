@@ -7,7 +7,9 @@
 #define ASYNC_AS_THREADBASE_H
 
 #include <cassert>
+#include <condition_variable>
 #include <cstring>
+#include <mutex>
 #include <optional>
 #include <pthread.h>
 
@@ -19,16 +21,35 @@
 
 namespace async::as {
 
-#ifndef __APPLE__
-using SpinlockT = pthread_spinlock_t;
-inline void lock_spinlock(SpinlockT* lock) { pthread_spin_lock(lock); }
-inline void unlock_spinlock(SpinlockT* lock) { pthread_spin_unlock(lock); }
-#else
-// Spinlock is a LINUX-only feature
-using SpinlockT = pthread_mutex_t;
-inline void lock_spinlock(SpinlockT* lock) { pthread_mutex_lock(lock); }
-inline void unlock_spinlock(SpinlockT* lock) { pthread_mutex_unlock(lock); }
-#endif // __APPLE__
+/**
+ * A binary semaphore: one thread releases it, another one acquires it.
+ *
+ * The hand-over between the caller and the executor thread needs exactly
+ * that. A mutex does not do: only the thread that locked it may unlock it.
+ */
+class BinarySemaphore {
+  private:
+  std::mutex m_mutex;
+  std::condition_variable m_condition;
+  bool m_available;
+
+  public:
+  explicit BinarySemaphore(bool available) : m_available(available) {}
+
+  void acquire() {
+    std::unique_lock<std::mutex> lock(m_mutex);
+    m_condition.wait(lock, [this]() { return m_available; });
+    m_available = false;
+  }
+
+  void release() {
+    {
+      const std::scoped_lock lock(m_mutex);
+      m_available = true;
+    }
+    m_condition.notify_one();
+  }
+};
 
 /**
  * Base class for asynchronous calls via pthreads.
@@ -54,11 +75,11 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
   /** Async thread */
   pthread_t m_asyncThread;
 
-  /** Mutex locked by the writer (caller) */
-  SpinlockT m_writerLock{};
+  /** Available while the executor thread is idle; the caller holds it between wait() and call() */
+  BinarySemaphore m_idle{false};
 
-  /** Mutex locked by the reader (callee) */
-  pthread_mutex_t m_readerLock{};
+  /** Available while there is work for the executor thread */
+  BinarySemaphore m_work{false};
 
   /** Parameters for the next call */
   Parameter m_nextParams;
@@ -69,8 +90,8 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
   /** The current phase */
   Phase m_phase{Phase::Exec};
 
-  /** Mutex to wait for the buffer initialization to finish */
-  SpinlockT m_initBufferLock{};
+  /** Available once the executor thread has initialized a buffer */
+  BinarySemaphore m_initBufferDone{false};
 
   /** Shutdown the thread */
   bool m_shutdown{false};
@@ -82,34 +103,10 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
 
   protected:
   explicit ThreadBase(Config config)
-      : Base<Executor, InitParameter, Parameter>(config), m_asyncThread(pthread_self()) {
-#ifndef __APPLE__
-    pthread_spin_init(&m_writerLock, PTHREAD_PROCESS_PRIVATE);
-    pthread_spin_init(&m_initBufferLock, PTHREAD_PROCESS_PRIVATE);
-#else
-    pthread_mutexattr_t attr;
-    pthread_mutexattr_init(&attr);
-    pthread_mutexattr_settype(&attr, PTHREAD_PROCESS_PRIVATE);
-    pthread_mutex_init(&m_writerLock, &attr);
-    pthread_mutex_init(&m_initBufferLock, &attr);
-
-#endif // __APPLE__
-    pthread_mutex_init(&m_readerLock, nullptr);
-  }
+      : Base<Executor, InitParameter, Parameter>(config), m_asyncThread(pthread_self()) {}
 
   public:
-  ~ThreadBase() override {
-    finalize();
-
-#ifndef __APPLE__
-    pthread_spin_destroy(&m_initBufferLock);
-    pthread_spin_destroy(&m_writerLock);
-#else
-    pthread_mutex_destroy(&m_initBufferLock);
-    pthread_mutex_destroy(&m_writerLock);
-#endif // __APPLE__
-    pthread_mutex_destroy(&m_readerLock);
-  }
+  ~ThreadBase() override { finalize(); }
 
   auto operator=(ThreadBase&&) -> ThreadBase& = delete;
   auto operator=(const ThreadBase&) -> ThreadBase& = delete;
@@ -119,14 +116,7 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
   void setExecutor(Executor& executor) override {
     Base<Executor, InitParameter, Parameter>::setExecutor(executor);
 
-    // Lock the reader until data is available
-    pthread_mutex_lock(&m_readerLock);
-
-    // Lock writer until the memory is initialized
-    lock_spinlock(&m_writerLock);
-    // initBuffer is only unlocked when the buffer initialization is done
-    lock_spinlock(&m_initBufferLock);
-
+    // the thread reports itself idle once it runs
     if (pthread_create(&m_asyncThread, nullptr, asyncThread, this) != 0) {
       logError() << "ASYNC: Failed to start asynchronous thread";
     }
@@ -153,19 +143,25 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
     const unsigned int id =
         Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size);
 
-    // Now, initialize the buffer on the executor thread with zeros
-    if (m_phase == Phase::Exec) {
-      lock_spinlock(&m_writerLock);
+    if (!m_started) {
+      // no executor thread yet, which could touch the memory first
+      initBuffer(id);
+      return id;
     }
 
-    m_initBuffer = id;                   // Mark for buffer fill
-    pthread_mutex_unlock(&m_readerLock); // Similar to call() but without setting the parameters
+    // Now, initialize the buffer on the executor thread with zeros
+    if (m_phase == Phase::Exec) {
+      m_idle.acquire();
+    }
+
+    m_initBuffer = id; // Mark for buffer fill
+    m_work.release();  // Similar to call() but without setting the parameters
 
     // Wait for the initialization to finish
-    lock_spinlock(&m_initBufferLock);
+    m_initBufferDone.acquire();
 
     if (m_phase != Phase::Exec) { // SEND_PHASE
-      lock_spinlock(&m_writerLock);
+      m_idle.acquire();
     }
     return id;
   }
@@ -173,16 +169,21 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
   void resizeBuffer(unsigned int id, const void* buffer, size_t size) override {
     Base<Executor, InitParameter, Parameter>::resizeBufferInternal(id, buffer, size);
 
+    if (!m_started) {
+      initBuffer(id);
+      return;
+    }
+
     assert(m_phase != Phase::Exec);
 
     // Initialize the buffer on the executor thread with zeros
-    m_initBuffer = id;                   // Mark for buffer fill
-    pthread_mutex_unlock(&m_readerLock); // Similar to call() but without setting the parameters
+    m_initBuffer = id; // Mark for buffer fill
+    m_work.release();  // Similar to call() but without setting the parameters
 
     // Wait for the initialization to finish
-    lock_spinlock(&m_initBufferLock);
+    m_initBufferDone.acquire();
 
-    lock_spinlock(&m_writerLock);
+    m_idle.acquire();
   }
 
   [[nodiscard]] auto buffer(unsigned int id) const -> const void* override {
@@ -194,14 +195,14 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
    */
   void wait() override {
     // wait for the previous call to finish
-    lock_spinlock(&m_writerLock);
+    m_idle.acquire();
 
     // signal wait
     m_waiting = true;
-    pthread_mutex_unlock(&m_readerLock);
+    m_work.release();
 
     // wait for the wait to finish
-    lock_spinlock(&m_writerLock);
+    m_idle.acquire();
     m_phase = Phase::Send;
   }
 
@@ -209,7 +210,7 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
     memcpy(&m_nextParams, &parameters, sizeof(Parameter));
 
     m_phase = Phase::Exec;
-    pthread_mutex_unlock(&m_readerLock);
+    m_work.release();
   }
 
   void finalize() override {
@@ -224,12 +225,24 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
 
     // Shutdown the thread
     m_shutdown = true;
-    pthread_mutex_unlock(&m_readerLock);
+    m_work.release();
     pthread_join(m_asyncThread, nullptr);
   }
 
   private:
   void waitInternal() { Base<Executor, InitParameter, Parameter>::wait(); }
+
+  /**
+   * Fill a buffer with zeros, which also places its pages near the thread
+   * that does it
+   */
+  void initBuffer(unsigned int id) {
+    if (Base<Executor, InitParameter, Parameter>::bufferSize(id) > 0) {
+      memset(Base<Executor, InitParameter, Parameter>::bufferInternal(id),
+             0,
+             Base<Executor, InitParameter, Parameter>::bufferSize(id));
+    }
+  }
 
   /**
    * Wrapper for the parent class because parent class function cannot be called directly
@@ -242,11 +255,10 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
     auto* async = reinterpret_cast<ThreadBase*>(c);
 
     // Tell everyone that we are read to go
-    unlock_spinlock(&async->m_writerLock);
+    async->m_idle.release();
 
     while (true) {
-      // We assume that this lock happens before any unlock from the main thread
-      pthread_mutex_lock(&async->m_readerLock);
+      async->m_work.acquire();
       if (async->m_shutdown) {
         break;
       }
@@ -256,19 +268,16 @@ class ThreadBase : public Base<Executor, InitParameter, Parameter> {
         async->m_waiting = false;
       } else if (async->m_initBuffer.has_value()) {
         // Touch the memory on this thread
-        const unsigned int id = async->m_initBuffer.value();
-        if (async->bufferSize(id) > 0) {
-          memset(async->bufferInternal(id), 0, async->bufferSize(id));
-        }
+        async->initBuffer(async->m_initBuffer.value());
         async->m_initBuffer = {};
 
         // Done
-        unlock_spinlock(&async->m_initBufferLock);
+        async->m_initBufferDone.release();
       } else {
         async->callInternal(async->m_nextParams);
       }
 
-      unlock_spinlock(&async->m_writerLock);
+      async->m_idle.release();
     }
 
     return nullptr;
