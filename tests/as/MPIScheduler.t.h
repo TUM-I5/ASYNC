@@ -214,6 +214,71 @@ class TestMPIScheduler : public CxxTest::TestSuite {
     TS_ASSERT_EQUALS(scheduler.numComputeRanks(), 5);
     TS_ASSERT_EQUALS(scheduler.layout().nodes, 2);
     TS_ASSERT_EQUALS(scheduler.layout().executors, 1);
+
+    // the parts of the nodes in the group, and who hands them on
+    TS_ASSERT_EQUALS(scheduler.groupRank(), m_rank);
+    for (int rank = 0; rank < 5; rank++) {
+      TS_ASSERT_EQUALS(scheduler.nodeOf(rank), rank / 3);
+    }
+    TS_ASSERT_EQUALS(scheduler.onExecutorNode(), m_rank >= 3);
+    TS_ASSERT_EQUALS(scheduler.isForwarder(), m_rank == 2);
+    TS_ASSERT(scheduler.sharedMemory());
+
+    int nodeSize = 0;
+    MPI_Comm_size(scheduler.nodeComm(), &nodeSize);
+    TS_ASSERT_EQUALS(nodeSize, m_rank < 3 ? 3 : 2);
+  }
+
+  /**
+   * Two nodes in one group, with the ranks placed round-robin: the group
+   * holds them node by node, so that the parts of a node are consecutive
+   */
+  void testGroupNodesCyclic() const {
+    MPI_Comm nodeComm = fakeNodes(m_rank % 2);
+
+    async::GroupLayout groupLayout;
+    groupLayout.groupNodes = 2;
+
+    async::as::MPIScheduler scheduler;
+    scheduler.setCommunicator(MPI_COMM_WORLD, nodeComm, groupLayout);
+    MPI_Comm_free(&nodeComm);
+
+    // the group is 0, 2, 4, 1, 3
+    const std::vector<int> groupRanks{0, 3, 1, 4, 2};
+    TS_ASSERT_EQUALS(scheduler.groupRank(), groupRanks[m_rank]);
+    TS_ASSERT_EQUALS(scheduler.isExecutor(), m_rank == 3);
+    TS_ASSERT_EQUALS(scheduler.onExecutorNode(), m_rank % 2 == 1);
+    TS_ASSERT_EQUALS(scheduler.isForwarder(), m_rank == 4);
+    for (int rank = 0; rank < 5; rank++) {
+      TS_ASSERT_EQUALS(scheduler.nodeOf(rank), rank < 3 ? 0 : 1);
+    }
+
+    MPI_Comm execComm = MPI_COMM_NULL;
+    MPI_Comm_split(MPI_COMM_WORLD, scheduler.isExecutor() ? 0 : MPI_UNDEFINED, 0, &execComm);
+    scheduler.determineOrder(execComm);
+    if (execComm != MPI_COMM_NULL) {
+      MPI_Comm_free(&execComm);
+    }
+    TS_ASSERT(!scheduler.layout().rankOrdered);
+  }
+
+  /** Three nodes, two of which hand their parts on to the executor of the group */
+  void testGroupNodesForwarders() const {
+    // nodes {0}, {1, 2} and {3, 4}
+    MPI_Comm nodeComm = fakeNodes((m_rank + 1) / 2);
+
+    async::GroupLayout groupLayout;
+    groupLayout.groupNodes = 3;
+
+    async::as::MPIScheduler scheduler;
+    scheduler.setCommunicator(MPI_COMM_WORLD, nodeComm, groupLayout);
+    MPI_Comm_free(&nodeComm);
+
+    TS_ASSERT_EQUALS(scheduler.isExecutor(), m_rank == 4);
+    TS_ASSERT_EQUALS(scheduler.onExecutorNode(), m_rank >= 3);
+    TS_ASSERT_EQUALS(scheduler.isForwarder(), m_rank == 0 || m_rank == 2);
+    TS_ASSERT_EQUALS(scheduler.layout().nodes, 3);
+    TS_ASSERT_EQUALS(scheduler.layout().groupNodes, 3);
   }
 
   /** Shared memory can be turned off, which leaves the messages */
@@ -231,6 +296,8 @@ class TestMPIScheduler : public CxxTest::TestSuite {
     scheduler.setCommunicator(MPI_COMM_WORLD, async::GroupLayout{});
 
     TS_ASSERT(scheduler.sharedMemory());
+    TS_ASSERT(scheduler.onExecutorNode());
+    TS_ASSERT(!scheduler.isForwarder());
   }
 
   /** Executors that only collect: the application loses one rank per node */

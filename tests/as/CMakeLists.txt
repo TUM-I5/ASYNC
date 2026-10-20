@@ -14,10 +14,14 @@ if( USE_MPI )
     add_cxx_test_run( TestMPIScheduler TestMPIScheduler 5 )
 
     # The groups of the low-level tests are {0, 1, 2} and {3, 4}. They aggregate
-    # in shared windows (the default), and through messages.
-    set( mpi_test_variants "" "NoShared" )
+    # in shared windows (the default), through messages, and spread over several
+    # nodes, which the tests draw on a single machine: rank 2 alone on its node
+    # (nodes {0, 1}, {2}, {3}, {4}), and rank 2 next to rank 1 ({0}, {1, 2}, {3}, {4}).
+    set( mpi_test_variants "" "NoShared" "Nodes" "NodesNextToExecutor" )
     set( mpi_test_env_ "" )
     set( mpi_test_env_NoShared "ASYNC_SHARED_MEMORY=0" )
+    set( mpi_test_env_Nodes "ASYNC_TEST_NODES=0,0,1,2,3" "ASYNC_GROUP_NODES=2" )
+    set( mpi_test_env_NodesNextToExecutor "ASYNC_TEST_NODES=0,1,1,2,3" "ASYNC_GROUP_NODES=2" )
     foreach( copy 0 1 )
         if( copy )
             set( executable TestMPIAsync )

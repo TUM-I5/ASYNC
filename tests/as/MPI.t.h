@@ -7,7 +7,10 @@
 #include "async/as/MPIScheduler.h"
 #include <array>
 #include <cstddef>
+#include <cstdlib>
 #include <mpi.h>
+#include <sstream>
+#include <string>
 
 #include <chrono>
 #include <pthread.h>
@@ -56,6 +59,54 @@ class LargeBuffer : public CxxTest::GlobalFixture {
 // NOLINTNEXTLINE
 static LargeBuffer largeBuffer;
 
+/**
+ * @return The node of every rank from ASYNC_TEST_NODES; empty if unset
+ */
+inline auto testNodes() -> std::vector<int> {
+  std::vector<int> nodes;
+  const char* list = std::getenv("ASYNC_TEST_NODES");
+  if (list != nullptr) {
+    std::istringstream stream(list);
+    std::string node;
+    while (std::getline(stream, node, ',')) {
+      nodes.push_back(std::stoi(node));
+    }
+  }
+  return nodes;
+}
+
+/**
+ * Set up the groups of the tests: ranks {0, 1, 2} and {3, 4}, with an
+ * executor of their own each, rank 2 and 4.
+ *
+ * ASYNC_TEST_NODES lists a node for every rank (as in "0,0,1,2,3"), so
+ * that a single machine can stand in for several nodes. The groups then span
+ * ASYNC_GROUP_NODES of these nodes each, which has to lead to the same
+ * groups.
+ */
+inline void setUpGroups(async::as::MPIScheduler& scheduler) {
+  const async::Config config;
+  scheduler.setAllowSharedMemory(config.sharedMemory());
+
+  const auto nodes = testNodes();
+  if (nodes.empty()) {
+    scheduler.setCommunicator(MPI_COMM_WORLD, 2);
+    return;
+  }
+
+  int rank = 0;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+  MPI_Comm nodeComm = MPI_COMM_NULL;
+  MPI_Comm_split(MPI_COMM_WORLD, nodes.at(rank), rank, &nodeComm);
+
+  auto layout = config.groupLayout();
+  layout.exclusive = true;
+  scheduler.setCommunicator(MPI_COMM_WORLD, nodeComm, layout);
+
+  MPI_Comm_free(&nodeComm);
+}
+
 class TestMPI : public CxxTest::TestSuite {
   async::as::MPIScheduler* m_scheduler{};
 
@@ -87,8 +138,7 @@ class TestMPI : public CxxTest::TestSuite {
     m_chunkSteps = 0;
 
     m_scheduler = new async::as::MPIScheduler();
-    m_scheduler->setAllowSharedMemory(async::Config{}.sharedMemory());
-    m_scheduler->setCommunicator(MPI_COMM_WORLD, 2);
+    setUpGroups(*m_scheduler);
   }
 
   void tearDown() override {
@@ -146,8 +196,9 @@ class TestMPI : public CxxTest::TestSuite {
   }
 
   /**
-   * The groups are {0, 1, 2} and {3, 4} in every variant, with an executor
-   * of their own each, rank 2 and 4
+   * The groups are the same in every variant; where they span several
+   * nodes, the last rank of every node but the one of the executor hands on
+   * the parts of its node
    */
   void testGroups() {
     const bool executor = m_rank == 2 || m_rank == 4;
@@ -155,6 +206,20 @@ class TestMPI : public CxxTest::TestSuite {
     TS_ASSERT_EQUALS(m_scheduler->isCompute(), !executor);
     TS_ASSERT_EQUALS(m_scheduler->groupRank(), m_rank < 3 ? m_rank : m_rank - 3);
     TS_ASSERT_EQUALS(m_scheduler->sharedMemory(), async::Config{}.sharedMemory());
+
+    const auto nodes = testNodes();
+    if (nodes.empty()) {
+      TS_ASSERT(m_scheduler->onExecutorNode());
+      TS_ASSERT(!m_scheduler->isForwarder());
+      return;
+    }
+
+    const int groupExecutor = m_rank < 3 ? 2 : 4;
+    const bool remote = nodes.at(m_rank) != nodes.at(groupExecutor);
+    const bool lastOfNode =
+        m_rank + 1 == static_cast<int>(nodes.size()) || nodes.at(m_rank + 1) != nodes.at(m_rank);
+    TS_ASSERT_EQUALS(m_scheduler->onExecutorNode(), !remote);
+    TS_ASSERT_EQUALS(m_scheduler->isForwarder(), remote && lastOfNode);
   }
 
   void testInit() {

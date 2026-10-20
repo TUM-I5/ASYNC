@@ -230,6 +230,18 @@ class MPIScheduler {
   /** Whether this group aggregates in shared windows */
   bool m_sharedMemory{false};
 
+  /**
+   * The ranks of the group on the node of this rank; they share a window.
+   * The group ranks of a node are consecutive.
+   */
+  MPI_Comm m_nodeComm{MPI_COMM_NULL};
+
+  /** The node the group ranks are on, numbered within the group */
+  std::vector<int> m_nodeOfGroupRank;
+
+  /** Node boundaries drawn by the caller, for the group that is being formed */
+  int m_pendingNode{-1};
+
   /** Set while the executor shuts down modules without their ranks */
   bool m_killing{false};
 
@@ -436,8 +448,17 @@ class MPIScheduler {
     const auto groupId =
         (static_cast<unsigned int>(nodeId) / groupNodes) * executorsPerNode + localGroup;
 
+    // order the group node by node, so that the ranks of a node are consecutive in it
+    int maxNodeSize = nodeSize;
+    MPI_Allreduce(MPI_IN_PLACE, &maxNodeSize, 1, MPI_INT, MPI_MAX, comm);
+    const int key =
+        static_cast<int>(static_cast<unsigned int>(nodeId) % groupNodes) * maxNodeSize + nodeRank;
+
     MPI_Comm groupComm = MPI_COMM_NULL;
-    MPI_Comm_split(comm, static_cast<int>(groupId), rank, &groupComm);
+    MPI_Comm_split(comm, static_cast<int>(groupId), key, &groupComm);
+
+    // the node, as the caller draws the boundaries
+    m_pendingNode = nodeId;
 
     MPI_Comm_rank(groupComm, &m_groupRank);
     MPI_Comm_size(groupComm, &m_groupSize);
@@ -478,6 +499,7 @@ class MPIScheduler {
 
     // Is an executor?
     m_isExecutor = isExecutor;
+    m_executorRank = m_groupSize - 1;
     m_isCompute = !(executorExclusive && isExecutor);
     m_executorExclusive = executorExclusive;
 
@@ -485,16 +507,44 @@ class MPIScheduler {
     // always the first m_numComputeRanks ones
     m_numComputeRanks = executorExclusive ? m_groupSize - 1 : m_groupSize;
 
-    // A group whose ranks all share memory can aggregate in shared windows
-    m_sharedMemory = false;
-    if (m_allowSharedMemory) {
-      MPI_Comm sharedComm = MPI_COMM_NULL;
-      MPI_Comm_split_type(groupComm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &sharedComm);
-      int sharedSize = 0;
-      MPI_Comm_size(sharedComm, &sharedSize);
-      MPI_Comm_free(&sharedComm);
-      m_sharedMemory = sharedSize == m_groupSize;
+    // The part of the group on this node; without boundaries from the caller,
+    // the ranks that share memory
+    if (m_pendingNode >= 0) {
+      MPI_Comm_split(groupComm, m_pendingNode, m_groupRank, &m_nodeComm);
+      m_pendingNode = -1;
+    } else {
+      MPI_Comm_split_type(groupComm, MPI_COMM_TYPE_SHARED, m_groupRank, MPI_INFO_NULL, &m_nodeComm);
     }
+    int nodeRank = 0;
+    MPI_Comm_rank(m_nodeComm, &nodeRank);
+
+    // number the nodes within the group by their first rank
+    int node = 0;
+    const int isNodeRoot = nodeRank == 0 ? 1 : 0;
+    MPI_Exscan(&isNodeRoot, &node, 1, MPI_INT, MPI_SUM, groupComm);
+    if (m_groupRank == 0) {
+      // MPI_Exscan leaves the result undefined on the first rank
+      node = 0;
+    }
+    MPI_Bcast(&node, 1, MPI_INT, 0, m_nodeComm);
+    m_nodeOfGroupRank.resize(m_groupSize);
+    MPI_Allgather(&node, 1, MPI_INT, m_nodeOfGroupRank.data(), 1, MPI_INT, groupComm);
+
+    // A node part can aggregate in a shared window if its ranks do share
+    // memory, which may be left to check where the caller drew the boundaries
+    int sharedMemory = m_allowSharedMemory ? 1 : 0;
+    if (sharedMemory != 0) {
+      MPI_Comm sharedComm = MPI_COMM_NULL;
+      MPI_Comm_split_type(m_nodeComm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &sharedComm);
+      int sharedSize = 0;
+      int nodeSize = 0;
+      MPI_Comm_size(sharedComm, &sharedSize);
+      MPI_Comm_size(m_nodeComm, &nodeSize);
+      MPI_Comm_free(&sharedComm);
+      sharedMemory = sharedSize == nodeSize ? 1 : 0;
+    }
+    MPI_Allreduce(MPI_IN_PLACE, &sharedMemory, 1, MPI_INT, MPI_LAND, groupComm);
+    m_sharedMemory = sharedMemory != 0;
 
     if (m_pollIntervalUs < 0) {
       // An exclusive executor owns its rank and can spin; a co-located one
@@ -506,7 +556,13 @@ class MPIScheduler {
     MPI_Allreduce(MPI_IN_PLACE, &executorCount, 1, MPI_INT, MPI_SUM, groupComm);
 
     if (executorCount != 1) {
-      logError() << "There exists more than one executor in the subgroup.";
+      logError() << "ASYNC: A group needs exactly one executor; this one has" << executorCount;
+    }
+
+    int misplaced = (isExecutor != (m_groupRank == m_executorRank)) ? 1 : 0;
+    MPI_Allreduce(MPI_IN_PLACE, &misplaced, 1, MPI_INT, MPI_MAX, groupComm);
+    if (misplaced != 0) {
+      logError() << "ASYNC: The executor has to be the last rank of its group.";
     }
 
     // what came out of it, over all groups
@@ -552,6 +608,35 @@ class MPIScheduler {
    * @return Whether this group aggregates in shared windows
    */
   [[nodiscard]] auto sharedMemory() const -> bool { return m_sharedMemory; }
+
+  /**
+   * @return The ranks of the group on the node of this rank
+   */
+  [[nodiscard]] auto nodeComm() const -> MPI_Comm { return m_nodeComm; }
+
+  /**
+   * @return The node of a group rank, numbered within the group; the ranks of
+   *  a node are consecutive
+   */
+  [[nodiscard]] auto nodeOf(int groupRank) const -> int { return m_nodeOfGroupRank[groupRank]; }
+
+  /**
+   * @return Whether this rank is on the node of the executor, where the node
+   *  window is the aggregate itself
+   */
+  [[nodiscard]] auto onExecutorNode() const -> bool {
+    return m_nodeOfGroupRank[m_groupRank] == m_nodeOfGroupRank[m_executorRank];
+  }
+
+  /**
+   * @return Whether this rank forwards the window of its node to the executor:
+   *  the last rank of a node other than the one of the executor
+   */
+  [[nodiscard]] auto isForwarder() const -> bool {
+    return !onExecutorNode() &&
+           (m_groupRank + 1 == m_groupSize ||
+            m_nodeOfGroupRank[m_groupRank + 1] != m_nodeOfGroupRank[m_groupRank]);
+  }
 
   /**
    * @return Whether the executor shuts the modules down without their ranks,
@@ -968,6 +1053,9 @@ class MPIScheduler {
       m_loopThreadRunning = false;
     }
 
+    if (m_nodeComm != MPI_COMM_NULL) {
+      MPI_Comm_free(&m_nodeComm);
+    }
     if (m_privateGroupComm != MPI_COMM_NULL) {
       MPI_Comm_free(&m_privateGroupComm);
     }

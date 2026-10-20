@@ -6,6 +6,7 @@
 #include "async/ExecInfo.h"
 #include <array>
 #include <cstddef>
+#include <cstdlib>
 #include <optional>
 #ifdef USE_MPI
 #include <mpi.h>
@@ -42,8 +43,9 @@ inline auto executes(const async::Dispatcher& dispatcher) -> bool {
 }
 
 /**
- * The number of ranks whose buffers the executor of this rank holds. The
- * tests run on a single node, so all ranks form one group.
+ * The number of ranks whose buffers the executor of this rank holds. All
+ * ranks form one group: the tests run on a single node, or on as many nodes
+ * as a group spans.
  */
 inline auto contributors(int size) -> int {
   if (testConfig().mode() != async::Mode::MPI) {
@@ -58,6 +60,45 @@ inline auto contributors(int size) -> int {
 inline auto lateModules() -> bool {
   return testConfig().mode() != async::Mode::MPI || !testConfig().groupLayout().exclusive;
 }
+
+/**
+ * Node boundaries for a dispatcher: ASYNC_TEST_NODE_RANKS consecutive ranks
+ * form a node, so that a single machine can stand in for several nodes.
+ * Without it, a node is what shares memory.
+ */
+class TestNodes {
+  public:
+  explicit TestNodes([[maybe_unused]] async::Dispatcher& dispatcher) {
+#ifdef USE_MPI
+    const char* ranks = std::getenv("ASYNC_TEST_NODE_RANKS");
+    const int nodeRanks = ranks == nullptr ? 0 : std::atoi(ranks);
+    if (nodeRanks > 0) {
+      int rank = 0;
+      MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+      MPI_Comm_split(MPI_COMM_WORLD, rank / nodeRanks, rank, &m_comm);
+      dispatcher.setNodeCommunicator(m_comm);
+    }
+#endif // USE_MPI
+  }
+
+  ~TestNodes() {
+#ifdef USE_MPI
+    if (m_comm != MPI_COMM_NULL) {
+      MPI_Comm_free(&m_comm);
+    }
+#endif // USE_MPI
+  }
+
+  TestNodes(const TestNodes&) = delete;
+  TestNodes(TestNodes&&) = delete;
+  auto operator=(const TestNodes&) -> TestNodes& = delete;
+  auto operator=(TestNodes&&) -> TestNodes& = delete;
+
+  private:
+#ifdef USE_MPI
+  MPI_Comm m_comm{MPI_COMM_NULL};
+#endif // USE_MPI
+};
 
 class Module : private async::Module<Module, Param, Param> {
   public:
@@ -540,12 +581,15 @@ class TestModule : public CxxTest::TestSuite {
 
   void testModuleDispatcher() const {
     async::Dispatcher dispatcher;
+    const TestNodes nodes(dispatcher);
 #ifdef USE_MPI
     dispatcher.setCommunicator(MPI_COMM_WORLD);
 #endif // USE_MPI
 
-    TS_ASSERT_EQUALS(dispatcher.groupLayout().executorsPerNode, 1); // the default
-    TS_ASSERT_EQUALS(dispatcher.groupLayout().groupNodes, 1);
+    // what the environment sets
+    TS_ASSERT_EQUALS(dispatcher.groupLayout().executorsPerNode,
+                     testConfig().groupLayout().executorsPerNode);
+    TS_ASSERT_EQUALS(dispatcher.groupLayout().groupNodes, testConfig().groupLayout().groupNodes);
 
     Module module;
 
@@ -585,6 +629,7 @@ class TestModule : public CxxTest::TestSuite {
 
   void testBuffer() const {
     async::Dispatcher dispatcher;
+    const TestNodes nodes(dispatcher);
 
     BufferModule module;
 
@@ -612,6 +657,7 @@ class TestModule : public CxxTest::TestSuite {
 
   void testResizeBuffer() const {
     async::Dispatcher dispatcher;
+    const TestNodes nodes(dispatcher);
 
     ResizeBufferModule module;
 
@@ -638,6 +684,7 @@ class TestModule : public CxxTest::TestSuite {
 
   void testRemoveBuffer() const {
     async::Dispatcher dispatcher;
+    const TestNodes nodes(dispatcher);
 
     RemoveBufferModule module;
 
@@ -661,6 +708,7 @@ class TestModule : public CxxTest::TestSuite {
 
   void testGrowEmptyBuffer() const {
     async::Dispatcher dispatcher;
+    const TestNodes nodes(dispatcher);
 
     GrowBufferModule module;
 
@@ -684,6 +732,7 @@ class TestModule : public CxxTest::TestSuite {
 
   void testOrder() const {
     async::Dispatcher dispatcher;
+    const TestNodes nodes(dispatcher);
 
     OrderModule module;
     module.mContributors = contributors(m_size);
@@ -712,6 +761,7 @@ class TestModule : public CxxTest::TestSuite {
 
   void testAffinity() const {
     async::Dispatcher dispatcher;
+    const TestNodes nodes(dispatcher);
 
     AffinityModule module;
 
@@ -743,6 +793,7 @@ class TestModule : public CxxTest::TestSuite {
     }
 
     async::Dispatcher dispatcher;
+    const TestNodes nodes(dispatcher);
     dispatcher.init();
 
     std::optional<BufferModule> module;
@@ -774,6 +825,7 @@ class TestModule : public CxxTest::TestSuite {
     }
 
     async::Dispatcher dispatcher;
+    const TestNodes nodes(dispatcher);
 
     Module first;
 
@@ -801,9 +853,11 @@ class TestModule : public CxxTest::TestSuite {
 
   static void testModulesActiveDisabled() {
     async::Dispatcher dispatcher;
+    const TestNodes nodes(dispatcher);
 
-    TS_ASSERT_EQUALS(dispatcher.groupLayout().executorsPerNode, 1); // the default
-    TS_ASSERT_EQUALS(dispatcher.groupLayout().groupNodes, 1);
+    TS_ASSERT_EQUALS(dispatcher.groupLayout().executorsPerNode,
+                     testConfig().groupLayout().executorsPerNode);
+    TS_ASSERT_EQUALS(dispatcher.groupLayout().groupNodes, testConfig().groupLayout().groupNodes);
 
     Module module0;
     const Module module1;

@@ -96,20 +96,34 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   bool m_finalizeSent{false};
 
   /**
-   * A buffer of a group that shares memory: the aggregate lives in a window
-   * that every rank of the group maps, and every rank writes its own part of
-   * it directly
+   * A buffer of a group whose nodes share memory. The ranks of a node map one
+   * window and write their parts of the buffer into it directly. On the node
+   * of the executor, the window is the aggregate itself. On any other node,
+   * it holds the parts of that node, which its last rank forwards to the
+   * executor in one piece: that rank is the executor of the node, as far as
+   * the transfer goes.
    */
   struct SharedWindow {
     MPI_Win window{MPI_WIN_NULL};
-    /** The start of the aggregate, as this rank sees it */
+    /** The start of the aggregate, on the node of the executor */
     uint8_t* aggregate{nullptr};
     /** Where the part of this rank starts */
     uint8_t* own{nullptr};
+    /** What the node holds, on the rank that forwards it */
+    const uint8_t* node{nullptr};
+    /** The size of what the node holds, on the rank that forwards it */
+    size_t nodeBytes{0};
   };
 
   /** The windows by buffer id, where the group shares memory */
   std::vector<SharedWindow> m_windows;
+
+  /**
+   * Messages of the transfer from a node to the executor that are still on
+   * their way: the parts of the node on its last rank, and the notes that
+   * a part is complete on the others
+   */
+  std::vector<MPI_Request> m_forwardRequests;
 
   public:
   explicit MPIBase(Config config)
@@ -160,6 +174,7 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   }
 
   void removeBuffer(unsigned int id) override {
+    waitForwards();
     m_scheduler->removeBuffer(m_id, id);
 
     if (shared() && !m_scheduler->isColocated()) {
@@ -257,6 +272,8 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
    * Wait for an asynchronous call to finish
    */
   void wait() override {
+    waitForwards();
+
     // Wait for the call to finish
     m_scheduler->wait(m_id);
 
@@ -274,6 +291,8 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   }
 
   void finalize() override {
+    waitForwards();
+
     if (m_scheduler != nullptr && m_scheduler->isColocated()) {
       // The executor side owns the buffers of this rank. It finalizes the
       // module on the loop thread once the whole group is done with it, and
@@ -317,9 +336,9 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   [[nodiscard]] auto sharedOwn(unsigned int id) const -> void* { return m_windows[id].own; }
 
   /**
-   * Make what this rank wrote into the shared windows visible to the group,
-   * or what the group wrote visible to this rank; called before the
-   * executor runs a call
+   * Make what this rank wrote into the shared windows visible to the ranks of
+   * its node, or what they wrote visible to this rank; called before the
+   * parameters of a call are sent, and before the executor runs it
    */
   void syncWindows() {
     for (const auto& window : m_windows) {
@@ -331,10 +350,68 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
 
   /**
    * Hand what this rank wrote into the shared windows on to the executor;
-   * called before the parameters of a call are sent, which tell the executor
-   * that the part of this rank is complete
+   * called before the parameters of a call are sent.
+   *
+   * On the node of the executor, the windows are the aggregate, and making
+   * the writes visible is all there is to it. On another node, every rank
+   * tells the last rank of the node that its part is complete, and that rank
+   * sends the parts of the whole node to the executor, which receives them
+   * in place. A rank that only notes its part as complete does not wait for
+   * anything; the transfer is settled with the next wait.
    */
-  void publishWindows() { syncWindows(); }
+  void publishWindows() {
+    syncWindows();
+
+    if (!shared() || m_scheduler->onExecutorNode() || m_windows.empty()) {
+      return;
+    }
+
+    MPI_Comm nodeComm = m_scheduler->nodeComm();
+    int nodeRank = 0;
+    int nodeSize = 0;
+    MPI_Comm_rank(nodeComm, &nodeRank);
+    MPI_Comm_size(nodeComm, &nodeSize);
+    const int forwarder = nodeSize - 1;
+
+    if (nodeRank != forwarder) {
+      // (a message of no size, which leaves this rank before it would have to wait for anybody)
+      m_forwardRequests.push_back(MPI_REQUEST_NULL);
+      MPI_Isend(nullptr, 0, MPI_BYTE, forwarder, m_id, nodeComm, &m_forwardRequests.back());
+      return;
+    }
+
+    // one note from every other rank of the node, in the order they were sent
+    std::vector<MPI_Request> notes(forwarder, MPI_REQUEST_NULL);
+    for (int rank = 0; rank < forwarder; rank++) {
+      MPI_Irecv(nullptr, 0, MPI_BYTE, rank, m_id, nodeComm, &notes[rank]);
+    }
+    MPI_Waitall(static_cast<int>(notes.size()), notes.data(), MPI_STATUSES_IGNORE);
+    syncWindows();
+
+    for (unsigned int id = 0; id < m_windows.size(); id++) {
+      const auto& window = m_windows[id];
+      for (size_t done = 0; done < window.nodeBytes; done += maxSend()) {
+        const size_t send = std::min(maxSend(), window.nodeBytes - done);
+        const MPIRequest2 requests =
+            m_scheduler->iSendBuffer(m_id, id, window.node + done, static_cast<int>(send));
+        m_forwardRequests.push_back(requests.r[0]);
+        m_forwardRequests.push_back(requests.r[1]);
+      }
+    }
+  }
+
+  /**
+   * Settle the transfer of the windows of this node to the executor
+   */
+  void waitForwards() {
+    if (m_forwardRequests.empty()) {
+      return;
+    }
+
+    MPI_Waitall(
+        static_cast<int>(m_forwardRequests.size()), m_forwardRequests.data(), MPI_STATUSES_IGNORE);
+    m_forwardRequests.clear();
+  }
 
   [[nodiscard]] auto id() const -> int { return m_id; }
 
@@ -361,6 +438,8 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   void resizeBuffer(unsigned int id, const void* buffer, size_t size) override {
     assert(m_scheduler);
     assert(m_scheduler->isCompute());
+
+    waitForwards();
 
     if (m_scheduler->isColocated()) {
       m_scheduler->resizeBuffer(m_id, id, buffer, size, m_buffer[id].clone);
@@ -477,7 +556,8 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   [[nodiscard]] auto useAsyncCopy(unsigned int id) const -> bool override {
     assert(id < m_executorBuffer.size());
 
-    return useAsyncCopy() && !m_executorBuffer[id].sync;
+    // what other nodes forward arrives with the call, whether the buffer is synchronized or not
+    return useAsyncCopy() && (!m_executorBuffer[id].sync || shared());
   }
 
   [[nodiscard]] auto numBufferChunks() const -> unsigned int override { return m_numBufferChunks; }
@@ -534,7 +614,7 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
       // Create the buffer
       if (shared()) {
         // the window is the aggregate; it is not to be touched by the executor thread, since the
-        // ranks of the group may write their parts right away
+        // ranks of the node may write their parts right away
         Base<Executor, InitParameter, Parameter>::addBufferInternal(nullptr, size, false);
         Base<Executor, InitParameter, Parameter>::setExternalBufferInternal(
             id, m_windows[id].aggregate);
@@ -618,7 +698,7 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
                m_scheduler->privateGroupComm());
 
     if (shared()) {
-      // a window has a fixed size: the group makes a new one
+      // a window has a fixed size: the node makes a new one
       freeWindow(id);
       allocateWindow(id, size);
     }
@@ -730,42 +810,85 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
       size += bufSize;
 
       // The contribution of this rank is copied in place, and a shared window
-      // gets its contributions without any message, so neither shows up as a
-      // chunk the loop has to wait for
+      // gets the contributions of its node without any message, so neither
+      // shows up as a chunk the loop has to wait for
       if (bufSize > 0 && !sync && !shared() && i != m_scheduler->groupRank()) {
         bufferChunks += (bufSize + mMaxSend - 1) / mMaxSend;
       }
+    }
+
+    if (!shared()) {
+      return size;
+    }
+
+    // Every other node sends its parts in one piece, from its last rank, to
+    // where the first of them starts
+    const int executorNode = m_scheduler->nodeOf(m_scheduler->groupSize() - 1);
+    for (int first = 0; first < numComputeRanks;) {
+      const int node = m_scheduler->nodeOf(first);
+      int last = first;
+      while (last + 1 < numComputeRanks && m_scheduler->nodeOf(last + 1) == node) {
+        last++;
+      }
+
+      if (node != executorNode) {
+        const unsigned long start = offsets[first];
+        const unsigned long end = (last + 1 < numComputeRanks) ? offsets[last + 1] : size;
+        offsets[last] = start;
+        if (useAsyncCopy()) {
+          bufferChunks += (end - start + mMaxSend - 1) / mMaxSend;
+        }
+      }
+
+      first = last + 1;
     }
 
     return size;
   }
 
   /**
-   * Allocate the shared window of a buffer, together with the rest of the
-   * group, and find this rank's part in it
+   * Allocate the shared window of a buffer, together with the other ranks of
+   * the node, and find this rank's part in it
    *
    * @param localSize The size this rank contributes
    */
   void allocateWindow(unsigned int id, unsigned long localSize) {
-    MPI_Comm comm = m_scheduler->privateGroupComm();
+    MPI_Comm groupComm = m_scheduler->privateGroupComm();
+    MPI_Comm nodeComm = m_scheduler->nodeComm();
 
-    // where the part of this rank starts
+    // where the part of this rank starts in the aggregate ...
     unsigned long offset = 0;
-    MPI_Exscan(&localSize, &offset, 1, MPI_UNSIGNED_LONG, MPI_SUM, comm);
+    MPI_Exscan(&localSize, &offset, 1, MPI_UNSIGNED_LONG, MPI_SUM, groupComm);
     if (m_scheduler->groupRank() == 0) {
       // MPI_Exscan leaves the result undefined on the first rank
       offset = 0;
     }
 
-    // the first rank makes room to align the start of the aggregate, which
-    // only the executor needs to be aligned
+    // ... and among the parts of its node
+    int nodeRank = 0;
+    int nodeSize = 0;
+    MPI_Comm_rank(nodeComm, &nodeRank);
+    MPI_Comm_size(nodeComm, &nodeSize);
+    unsigned long nodeOffset = 0;
+    MPI_Exscan(&localSize, &nodeOffset, 1, MPI_UNSIGNED_LONG, MPI_SUM, nodeComm);
+    if (nodeRank == 0) {
+      nodeOffset = 0;
+    }
+
+    // On the node of the executor, the window is the aggregate: its first
+    // rank makes room for the parts of the other nodes, which come first, and
+    // for aligning the start, which only the executor needs to be aligned
+    const bool executorNode = m_scheduler->onExecutorNode();
     const size_t alignment = Base<Executor, InitParameter, Parameter>::alignment();
-    const auto request =
-        static_cast<MPI_Aint>(localSize + ((m_scheduler->groupRank() == 0) ? alignment : 0));
+    unsigned long request = localSize;
+    if (executorNode && nodeRank == 0) {
+      request += offset + alignment;
+    }
 
     SharedWindow window;
     void* start = nullptr;
-    MPI_Win_allocate_shared(request, 1, MPI_INFO_NULL, comm, &start, &window.window);
+    MPI_Win_allocate_shared(
+        static_cast<MPI_Aint>(request), 1, MPI_INFO_NULL, nodeComm, &start, &window.window);
 
     // the start of the window (the part of the first rank that has any memory), rather than the
     // part of this rank
@@ -774,15 +897,24 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
     MPI_Win_shared_query(window.window, MPI_PROC_NULL, &segmentSize, &unit, &start);
     auto* base = static_cast<uint8_t*>(start);
 
-    unsigned long padding = 0;
-    if (m_scheduler->isExecutor() && alignment > 0 && base != nullptr) {
-      const auto address = reinterpret_cast<std::uintptr_t>(base);
-      padding = (alignment - address % alignment) % alignment;
-    }
-    MPI_Bcast(&padding, 1, MPI_UNSIGNED_LONG, m_scheduler->groupSize() - 1, comm);
+    if (executorNode) {
+      unsigned long padding = 0;
+      if (m_scheduler->isExecutor() && alignment > 0 && base != nullptr) {
+        const auto address = reinterpret_cast<std::uintptr_t>(base);
+        padding = (alignment - address % alignment) % alignment;
+      }
+      // (the executor is the last rank of its node)
+      MPI_Bcast(&padding, 1, MPI_UNSIGNED_LONG, nodeSize - 1, nodeComm);
 
-    window.aggregate = base == nullptr ? nullptr : base + padding;
-    window.own = window.aggregate == nullptr ? nullptr : window.aggregate + offset;
+      window.aggregate = base == nullptr ? nullptr : base + padding;
+      window.own = window.aggregate == nullptr ? nullptr : window.aggregate + offset;
+    } else {
+      window.own = base == nullptr ? nullptr : base + nodeOffset;
+      if (nodeRank == nodeSize - 1) {
+        window.node = base;
+        window.nodeBytes = nodeOffset + localSize;
+      }
+    }
 
     // one passive epoch for the life of the window; MPI_Win_sync orders the
     // accesses within it
@@ -795,7 +927,8 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   }
 
   /**
-   * Free the shared window of a buffer, together with the rest of the group
+   * Free the shared window of a buffer, together with the other ranks of the
+   * node
    */
   void freeWindow(unsigned int id) {
     if (id >= m_windows.size() || m_windows[id].window == MPI_WIN_NULL) {

@@ -25,6 +25,9 @@ class Dispatcher {
 
   MPI_Comm m_comm{MPI_COMM_WORLD};
 
+  /** Where the caller draws the node boundaries; the ranks that share memory otherwise */
+  MPI_Comm m_nodeComm{MPI_COMM_NULL};
+
   /** The communicator spanning all ranks that run the executors */
   MPI_Comm m_execComm{MPI_COMM_NULL};
 #endif // USE_MPI
@@ -50,6 +53,15 @@ class Dispatcher {
 
 #ifdef USE_MPI
   void setCommunicator(MPI_Comm comm) { m_comm = comm; }
+
+  /**
+   * Draw the node boundaries the groups are formed along: the ranks of the
+   * communicator that share a node with this one. Without it, a node is
+   * what shares memory.
+   *
+   * The communicator stays with the caller; it is only used in {@link init}.
+   */
+  void setNodeCommunicator(MPI_Comm nodeComm) { m_nodeComm = nodeComm; }
 #endif
 
   /**
@@ -89,7 +101,11 @@ class Dispatcher {
       // Initialize the scheduler
       m_scheduler.setPollIntervalUs(m_config.pollIntervalUs());
       m_scheduler.setAllowSharedMemory(m_config.sharedMemory());
-      m_scheduler.setCommunicator(m_comm, m_groupLayout);
+      if (m_nodeComm != MPI_COMM_NULL) {
+        m_scheduler.setCommunicator(m_comm, m_nodeComm, m_groupLayout);
+      } else {
+        m_scheduler.setCommunicator(m_comm, m_groupLayout);
+      }
 
       // Only the executors run the modules
       MPI_Comm_split(m_comm, m_scheduler.isExecutor() ? 0 : MPI_UNDEFINED, 0, &m_execComm);
