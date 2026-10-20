@@ -1430,7 +1430,9 @@ class MPIScheduler {
   }
 
   void resizeManagedBuffer(size_t oldSize, size_t newSize) {
-    assert(oldSize != newSize);
+    if (oldSize == newSize) {
+      return;
+    }
 
     m_managedBufferCounter[newSize]++;
     m_managedBufferCounter.at(oldSize)--;

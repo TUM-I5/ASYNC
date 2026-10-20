@@ -721,6 +721,43 @@ class TestMPI : public CxxTest::TestSuite {
     }
   }
 
+  /** A buffer ASYNC manages, resized to the size it has */
+  void testResizeManagedBufferSameSize() {
+    Executor<TestMPI> executor(this);
+
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async;
+    async.setScheduler(*m_scheduler);
+
+    async.setExecutor(executor);
+    m_async = &async;
+
+    if (m_scheduler->isExecutor()) {
+      m_scheduler->loop();
+
+      TS_ASSERT_EQUALS(m_buffers.size(),
+                       2 * static_cast<std::size_t>(m_scheduler->numComputeRanks()));
+      for (const auto& i : m_buffers) {
+        TS_ASSERT_EQUALS(i, 7);
+      }
+    } else {
+      async.addBuffer(nullptr, 2 * sizeof(int));
+
+      async.wait();
+
+      async.resizeBuffer(0, nullptr, 2 * sizeof(int));
+
+      auto* managed = static_cast<int*>(async.managedBuffer(0));
+      managed[0] = 7;
+      managed[1] = 7;
+      async.sendBuffer(0, 2 * sizeof(int));
+
+      const Parameter parameter;
+      async.call(parameter);
+
+      async.wait();
+    }
+  }
+
   void testMultiple() {
     Executor<TestMPI> executor(this);
 
