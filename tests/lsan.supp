@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 Technical University of Munich
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+# Allocations of the MPI library and its runtime that live until the process ends
+leak:libmpi.so
+leak:libopen-pal.so
+leak:libopen-rte.so
+leak:libpmix.so
+leak:libhwloc.so
+leak:libevent
+leak:libucs.so
+leak:libucp.so
+leak:libfabric.so
+leak:mca_
+# a string the MPI runtime keeps from a component it has unloaded again, so the stack has no module
+# name to match (ASYNC itself never calls strdup)
+leak:strdup

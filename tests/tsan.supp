@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 Technical University of Munich
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+# The MPI library, its runtime and its components are not instrumented; their
+# internal synchronization is invisible to ThreadSanitizer
+race:libmpi.so
+race:libopen-pal.so
+race:libopen-rte.so
+race:libpmix.so
+race:libevent
+race:libhwloc.so
+race:mca_
+mutex:libmpi.so
+mutex:libopen-pal.so
+mutex:libopen-rte.so
+mutex:libpmix.so
+mutex:libevent
+mutex:mca_
+deadlock:libmpi.so
+deadlock:libopen-pal.so
+deadlock:libopen-rte.so
+deadlock:libpmix.so
+deadlock:libevent
+deadlock:mca_
