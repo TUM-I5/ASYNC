@@ -12,6 +12,7 @@
 
 #include <cassert>
 #include <cstring>
+#include <map>
 #include <utility>
 #include <vector>
 
@@ -125,6 +126,13 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
    */
   std::vector<MPI_Request> m_forwardRequests;
 
+  /**
+   * The copy of a clone buffer that ASYNC manages, by buffer id, on a rank
+   * other than the first of its group. Only the copy of the first rank
+   * reaches the executor, but the application fills its copy on every rank.
+   */
+  std::map<unsigned int, std::vector<uint8_t>> m_cloneCopies;
+
   public:
   explicit MPIBase(Config config)
       : ThreadBase<Executor, InitParameter, Parameter>(config),
@@ -176,6 +184,7 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   void removeBuffer(unsigned int id) override {
     waitForwards();
     m_scheduler->removeBuffer(m_id, id);
+    m_cloneCopies.erase(id);
 
     if (shared() && !m_scheduler->isColocated()) {
       // (on an executor that computes as well, the loop thread frees it for both roles)
@@ -441,6 +450,8 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
 
     waitForwards();
 
+    keepCloneCopy(id, buffer, size, m_buffer[id].clone);
+
     if (m_scheduler->isColocated()) {
       m_scheduler->resizeBuffer(m_id, id, buffer, size, m_buffer[id].clone);
       return;
@@ -467,6 +478,35 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   }
 
   [[nodiscard]] auto isClone(unsigned int id) const -> bool { return m_buffer[id].clone; }
+
+  /**
+   * Whether this rank fills a clone buffer that ASYNC manages without sending
+   * it: the first rank of the group sends its copy
+   */
+  [[nodiscard]] auto unsentClone(const void* buffer, bool clone) const -> bool {
+    return buffer == nullptr && clone && m_scheduler->groupRank() != 0;
+  }
+
+  /**
+   * Give the application a copy of a clone buffer to fill, where this rank
+   * does not send it
+   */
+  void keepCloneCopy(unsigned int id, const void* buffer, size_t size, bool clone) {
+    if (unsentClone(buffer, clone)) {
+      m_cloneCopies[id].resize(size);
+    } else {
+      m_cloneCopies.erase(id);
+    }
+  }
+
+  [[nodiscard]] auto hasCloneCopy(unsigned int id) const -> bool {
+    return m_cloneCopies.find(id) != m_cloneCopies.end();
+  }
+
+  /**
+   * The copy of a clone buffer this rank fills without sending it
+   */
+  auto cloneCopy(unsigned int id) -> void* { return m_cloneCopies.at(id).data(); }
 
   /**
    * The memory this rank contributes to a buffer

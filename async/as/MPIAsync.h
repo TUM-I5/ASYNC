@@ -66,6 +66,7 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone);
     const unsigned int id =
         MPIBase<Executor, InitParameter, Parameter>::addBufferLocal(buffer, size, false);
+    MPIBase<Executor, InitParameter, Parameter>::keepCloneCopy(id, buffer, size, clone);
 
     // We directly send sync buffers
     BufInfo bufInfo{};
@@ -84,9 +85,12 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
    */
   auto addBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned override {
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone, false);
-    // (a buffer in a shared window needs no staging copy: this rank writes its part directly)
+    // (a buffer in a shared window needs no staging copy: this rank writes its part directly; nor
+    // does a copy of a clone that is not sent, which has memory of its own)
+    const bool unsent = MPIBase<Executor, InitParameter, Parameter>::unsentClone(buffer, clone);
     const auto id = MPIBase<Executor, InitParameter, Parameter>::addBufferLocal(
-        buffer, size, !MPIBase<Executor, InitParameter, Parameter>::shared());
+        buffer, size, !MPIBase<Executor, InitParameter, Parameter>::shared() && !unsent);
+    MPIBase<Executor, InitParameter, Parameter>::keepCloneCopy(id, buffer, size, clone);
 
     BufInfo bufInfo{};
     bufInfo.sync = false;
@@ -137,6 +141,10 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
   }
 
   auto managedBuffer(unsigned int id) -> void* override {
+    if (MPIBase<Executor, InitParameter, Parameter>::hasCloneCopy(id)) {
+      return MPIBase<Executor, InitParameter, Parameter>::cloneCopy(id);
+    }
+
     if (MPIBase<Executor, InitParameter, Parameter>::shared()) {
       // what the application writes there is in the aggregate already
       return MPIBase<Executor, InitParameter, Parameter>::localOrigin(id) == nullptr

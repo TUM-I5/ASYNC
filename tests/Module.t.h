@@ -55,6 +55,14 @@ inline auto contributors(int size) -> int {
 }
 
 /**
+ * The first rank whose buffers the executor of this rank holds: the group
+ * starts with the first rank, and every other executor holds its own rank
+ */
+inline auto firstContributor(int rank) -> int {
+  return testConfig().mode() == async::Mode::MPI ? 0 : rank;
+}
+
+/**
  * Whether modules can be attached after the dispatcher started the executors
  */
 inline auto lateModules() -> bool {
@@ -511,6 +519,87 @@ class OrderModule : private async::Module<OrderModule, Param, Param> {
 };
 
 /**
+ * A clone buffer that ASYNC manages: every rank fills its copy, the whole
+ * size of it, and keeps what it wrote there; the executor holds the copy of
+ * the first rank of its group, also after a resize
+ */
+class CloneModule : private async::Module<CloneModule, Param, Param> {
+  public:
+  static constexpr int Steps = 2;
+  static constexpr std::array<int, Steps> Counts{4, 64};
+
+  /** The rank whose copy the executor holds */
+  int mFirst{0};
+
+  std::array<std::size_t, Steps> mSize{};
+  std::array<bool, Steps> mCopy{};
+
+  /** Whether this rank found its copy as it wrote it, after all ranks wrote theirs */
+  std::array<bool, Steps> mOwn{};
+
+  CloneModule() = default;
+
+  /**
+   * @param ranks The ranks that compute, which all fill their copies before
+   *  any of them looks at its own again
+   */
+  template <typename Barrier>
+  void run(int rank, const Barrier& ranks) {
+    init();
+
+    addBuffer(nullptr, Counts[0] * sizeof(int), true);
+
+    auto param = Param{0};
+    callInit(param);
+    wait();
+
+    for (int step = 0; step < Steps; step++) {
+      if (step > 0) {
+        resizeBuffer(0, nullptr, Counts.at(step) * sizeof(int));
+      }
+      auto* values = managedBuffer<int*>(0);
+      for (int i = 0; i < Counts.at(step); i++) {
+        values[i] = value(rank, step, i);
+      }
+      ranks();
+      bool own = true;
+      for (int i = 0; i < Counts.at(step); i++) {
+        own = own && values[i] == value(rank, step, i);
+      }
+      mOwn.at(step) = own;
+      sendBuffer(0);
+      param.step = step;
+      call(param);
+      wait();
+    }
+
+    finalize();
+  }
+
+  void execInit(const Param& param) {}
+
+  void exec(const async::ExecInfo& info, const Param& param) {
+    mSize.at(param.step) = info.bufferSize(0);
+
+    const auto* values = static_cast<const int*>(info.buffer(0));
+    bool copy = values != nullptr;
+    for (std::size_t i = 0; copy && i < info.bufferSize(0) / sizeof(int); i++) {
+      copy = values[i] == value(mFirst, param.step, static_cast<int>(i));
+    }
+    mCopy.at(param.step) = copy;
+  }
+
+  void setUp() override { setExecutor(*this); }
+
+  void tearDown() override {}
+
+  private:
+  static auto value(int rank, int step, int i) -> int {
+    return (100000 * rank) + (1000 * step) + i;
+  }
+};
+
+/**
  * Pins the executor thread to a core, as an application does with the cores
  * its computation leaves free
  */
@@ -756,6 +845,41 @@ class TestModule : public CxxTest::TestSuite {
       TS_ASSERT_EQUALS(module.mManagedSize[1], 3 * group * sizeof(int));
       TS_ASSERT(module.mOrdered[0]);
       TS_ASSERT(module.mOrdered[1]);
+    }
+  }
+
+  void testCloneManaged() const {
+    async::Dispatcher dispatcher;
+    const TestNodes nodes(dispatcher);
+
+    CloneModule module;
+    module.mFirst = firstContributor(m_rank);
+
+    dispatcher.init();
+
+#ifdef USE_MPI
+    const auto ranks = [&dispatcher]() { MPI_Barrier(dispatcher.commWorld()); };
+#else  // USE_MPI
+    const auto ranks = []() {};
+#endif // USE_MPI
+
+    const bool computes = dispatcher.dispatch();
+    if (computes) {
+      module.run(m_rank, ranks);
+    }
+
+    const bool executor = executes(dispatcher);
+
+    dispatcher.finalize();
+
+    for (int step = 0; step < CloneModule::Steps; step++) {
+      if (computes) {
+        TS_ASSERT(module.mOwn.at(step));
+      }
+      if (executor) {
+        TS_ASSERT_EQUALS(module.mSize.at(step), CloneModule::Counts.at(step) * sizeof(int));
+        TS_ASSERT(module.mCopy.at(step));
+      }
     }
   }
 
