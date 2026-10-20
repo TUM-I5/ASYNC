@@ -18,6 +18,7 @@
 #include "ThreadBase.h"
 #include "async/Config.h"
 #include "async/as/Base.h"
+#include "async/as/Pin.h"
 
 namespace async::as {
 
@@ -92,6 +93,20 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
 
     // Add this to the scheduler
     m_id = m_scheduler->addScheduled(this);
+  }
+
+  /**
+   * Only an executor runs a thread of its own; on a rank that only computes,
+   * pinning it would pin the calling thread instead
+   */
+  auto isAffinityNecessary() -> bool override {
+    return m_scheduler != nullptr && m_scheduler->isExecutor();
+  }
+
+  void setAffinityIfNecessary(const CpuMask& cpuSet) override {
+    if (isAffinityNecessary()) {
+      ThreadBase<Executor, InitParameter, Parameter>::setAffinityIfNecessary(cpuSet);
+    }
   }
 
   /**

@@ -12,11 +12,13 @@
 
 #include <cxxtest/TestSuite.h>
 
+#include <pthread.h>
 #include <sched.h>
 
 #include "async/Config.h"
 #include "async/Dispatcher.h"
 #include "async/Module.h"
+#include "async/as/Pin.h"
 
 struct Param {
   int step{0};
@@ -372,6 +374,59 @@ class GrowBufferModule : private async::Module<GrowBufferModule, Param, Param> {
 };
 
 /**
+ * Pins the executor thread to a core, as an application does with the cores
+ * its computation leaves free
+ */
+class AffinityModule : private async::Module<AffinityModule, Param, Param> {
+  public:
+  static constexpr int Core = 0;
+
+  int mCpu{-1};
+  int mMainCpusBefore{0};
+  int mMainCpusAfter{0};
+
+  AffinityModule() = default;
+
+  void run() {
+    init();
+
+    const auto param = Param{0};
+    callInit(param);
+    wait();
+    call(param);
+    wait();
+
+    finalize();
+  }
+
+  void execInit(const Param& param) {}
+
+  void exec(const async::ExecInfo& info, const Param& param) { mCpu = sched_getcpu(); }
+
+  void setUp() override {
+    setExecutor(*this);
+
+    mMainCpusBefore = callingThreadCpus();
+    if (isAffinityNecessary()) {
+      async::as::CpuMask mask{};
+      CPU_ZERO(&mask.set);
+      CPU_SET(Core, &mask.set);
+      setAffinityIfNecessary(mask);
+    }
+    mMainCpusAfter = callingThreadCpus();
+  }
+
+  void tearDown() override {}
+
+  private:
+  static auto callingThreadCpus() -> int {
+    cpu_set_t set;
+    pthread_getaffinity_np(pthread_self(), sizeof(set), &set);
+    return CPU_COUNT(&set);
+  }
+};
+
+/**
  * Test for {@link Dispatcher} and {@link Module} since
  * they work closely together.
  */
@@ -527,6 +582,29 @@ class TestModule : public CxxTest::TestSuite {
       TS_ASSERT(module.mExecuted);
       TS_ASSERT_EQUALS(module.mBufferSize, contributors * GrowBufferModule::Values * sizeof(int));
       TS_ASSERT(module.mValid);
+    }
+  }
+
+  void testAffinity() const {
+    async::Dispatcher dispatcher;
+
+    AffinityModule module;
+
+    dispatcher.init();
+
+    if (dispatcher.dispatch()) {
+      module.run();
+    }
+
+    const bool executes = testConfig().mode() == async::Mode::Thread ||
+                          (testConfig().mode() == async::Mode::MPI && dispatcher.isExecutor());
+
+    dispatcher.finalize();
+
+    // the thread that asked for the affinity keeps its own
+    TS_ASSERT_EQUALS(module.mMainCpusBefore, module.mMainCpusAfter);
+    if (executes) {
+      TS_ASSERT_EQUALS(module.mCpu, AffinityModule::Core);
     }
   }
 
