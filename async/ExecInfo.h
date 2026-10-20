@@ -71,6 +71,17 @@ class ExecInfo {
   }
 
   /**
+   * The contributions a buffer is made of, in bytes, in the order they follow
+   * one another in it: in NODE mode, one for every rank whose buffers the
+   * executor holds, and otherwise the buffer as a whole. A contribution is a
+   * block of its own, which matters for data that is distributed along
+   * another dimension than its leading one.
+   */
+  [[nodiscard]] virtual auto bufferParts(unsigned int id) const -> std::vector<size_t> {
+    return {bufferSize(id)};
+  }
+
+  /**
    * @return Read-only pointer to the buffer (Useful for executors.)
    */
   [[nodiscard]] virtual auto buffer(unsigned int id) const -> const void* = 0;

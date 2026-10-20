@@ -71,6 +71,9 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
     /** Next writing position for all tasks */
     size_t* positions;
 
+    /** What every rank that computes contributes, in the order of the ranks */
+    std::vector<size_t> parts;
+
     /** Number of asychronous buffer chunks we receive for this buffer */
     unsigned int bufferChunks;
   };
@@ -200,6 +203,14 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
     }
 
     return nullptr;
+  }
+
+  [[nodiscard]] auto bufferParts(unsigned int id) const -> std::vector<size_t> override {
+    if (m_scheduler != nullptr && m_scheduler->isExecutor() && id < m_executorBuffer.size()) {
+      return m_executorBuffer[id].parts;
+    }
+
+    return ThreadBase<Executor, InitParameter, Parameter>::bufferParts(id);
   }
 
   /**
@@ -646,6 +657,8 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
     }
 
     if (m_scheduler->isExecutor()) {
+      std::vector<size_t> parts(bufferOffsets, bufferOffsets + numComputeRanks);
+
       unsigned int bufferChunks = 0;
       size = layoutBuffer(bufferOffsets, sync, bufferChunks);
 
@@ -666,6 +679,7 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
       executorBufInfo.sync = sync;
       executorBufInfo.offsets = bufferOffsets;
       executorBufInfo.bufferChunks = bufferChunks;
+      executorBufInfo.parts = std::move(parts);
 
       // Initialize the current position
       executorBufInfo.positions = new size_t[numComputeRanks];
@@ -744,6 +758,9 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
     }
 
     if (m_scheduler->isExecutor()) {
+      m_executorBuffer[id].parts.assign(bufferOffsets,
+                                        bufferOffsets + m_scheduler->numComputeRanks());
+
       unsigned int bufferChunks = 0;
       size = layoutBuffer(bufferOffsets, m_executorBuffer[id].sync, bufferChunks);
 
@@ -772,6 +789,7 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
     m_executorBuffer[id].offsets = nullptr;
     delete[] m_executorBuffer[id].positions;
     m_executorBuffer[id].positions = nullptr;
+    m_executorBuffer[id].parts.clear();
 
     if (shared()) {
       freeWindow(id);

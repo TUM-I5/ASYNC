@@ -47,7 +47,10 @@ The buffers belong to the application between `wait()` and `call()`, and to
 ASYNC between `call()` and `wait()`. Every `call()` follows a `wait()`, the
 first one included. `addBuffer(nullptr, size)` lets ASYNC manage the memory
 of a buffer, which `managedBuffer()` hands out for the application to fill.
-In the executor, `ExecInfo` describes the buffers as the executor holds them.
+In the executor, `ExecInfo` describes the buffers as the executor holds them,
+and `bufferParts()` the contributions a buffer is made of: one for every rank
+in `NODE` mode. Each contribution is a block of its own, so data distributed
+along another dimension than its leading one has to be put together from them.
 
 ## Modes
 

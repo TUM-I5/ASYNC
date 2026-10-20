@@ -449,6 +449,10 @@ class OrderModule : private async::Module<OrderModule, Param, Param> {
   std::array<std::size_t, Steps> mManagedSize{};
   std::array<bool, Steps> mOrdered{};
 
+  /** The contributions the buffers are made of, as the executor sees them */
+  std::array<std::vector<std::size_t>, Steps> mParts{};
+  std::array<std::vector<std::size_t>, Steps> mManagedParts{};
+
   OrderModule() = default;
 
   void run(int rank) {
@@ -493,6 +497,8 @@ class OrderModule : private async::Module<OrderModule, Param, Param> {
   void exec(const async::ExecInfo& info, const Param& param) {
     mSize.at(param.step) = info.bufferSize(0);
     mManagedSize.at(param.step) = info.bufferSize(1);
+    mParts.at(param.step) = info.bufferParts(0);
+    mManagedParts.at(param.step) = info.bufferParts(1);
 
     const auto* values = static_cast<const int*>(info.buffer(0));
     const auto* managed = static_cast<const int*>(info.buffer(1));
@@ -845,6 +851,18 @@ class TestModule : public CxxTest::TestSuite {
       TS_ASSERT_EQUALS(module.mManagedSize[1], 3 * group * sizeof(int));
       TS_ASSERT(module.mOrdered[0]);
       TS_ASSERT(module.mOrdered[1]);
+
+      // one contribution for every rank, in the order of the ranks
+      std::array<std::vector<std::size_t>, OrderModule::Steps> parts;
+      std::array<std::vector<std::size_t>, OrderModule::Steps> managedParts;
+      for (std::size_t i = 0; i < group; i++) {
+        parts[0].push_back((i + 1) * sizeof(int));
+        managedParts[0].push_back((i + 1) * sizeof(int));
+        parts[1].push_back(2 * sizeof(int));
+        managedParts[1].push_back(3 * sizeof(int));
+      }
+      TS_ASSERT(module.mParts == parts);
+      TS_ASSERT(module.mManagedParts == managedParts);
     }
   }
 
