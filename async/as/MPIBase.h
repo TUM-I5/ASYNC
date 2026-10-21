@@ -12,12 +12,17 @@
 
 #include <cassert>
 #include <cstring>
+#include <map>
+#include <utility>
 #include <vector>
 
 #include "MPIScheduler.h"
 #include "ThreadBase.h"
 #include "async/Config.h"
+#include "async/ExecInfo.h"
 #include "async/as/Base.h"
+#include "async/as/Pin.h"
+#include "utils/logger.h"
 
 namespace async::as {
 
@@ -38,6 +43,19 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
 
     /** Current position of the buffer */
     size_t position;
+
+    /**
+     * The memory of this rank. On a co-located executor the buffer slot holds
+     * the aggregate of the whole group, so the local contribution is
+     * described here instead.
+     */
+    const void* origin;
+
+    /** Size of the local contribution */
+    size_t size;
+
+    /** Storage of the local contribution if ASYNC manages the buffer */
+    std::vector<uint8_t> managed;
   };
 
   /**
@@ -52,6 +70,9 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
 
     /** Next writing position for all tasks */
     size_t* positions;
+
+    /** What every rank that computes contributes, in the order of the ranks */
+    std::vector<size_t> parts;
 
     /** Number of asychronous buffer chunks we receive for this buffer */
     unsigned int bufferChunks;
@@ -75,8 +96,50 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   /** Buffer description on executors */
   std::vector<ExecutorBufInfo> m_executorBuffer;
 
+  /** Whether this rank has handed over the finalization of the module */
+  bool m_finalizeSent{false};
+
+  /**
+   * A buffer of a group whose nodes share memory. The ranks of a node map one
+   * window and write their parts of the buffer into it directly. On the node
+   * of the executor, the window is the aggregate itself. On any other node,
+   * it holds the parts of that node, which its last rank forwards to the
+   * executor in one piece: that rank is the executor of the node, as far as
+   * the transfer goes.
+   */
+  struct SharedWindow {
+    MPI_Win window{MPI_WIN_NULL};
+    /** The start of the aggregate, on the node of the executor */
+    uint8_t* aggregate{nullptr};
+    /** Where the part of this rank starts */
+    uint8_t* own{nullptr};
+    /** What the node holds, on the rank that forwards it */
+    const uint8_t* node{nullptr};
+    /** The size of what the node holds, on the rank that forwards it */
+    size_t nodeBytes{0};
+  };
+
+  /** The windows by buffer id, where the group shares memory */
+  std::vector<SharedWindow> m_windows;
+
+  /**
+   * Messages of the transfer from a node to the executor that are still on
+   * their way: the parts of the node on its last rank, and the notes that
+   * a part is complete on the others
+   */
+  std::vector<MPI_Request> m_forwardRequests;
+
+  /**
+   * The copy of a clone buffer that ASYNC manages, by buffer id, on a rank
+   * other than the first of its group. Only the copy of the first rank
+   * reaches the executor, but the application fills its copy on every rank.
+   */
+  std::map<unsigned int, std::vector<uint8_t>> m_cloneCopies;
+
   public:
-  MPIBase() : mMaxSend(async::Config::maxSend()) {}
+  explicit MPIBase(Config config)
+      : ThreadBase<Executor, InitParameter, Parameter>(config),
+        mMaxSend(Base<Executor, InitParameter, Parameter>::config().maxSend()) {}
 
   ~MPIBase() override { finalize(); }
 
@@ -93,9 +156,28 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   }
 
   /**
+   * Only an executor runs a thread of its own; on a rank that only computes,
+   * pinning it would pin the calling thread instead
+   */
+  auto isAffinityNecessary() -> bool override {
+    return m_scheduler != nullptr && m_scheduler->isExecutor();
+  }
+
+  void setAffinityIfNecessary(const CpuMask& cpuSet) override {
+    if (isAffinityNecessary()) {
+      ThreadBase<Executor, InitParameter, Parameter>::setAffinityIfNecessary(cpuSet);
+    }
+  }
+
+  /**
    * @param executor
    */
   void setExecutor(Executor& executor) override {
+    if (m_scheduler == nullptr) {
+      logError() << "ASYNC: The module has no scheduler. A module created after"
+                 << "Dispatcher::init() has to be attached to the dispatcher.";
+    }
+
     // Initialization on the executor
     if (m_scheduler->isExecutor()) {
       ThreadBase<Executor, InitParameter, Parameter>::setExecutor(executor);
@@ -103,7 +185,14 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   }
 
   void removeBuffer(unsigned int id) override {
+    waitForwards();
     m_scheduler->removeBuffer(m_id, id);
+    m_cloneCopies.erase(id);
+
+    if (shared() && !m_scheduler->isColocated()) {
+      // (on an executor that computes as well, the loop thread frees it for both roles)
+      freeWindow(id);
+    }
 
     Base<Executor, InitParameter, Parameter>::removeBuffer(id);
   }
@@ -114,6 +203,14 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
     }
 
     return nullptr;
+  }
+
+  [[nodiscard]] auto bufferParts(unsigned int id) const -> std::vector<size_t> override {
+    if (m_scheduler != nullptr && m_scheduler->isExecutor() && id < m_executorBuffer.size()) {
+      return m_executorBuffer[id].parts;
+    }
+
+    return ThreadBase<Executor, InitParameter, Parameter>::bufferParts(id);
   }
 
   /**
@@ -127,6 +224,16 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
     assert(id < (Base<Executor, InitParameter, Parameter>::numBuffers()));
 
     if (isClone(id) && m_scheduler->groupRank() != 0) {
+      return;
+    }
+
+    if (shared()) {
+      sendBufferShared(id, size);
+      return;
+    }
+
+    if (m_scheduler->isColocated()) {
+      sendBufferLocal(id, size);
       return;
     }
 
@@ -145,9 +252,48 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   }
 
   /**
+   * Put the contribution of this rank into its part of the shared window. A
+   * buffer ASYNC manages already lives there.
+   */
+  void sendBufferShared(unsigned int id, size_t size) {
+    uint8_t* target = m_windows[id].own + bufferPos(id);
+    const auto* source = static_cast<const uint8_t*>(localOrigin(id));
+    if (source != nullptr && source + bufferPos(id) != target) {
+      async::ExecInfo::bufferOrigin(id).copyFrom(target, source + bufferPos(id), size);
+    }
+    incBufferPos(id, size);
+  }
+
+  /**
+   * Move the contribution of a co-located executor rank into the aggregation
+   * buffer without going through MPI
+   */
+  void sendBufferLocal(unsigned int id, size_t size) {
+    const auto* buffer = static_cast<const uint8_t*>(localOrigin(id));
+    if (buffer == nullptr) {
+      buffer = static_cast<const uint8_t*>(localManagedBuffer(id));
+    }
+    if (buffer == nullptr) {
+      buffer = m_scheduler->managedBuffer();
+    }
+
+    const int rank = m_scheduler->groupRank();
+
+    for (size_t done = 0; done < size; done += maxSend()) {
+      const size_t copy = std::min(maxSend(), size - done);
+
+      void* target = getBufferPos(id, rank, static_cast<int>(copy));
+      async::ExecInfo::bufferOrigin(id).copyFrom(target, buffer + bufferPos(id), copy);
+      incBufferPos(id, copy);
+    }
+  }
+
+  /**
    * Wait for an asynchronous call to finish
    */
   void wait() override {
+    waitForwards();
+
     // Wait for the call to finish
     m_scheduler->wait(m_id);
 
@@ -158,23 +304,134 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
    * @warning Only the parameter from one task will be considered
    */
   void callInit(const InitParameter& parameters) override {
+    publishWindows();
     m_scheduler->sendInitParam(m_id, parameters);
 
     resetBufferPosition();
   }
 
   void finalize() override {
+    waitForwards();
+
+    if (m_scheduler != nullptr && m_scheduler->isColocated()) {
+      // The executor side owns the buffers of this rank. It finalizes the
+      // module on the loop thread once the whole group is done with it, and
+      // this returns only then.
+      if (m_id >= 0 && !m_finalizeSent) {
+        m_finalizeSent = true;
+        m_scheduler->sendFinalize(m_id);
+      }
+      Base<Executor, InitParameter, Parameter>::finalizeInternal();
+      return;
+    }
+
     if (!Base<Executor, InitParameter, Parameter>::finalizeInternal()) {
       return;
     }
 
-    if (m_id >= 0 && !m_scheduler->isExecutor()) {
+    if (m_scheduler != nullptr && m_id >= 0 && m_scheduler->isCompute()) {
       m_scheduler->sendFinalize(m_id);
+
+      // the executor frees the windows together with this rank once it finalizes the module;
+      // without a dispatcher, that will not happen any more
+      if (!m_scheduler->finalized()) {
+        freeWindows();
+      }
     }
   }
 
   protected:
   [[nodiscard]] auto maxSend() const -> size_t { return mMaxSend; }
+
+  /**
+   * @return Whether the buffers of this module live in shared windows
+   */
+  [[nodiscard]] auto shared() const -> bool {
+    return m_scheduler != nullptr && m_scheduler->sharedMemory();
+  }
+
+  /**
+   * The part of a shared window this rank writes to
+   */
+  [[nodiscard]] auto sharedOwn(unsigned int id) const -> void* { return m_windows[id].own; }
+
+  /**
+   * Make what this rank wrote into the shared windows visible to the ranks of
+   * its node, or what they wrote visible to this rank; called before the
+   * parameters of a call are sent, and before the executor runs it
+   */
+  void syncWindows() {
+    for (const auto& window : m_windows) {
+      if (window.window != MPI_WIN_NULL) {
+        MPI_Win_sync(window.window);
+      }
+    }
+  }
+
+  /**
+   * Hand what this rank wrote into the shared windows on to the executor;
+   * called before the parameters of a call are sent.
+   *
+   * On the node of the executor, the windows are the aggregate, and making
+   * the writes visible is all there is to it. On another node, every rank
+   * tells the last rank of the node that its part is complete, and that rank
+   * sends the parts of the whole node to the executor, which receives them
+   * in place. A rank that only notes its part as complete does not wait for
+   * anything; the transfer is settled with the next wait.
+   */
+  void publishWindows() {
+    syncWindows();
+
+    if (!shared() || m_scheduler->onExecutorNode() || m_windows.empty()) {
+      return;
+    }
+
+    MPI_Comm nodeComm = m_scheduler->nodeComm();
+    int nodeRank = 0;
+    int nodeSize = 0;
+    MPI_Comm_rank(nodeComm, &nodeRank);
+    MPI_Comm_size(nodeComm, &nodeSize);
+    const int forwarder = nodeSize - 1;
+
+    if (nodeRank != forwarder) {
+      // (a message of no size, which leaves this rank before it would have to wait for anybody)
+      m_forwardRequests.push_back(MPI_REQUEST_NULL);
+      MPI_Isend(nullptr, 0, MPI_BYTE, forwarder, m_id, nodeComm, &m_forwardRequests.back());
+      return;
+    }
+
+    // one note from every other rank of the node, in the order they were sent
+    std::vector<MPI_Request> notes(forwarder, MPI_REQUEST_NULL);
+    for (int rank = 0; rank < forwarder; rank++) {
+      MPI_Irecv(nullptr, 0, MPI_BYTE, rank, m_id, nodeComm, &notes[rank]);
+    }
+    MPI_Waitall(static_cast<int>(notes.size()), notes.data(), MPI_STATUSES_IGNORE);
+    syncWindows();
+
+    for (unsigned int id = 0; id < m_windows.size(); id++) {
+      const auto& window = m_windows[id];
+      for (size_t done = 0; done < window.nodeBytes; done += maxSend()) {
+        const size_t send = std::min(maxSend(), window.nodeBytes - done);
+        const MPIRequest2 requests =
+            m_scheduler->iSendBuffer(m_id, id, window.node + done, static_cast<int>(send));
+        m_forwardRequests.push_back(requests.r[0]);
+        m_forwardRequests.push_back(requests.r[1]);
+      }
+    }
+  }
+
+  /**
+   * Settle the transfer of the windows of this node to the executor
+   */
+  void waitForwards() {
+    if (m_forwardRequests.empty()) {
+      return;
+    }
+
+    MPI_Waitall(
+        static_cast<int>(m_forwardRequests.size()), m_forwardRequests.data(), MPI_STATUSES_IGNORE);
+    m_forwardRequests.clear();
+  }
 
   [[nodiscard]] auto id() const -> int { return m_id; }
 
@@ -185,26 +442,140 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   auto addBuffer(const void* buffer, size_t size, bool clone = false, bool sync = true)
       -> unsigned {
     assert(m_scheduler);
-    assert(!m_scheduler->isExecutor());
+    assert(m_scheduler->isCompute());
 
-    m_scheduler->addBuffer(m_id, Base<Executor, InitParameter, Parameter>::numBuffers());
+    m_scheduler->addBuffer(
+        m_id, Base<Executor, InitParameter, Parameter>::numBuffers(), sync, buffer, size, clone);
+
+    if (m_scheduler->isColocated()) {
+      // The loop thread has registered the buffer for both roles already
+      return Base<Executor, InitParameter, Parameter>::numBuffers() - 1;
+    }
 
     return addBufferInternal(buffer, size, clone, sync);
   }
 
   void resizeBuffer(unsigned int id, const void* buffer, size_t size) override {
     assert(m_scheduler);
-    assert(!m_scheduler->isExecutor());
+    assert(m_scheduler->isCompute());
+
+    waitForwards();
+
+    keepCloneCopy(id, buffer, size, m_buffer[id].clone);
+
+    if (m_scheduler->isColocated()) {
+      m_scheduler->resizeBuffer(m_id, id, buffer, size, m_buffer[id].clone);
+      return;
+    }
 
     // Resize the buffer on the compute node
     Base<Executor, InitParameter, Parameter>::resizeBufferInternal(id, buffer, size);
 
-    m_scheduler->resizeBuffer(m_id, id);
+    m_scheduler->resizeBuffer(m_id, id, buffer, size, m_buffer[id].clone);
 
     resizeBufferInternal(id, buffer, size);
   }
 
+  /**
+   * Register a buffer slot on the compute side, unless the loop thread of a
+   * co-located executor rank has already done so
+   */
+  auto addBufferLocal(const void* buffer, size_t size, bool allocate) -> unsigned int {
+    if (m_scheduler->isColocated()) {
+      return Base<Executor, InitParameter, Parameter>::numBuffers() - 1;
+    }
+
+    return Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, allocate);
+  }
+
   [[nodiscard]] auto isClone(unsigned int id) const -> bool { return m_buffer[id].clone; }
+
+  /**
+   * Whether this rank fills a clone buffer that ASYNC manages without sending
+   * it: the first rank of the group sends its copy
+   */
+  [[nodiscard]] auto unsentClone(const void* buffer, bool clone) const -> bool {
+    return buffer == nullptr && clone && m_scheduler->groupRank() != 0;
+  }
+
+  /**
+   * Give the application a copy of a clone buffer to fill, where this rank
+   * does not send it
+   */
+  void keepCloneCopy(unsigned int id, const void* buffer, size_t size, bool clone) {
+    if (unsentClone(buffer, clone)) {
+      m_cloneCopies[id].resize(size);
+    } else {
+      m_cloneCopies.erase(id);
+    }
+  }
+
+  [[nodiscard]] auto hasCloneCopy(unsigned int id) const -> bool {
+    return m_cloneCopies.find(id) != m_cloneCopies.end();
+  }
+
+  /**
+   * The copy of a clone buffer this rank fills without sending it
+   */
+  auto cloneCopy(unsigned int id) -> void* { return m_cloneCopies.at(id).data(); }
+
+  /**
+   * The memory this rank contributes to a buffer
+   */
+  [[nodiscard]] auto localOrigin(unsigned int id) const -> const void* {
+    if (m_scheduler->isColocated()) {
+      return m_buffer[id].origin;
+    }
+
+    return Base<Executor, InitParameter, Parameter>::origin(id);
+  }
+
+  /**
+   * The memory this rank contributes to a buffer, as the application sees it
+   */
+  [[nodiscard]] auto localBuffer(unsigned int id) const -> const void* override {
+    if (shared()) {
+      return m_windows[id].own;
+    }
+
+    if (m_scheduler != nullptr && m_scheduler->isColocated()) {
+      if (m_buffer[id].origin != nullptr) {
+        return m_buffer[id].origin;
+      }
+      if (!m_buffer[id].managed.empty()) {
+        return m_buffer[id].managed.data();
+      }
+      return nullptr;
+    }
+
+    return buffer(id);
+  }
+
+  /**
+   * Storage of the local contribution where ASYNC manages the buffer
+   */
+  auto localManagedBuffer(unsigned int id) -> void* {
+    if (m_buffer[id].managed.empty()) {
+      return nullptr;
+    }
+
+    return m_buffer[id].managed.data();
+  }
+
+  /**
+   * The size this rank contributes to a buffer.
+   *
+   * On a co-located executor rank the buffer slot reports the size of the
+   * aggregate, which is not what the compute side of the same rank hands to
+   * {@link sendBuffer}.
+   */
+  [[nodiscard]] auto localBufferSize(unsigned int id) const -> size_t override {
+    if (m_scheduler->isColocated()) {
+      return m_buffer[id].size;
+    }
+
+    return async::ExecInfo::bufferSize(id);
+  }
 
   /**
    * The current position of a buffer on non-executors
@@ -236,12 +607,15 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   [[nodiscard]] auto useAsyncCopy(unsigned int id) const -> bool override {
     assert(id < m_executorBuffer.size());
 
-    return useAsyncCopy() && !m_executorBuffer[id].sync;
+    // what other nodes forward arrives with the call, whether the buffer is synchronized or not
+    return useAsyncCopy() && (!m_executorBuffer[id].sync || shared());
   }
 
   [[nodiscard]] auto numBufferChunks() const -> unsigned int override { return m_numBufferChunks; }
 
-  void addBufferInternal(bool sync) override { addBufferInternal(nullptr, 0, false, sync); }
+  void addBufferInternal(bool sync, const LocalBuffer& local) override {
+    addBufferInternal(local.origin, local.size, local.clone, sync);
+  }
 
   auto addBufferInternal(const void* origin,
                          unsigned long size,
@@ -253,12 +627,13 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
     }
 
     const int executorRank = m_scheduler->groupSize() - 1;
+    const int numComputeRanks = m_scheduler->numComputeRanks();
 
     // Compute buffer size and offsets
     unsigned long* bufferOffsets = nullptr;
     if (m_scheduler->isExecutor()) {
-      assert(origin == nullptr);
-      assert(size == 0);
+      assert(m_scheduler->isCompute() || origin == nullptr);
+      assert(m_scheduler->isCompute() || size == 0);
 
       bufferOffsets = new unsigned long[m_scheduler->groupSize()];
     }
@@ -272,58 +647,88 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
                executorRank,
                m_scheduler->privateGroupComm());
 
+    const unsigned long localSize = size;
+
+    // the id of the buffer this adds
+    const auto id =
+        static_cast<unsigned int>(Base<Executor, InitParameter, Parameter>::numBuffers());
+    if (shared()) {
+      allocateWindow(id, localSize);
+    }
+
     if (m_scheduler->isExecutor()) {
-      // Compute total size, offsets and buffer chunks
-      size = 0;
+      std::vector<size_t> parts(bufferOffsets, bufferOffsets + numComputeRanks);
+
       unsigned int bufferChunks = 0;
-      for (int i = 0; i < m_scheduler->groupSize() - 1; i++) {
-        // Compute offsets from the size
-        const unsigned long bufSize = bufferOffsets[i];
-        bufferOffsets[i] = size;
-
-        if (bufSize > 0) {
-          // Increment the total buffer size
-          size += bufSize;
-
-          if (!sync) {
-            // Increment the number of buffer chunks
-            bufferChunks += (bufSize + mMaxSend - 1) / mMaxSend;
-          }
-        }
-      }
+      size = layoutBuffer(bufferOffsets, sync, bufferChunks);
 
       m_numBufferChunks += bufferChunks;
 
       // Create the buffer
-      ThreadBase<Executor, InitParameter, Parameter>::addBuffer(nullptr, size);
+      if (shared()) {
+        // the window is the aggregate; it is not to be touched by the executor thread, since the
+        // ranks of the node may write their parts right away
+        Base<Executor, InitParameter, Parameter>::addBufferInternal(nullptr, size, false);
+        Base<Executor, InitParameter, Parameter>::setExternalBufferInternal(
+            id, m_windows[id].aggregate);
+      } else {
+        ThreadBase<Executor, InitParameter, Parameter>::addBuffer(nullptr, size);
+      }
 
       ExecutorBufInfo executorBufInfo{};
       executorBufInfo.sync = sync;
       executorBufInfo.offsets = bufferOffsets;
       executorBufInfo.bufferChunks = bufferChunks;
+      executorBufInfo.parts = std::move(parts);
 
       // Initialize the current position
-      executorBufInfo.positions = new size_t[m_scheduler->groupSize() - 1];
-      memset(executorBufInfo.positions, 0, (m_scheduler->groupSize() - 1) * sizeof(size_t));
+      executorBufInfo.positions = new size_t[numComputeRanks];
+      memset(executorBufInfo.positions, 0, numComputeRanks * sizeof(size_t));
 
       m_executorBuffer.push_back(executorBufInfo);
-    } else {
-      BufInfo bufInfo{};
-      bufInfo.clone = clone;
-      bufInfo.position = 0;
 
-      m_buffer.push_back(bufInfo);
+      if (m_scheduler->isCompute()) {
+        pushComputeBuffer(origin, localSize, clone);
+      }
+    } else {
+      pushComputeBuffer(origin, size, clone);
     }
 
     return Base<Executor, InitParameter, Parameter>::numBuffers() - 1;
   }
 
-  void resizeBufferInternal(unsigned int id) override { resizeBufferInternal(id, nullptr, 0); }
+  void pushComputeBuffer(const void* origin, size_t size, bool clone) {
+    BufInfo bufInfo{};
+    bufInfo.clone = clone;
+    bufInfo.position = 0;
+    bufInfo.origin = origin;
+    bufInfo.size = size;
+
+    // A co-located rank cannot stage into the buffer slot, because that slot
+    // holds the aggregate of the whole group
+    if (origin == nullptr && useAsyncCopy() && m_scheduler->isColocated() && !shared()) {
+      bufInfo.managed.resize(size);
+    }
+
+    m_buffer.push_back(std::move(bufInfo));
+  }
+
+  void resizeBufferInternal(unsigned int id, const LocalBuffer& local) override {
+    resizeBufferInternal(id, local.origin, local.size);
+  }
 
   void resizeBufferInternal(unsigned int id, const void* buffer, size_t size) {
-    if (!m_scheduler->isExecutor()) {
+    if (m_scheduler->isCompute()) {
       if (m_buffer[id].clone && m_scheduler->groupRank() != 0) {
         size = 0;
+      }
+    }
+
+    if (m_scheduler->isColocated()) {
+      m_buffer[id].origin = buffer;
+      m_buffer[id].size = size;
+      if (!shared() && (!m_buffer[id].managed.empty() || (buffer == nullptr && useAsyncCopy()))) {
+        m_buffer[id].managed.resize(size);
       }
     }
 
@@ -332,7 +737,7 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
     // Compute buffer size and offsets
     unsigned long* bufferOffsets = nullptr;
     if (m_scheduler->isExecutor()) {
-      assert(size == 0);
+      assert(m_scheduler->isCompute() || size == 0);
 
       bufferOffsets = m_executorBuffer[id].offsets;
     }
@@ -346,30 +751,29 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
                executorRank,
                m_scheduler->privateGroupComm());
 
+    if (shared()) {
+      // a window has a fixed size: the node makes a new one
+      freeWindow(id);
+      allocateWindow(id, size);
+    }
+
     if (m_scheduler->isExecutor()) {
-      // Compute total size, offsets and buffer chunks
-      size = 0;
+      m_executorBuffer[id].parts.assign(bufferOffsets,
+                                        bufferOffsets + m_scheduler->numComputeRanks());
+
       unsigned int bufferChunks = 0;
-      for (int i = 0; i < m_scheduler->groupSize() - 1; i++) {
-        // Compute offsets from the size
-        const unsigned long bufSize = bufferOffsets[i];
-        bufferOffsets[i] = size;
-
-        if (bufSize > 0) {
-          // Increment the total buffer size
-          size += bufSize;
-
-          if (!m_executorBuffer[id].sync) {
-            // Increment the number of buffer chunks
-            bufferChunks += (bufSize + mMaxSend - 1) / mMaxSend;
-          }
-        }
-      }
+      size = layoutBuffer(bufferOffsets, m_executorBuffer[id].sync, bufferChunks);
 
       m_numBufferChunks += bufferChunks - m_executorBuffer[id].bufferChunks;
 
       // Resize the buffer
-      ThreadBase<Executor, InitParameter, Parameter>::resizeBuffer(id, nullptr, size);
+      if (shared()) {
+        Base<Executor, InitParameter, Parameter>::resizeBufferInternal(id, nullptr, size);
+        Base<Executor, InitParameter, Parameter>::setExternalBufferInternal(
+            id, m_windows[id].aggregate);
+      } else {
+        ThreadBase<Executor, InitParameter, Parameter>::resizeBuffer(id, nullptr, size);
+      }
 
       m_executorBuffer[id].bufferChunks = bufferChunks;
     }
@@ -385,12 +789,17 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
     m_executorBuffer[id].offsets = nullptr;
     delete[] m_executorBuffer[id].positions;
     m_executorBuffer[id].positions = nullptr;
+    m_executorBuffer[id].parts.clear();
+
+    if (shared()) {
+      freeWindow(id);
+    }
 
     Base<Executor, InitParameter, Parameter>::removeBuffer(id);
   }
 
   auto getBufferPos(unsigned int id, int rank, int size) -> void* override {
-    assert(rank < m_scheduler->groupSize() - 1);
+    assert(rank < m_scheduler->numComputeRanks());
     assert(bufferOffset(id, rank) + size <=
            (Base<Executor, InitParameter, Parameter>::bufferSize(id)));
 
@@ -401,6 +810,7 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   }
 
   void execInitInternal(const void* paramBuffer) override {
+    syncWindows();
     const auto* param = reinterpret_cast<const InitParameter*>(paramBuffer);
     Base<Executor, InitParameter, Parameter>::callInit(*param);
 
@@ -408,6 +818,7 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   }
 
   void execInternal(const void* paramBuffer) override {
+    syncWindows();
     const auto* param = reinterpret_cast<const Parameter*>(paramBuffer);
     ThreadBase<Executor, InitParameter, Parameter>::call(*param);
   }
@@ -426,7 +837,171 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
       execBuffer.positions = nullptr;
     }
 
+    // the writer thread is done with the windows once it has stopped
     ThreadBase<Executor, InitParameter, Parameter>::finalize();
+
+    if (!m_scheduler->killing()) {
+      // (the ranks of the group free them together with the executor, which they do not when
+      // the executor shuts their modules down on its own)
+      freeWindows();
+    }
+  }
+
+  /**
+   * Lay out a buffer on the executor: where the part of every rank starts in
+   * the aggregate, and how many chunks of it the loop waits for with a call
+   *
+   * @param offsets The sizes of the parts by group rank; their offsets on return
+   * @param sync Whether the ranks send the buffer synchronously
+   * @param bufferChunks The number of chunks
+   * @return The size of the aggregate
+   */
+  auto layoutBuffer(unsigned long* offsets, bool sync, unsigned int& bufferChunks)
+      -> unsigned long {
+    const int numComputeRanks = m_scheduler->numComputeRanks();
+
+    unsigned long size = 0;
+    bufferChunks = 0;
+    for (int i = 0; i < numComputeRanks; i++) {
+      const unsigned long bufSize = offsets[i];
+      offsets[i] = size;
+      size += bufSize;
+
+      // The contribution of this rank is copied in place, and a shared window
+      // gets the contributions of its node without any message, so neither
+      // shows up as a chunk the loop has to wait for
+      if (bufSize > 0 && !sync && !shared() && i != m_scheduler->groupRank()) {
+        bufferChunks += (bufSize + mMaxSend - 1) / mMaxSend;
+      }
+    }
+
+    if (!shared()) {
+      return size;
+    }
+
+    // Every other node sends its parts in one piece, from its last rank, to
+    // where the first of them starts
+    const int executorNode = m_scheduler->nodeOf(m_scheduler->groupSize() - 1);
+    for (int first = 0; first < numComputeRanks;) {
+      const int node = m_scheduler->nodeOf(first);
+      int last = first;
+      while (last + 1 < numComputeRanks && m_scheduler->nodeOf(last + 1) == node) {
+        last++;
+      }
+
+      if (node != executorNode) {
+        const unsigned long start = offsets[first];
+        const unsigned long end = (last + 1 < numComputeRanks) ? offsets[last + 1] : size;
+        offsets[last] = start;
+        if (useAsyncCopy()) {
+          bufferChunks += (end - start + mMaxSend - 1) / mMaxSend;
+        }
+      }
+
+      first = last + 1;
+    }
+
+    return size;
+  }
+
+  /**
+   * Allocate the shared window of a buffer, together with the other ranks of
+   * the node, and find this rank's part in it
+   *
+   * @param localSize The size this rank contributes
+   */
+  void allocateWindow(unsigned int id, unsigned long localSize) {
+    MPI_Comm groupComm = m_scheduler->privateGroupComm();
+    MPI_Comm nodeComm = m_scheduler->nodeComm();
+
+    // where the part of this rank starts in the aggregate ...
+    unsigned long offset = 0;
+    MPI_Exscan(&localSize, &offset, 1, MPI_UNSIGNED_LONG, MPI_SUM, groupComm);
+    if (m_scheduler->groupRank() == 0) {
+      // MPI_Exscan leaves the result undefined on the first rank
+      offset = 0;
+    }
+
+    // ... and among the parts of its node
+    int nodeRank = 0;
+    int nodeSize = 0;
+    MPI_Comm_rank(nodeComm, &nodeRank);
+    MPI_Comm_size(nodeComm, &nodeSize);
+    unsigned long nodeOffset = 0;
+    MPI_Exscan(&localSize, &nodeOffset, 1, MPI_UNSIGNED_LONG, MPI_SUM, nodeComm);
+    if (nodeRank == 0) {
+      nodeOffset = 0;
+    }
+
+    // On the node of the executor, the window is the aggregate: its first
+    // rank makes room for the parts of the other nodes, which come first, and
+    // for aligning the start, which only the executor needs to be aligned
+    const bool executorNode = m_scheduler->onExecutorNode();
+    const size_t alignment = Base<Executor, InitParameter, Parameter>::alignment();
+    unsigned long request = localSize;
+    if (executorNode && nodeRank == 0) {
+      request += offset + alignment;
+    }
+
+    SharedWindow window;
+    void* start = nullptr;
+    MPI_Win_allocate_shared(
+        static_cast<MPI_Aint>(request), 1, MPI_INFO_NULL, nodeComm, &start, &window.window);
+
+    // the start of the window (the part of the first rank that has any memory), rather than the
+    // part of this rank
+    MPI_Aint segmentSize = 0;
+    int unit = 0;
+    MPI_Win_shared_query(window.window, MPI_PROC_NULL, &segmentSize, &unit, &start);
+    auto* base = static_cast<uint8_t*>(start);
+
+    if (executorNode) {
+      unsigned long padding = 0;
+      if (m_scheduler->isExecutor() && alignment > 0 && base != nullptr) {
+        const auto address = reinterpret_cast<std::uintptr_t>(base);
+        padding = (alignment - address % alignment) % alignment;
+      }
+      // (the executor is the last rank of its node)
+      MPI_Bcast(&padding, 1, MPI_UNSIGNED_LONG, nodeSize - 1, nodeComm);
+
+      window.aggregate = base == nullptr ? nullptr : base + padding;
+      window.own = window.aggregate == nullptr ? nullptr : window.aggregate + offset;
+    } else {
+      window.own = base == nullptr ? nullptr : base + nodeOffset;
+      if (nodeRank == nodeSize - 1) {
+        window.node = base;
+        window.nodeBytes = nodeOffset + localSize;
+      }
+    }
+
+    // one passive epoch for the life of the window; MPI_Win_sync orders the
+    // accesses within it
+    MPI_Win_lock_all(MPI_MODE_NOCHECK, window.window);
+
+    if (id >= m_windows.size()) {
+      m_windows.resize(id + 1);
+    }
+    m_windows[id] = window;
+  }
+
+  /**
+   * Free the shared window of a buffer, together with the other ranks of the
+   * node
+   */
+  void freeWindow(unsigned int id) {
+    if (id >= m_windows.size() || m_windows[id].window == MPI_WIN_NULL) {
+      return;
+    }
+
+    MPI_Win_unlock_all(m_windows[id].window);
+    MPI_Win_free(&m_windows[id].window);
+    m_windows[id] = SharedWindow{};
+  }
+
+  void freeWindows() {
+    for (unsigned int id = 0; id < m_windows.size(); id++) {
+      freeWindow(id);
+    }
   }
 
   /**
@@ -444,7 +1019,7 @@ class MPIBase : public ThreadBase<Executor, InitParameter, Parameter>, private S
   void resetBufferPositionOnExecutor() {
     for (auto& execBuffer : m_executorBuffer) {
       if (execBuffer.positions) {
-        memset(execBuffer.positions, 0, (m_scheduler->groupSize() - 1) * sizeof(size_t));
+        memset(execBuffer.positions, 0, m_scheduler->numComputeRanks() * sizeof(size_t));
       }
     }
   }

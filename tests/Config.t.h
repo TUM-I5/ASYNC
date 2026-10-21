@@ -5,49 +5,102 @@
 
 #include <cxxtest/TestSuite.h>
 
-#include "async/Config.h"
+#include <stdlib.h>
 
-/**
- * @todo Reset the config after each test
- */
+#include "async/Config.h"
+#include "utils/env.h"
+
 class TestConfig : public CxxTest::TestSuite {
   public:
-  static void testMode() {
-    TS_ASSERT_EQUALS(async::Config::mode(), async::Mode::Sync);
+  static void testDefaults() {
+    const async::Config config;
 
-    async::Config::setMode(async::Mode::Thread);
-    TS_ASSERT_EQUALS(async::Config::mode(), async::Mode::Thread);
+    TS_ASSERT_EQUALS(config.mode(), async::Mode::Sync);
+    TS_ASSERT_EQUALS(config.pinCore(), -1);
+    TS_ASSERT_EQUALS(config.groupLayout().executorsPerNode, 1);
+    TS_ASSERT_EQUALS(config.groupLayout().groupNodes, 1);
+    TS_ASSERT_EQUALS(config.groupLayout().maxGroupRanks, 0);
+    TS_ASSERT_EQUALS(config.groupLayout().exclusive, false);
+    TS_ASSERT_EQUALS(config.useAsyncCopy(), true);
+    TS_ASSERT_EQUALS(config.alignment(), 0);
+    TS_ASSERT_EQUALS(config.maxSend(), 1UL << 30);
+    TS_ASSERT_EQUALS(config.pollIntervalUs(), -1);
+    TS_ASSERT_EQUALS(config.sharedMemory(), true);
   }
 
-  static void testGetPinCore() {
-    TS_ASSERT_EQUALS(async::Config::getPinCore(), -1);
+  static void testSetters() {
+    async::Config config;
 
-    async::Config::setPinCore(0);
-    TS_ASSERT_EQUALS(async::Config::getPinCore(), 0);
+    config.setMode(async::Mode::Thread)
+        .setPinCore(0)
+        .setGroupLayout(async::GroupLayout{2, 4, 0})
+        .setAlignment(2048)
+        .setUseAsyncCopy(false)
+        .setMaxSend(4096)
+        .setPollIntervalUs(250)
+        .setSharedMemory(false);
+
+    TS_ASSERT_EQUALS(config.mode(), async::Mode::Thread);
+    TS_ASSERT_EQUALS(config.pinCore(), 0);
+    TS_ASSERT_EQUALS(config.groupLayout().executorsPerNode, 2);
+    TS_ASSERT_EQUALS(config.groupLayout().groupNodes, 4);
+    TS_ASSERT_EQUALS(config.alignment(), 2048);
+    TS_ASSERT_EQUALS(config.useAsyncCopy(), false);
+    TS_ASSERT_EQUALS(config.maxSend(), 4096);
+    TS_ASSERT_EQUALS(config.pollIntervalUs(), 250);
+    TS_ASSERT_EQUALS(config.sharedMemory(), false);
   }
 
+  /**
+   * An application reads the settings under a prefix of its own first, and
+   * under the plain one after that
+   */
+  static void testPrefixes() {
+    setenv("TESTAPP_ASYNC_MODE", "THREAD", 1);
+    setenv("TESTPLAIN_ASYNC_MODE", "SYNC", 1);
+    setenv("TESTPLAIN_ASYNC_EXECUTORS_PER_NODE", "3", 1);
+
+    const async::Config config{utils::Env{"TESTAPP_ASYNC_", "TESTPLAIN_ASYNC_"}};
+
+    unsetenv("TESTAPP_ASYNC_MODE");
+    unsetenv("TESTPLAIN_ASYNC_MODE");
+    unsetenv("TESTPLAIN_ASYNC_EXECUTORS_PER_NODE");
+
+    TS_ASSERT_EQUALS(config.mode(), async::Mode::Thread);
+    TS_ASSERT_EQUALS(config.groupLayout().executorsPerNode, 3);
+  }
+
+  /** The deprecated GROUP_SIZE bounds the ranks per executor */
   static void testGroupSize() {
-    TS_ASSERT_EQUALS(async::Config::groupSize(), 1);
+    setenv("TESTAPP_ASYNC_GROUP_SIZE", "5", 1);
 
-    async::Config::setGroupSize(4);
-    TS_ASSERT_EQUALS(async::Config::groupSize(), 1);
+    const async::Config config{utils::Env{"TESTAPP_ASYNC_"}};
 
-    async::Config::setMode(async::Mode::MPI);
-    async::Config::setGroupSize(4);
-    TS_ASSERT_EQUALS(async::Config::groupSize(), 4);
+    unsetenv("TESTAPP_ASYNC_GROUP_SIZE");
+
+    TS_ASSERT_EQUALS(config.groupLayout().maxGroupRanks, 5);
   }
 
-  static void testUseAsyncCopy() {
-    TS_ASSERT_EQUALS(async::Config::useAsyncCopy(), true);
+  static void testIndependence() {
+    async::Config first;
+    const async::Config second;
 
-    async::Config::setUseAsyncCopy(false);
-    TS_ASSERT_EQUALS(async::Config::useAsyncCopy(), false);
+    first.setAlignment(4096);
+
+    TS_ASSERT_EQUALS(first.alignment(), 4096);
+    TS_ASSERT_EQUALS(second.alignment(), 0);
   }
 
-  static void testAlignment() {
-    TS_ASSERT_EQUALS(async::Config::alignment(), 0);
-
-    async::Config::setAlignment(2048);
-    TS_ASSERT_EQUALS(async::Config::alignment(), 2048);
+  static void testModeParsing() {
+    TS_ASSERT_EQUALS(async::Config::str2mode("thread"), async::Mode::Thread);
+    TS_ASSERT_EQUALS(async::Config::str2mode("SYNC"), async::Mode::Sync);
+    TS_ASSERT_EQUALS(async::Config::str2mode("nonsense"), async::Mode::Sync);
+    // the dispatcher settles it, with MPI or without
+    TS_ASSERT_EQUALS(async::Config::str2mode("auto"), async::Mode::Auto);
+#ifdef USE_MPI
+    TS_ASSERT_EQUALS(async::Config::str2mode("node"), async::Mode::MPI);
+    // the deprecated name
+    TS_ASSERT_EQUALS(async::Config::str2mode("MPI"), async::Mode::MPI);
+#endif // USE_MPI
   }
 };

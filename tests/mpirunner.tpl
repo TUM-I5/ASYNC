@@ -11,7 +11,9 @@
 int main(int argc, char** argv)
 {
 #ifdef USE_MPI
-    MPI_Init(&argc, &argv);
+    // MPI mode calls MPI from the scheduler loop and the executor thread at once
+    int provided = 0;
+    MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
 #endif
 
     CxxTest::ErrorPrinter tester;

@@ -11,6 +11,10 @@
 #include <cstddef>
 #include <vector>
 
+#ifdef USE_MPI
+#include <mpi.h>
+#endif // USE_MPI
+
 namespace async {
 
 /**
@@ -23,10 +27,12 @@ class ExecInfo {
 
   std::vector<BufferOrigin*> m_bufferOrigin;
 
-  HostBufferOrigin* m_hostBuffer;
+#ifdef USE_MPI
+  MPI_Comm m_comm{MPI_COMM_NULL};
+#endif // USE_MPI
 
   public:
-  ExecInfo() : m_hostBuffer(new HostBufferOrigin()) {}
+  ExecInfo() = default;
 
   virtual ~ExecInfo() = default;
 
@@ -36,6 +42,21 @@ class ExecInfo {
   [[nodiscard]] virtual auto isExecutor() const -> bool {
     return false; // Default for sync and thread
   }
+
+#ifdef USE_MPI
+  /**
+   * The communicator spanning all ranks on which this call is executed.
+   *
+   * Collective operations inside an executor have to use this communicator:
+   * in MPI mode the executors are a strict subset of the ranks the
+   * application runs on, and any other communicator would either deadlock or
+   * exclude the executor.
+   *
+   * It is MPI_COMM_NULL on ranks that never execute. The communicator is
+   * owned by the {@link Dispatcher} and must not be freed by the executor.
+   */
+  [[nodiscard]] auto comm() const -> MPI_Comm { return m_comm; }
+#endif // USE_MPI
 
   [[nodiscard]] auto numBuffers() const -> std::size_t { return m_bufferSize.size(); }
 
@@ -50,14 +71,29 @@ class ExecInfo {
   }
 
   /**
+   * The contributions a buffer is made of, in bytes, in the order they follow
+   * one another in it: in NODE mode, one for every rank whose buffers the
+   * executor holds, and otherwise the buffer as a whole. A contribution is a
+   * block of its own, which matters for data that is distributed along
+   * another dimension than its leading one.
+   */
+  [[nodiscard]] virtual auto bufferParts(unsigned int id) const -> std::vector<size_t> {
+    return {bufferSize(id)};
+  }
+
+  /**
    * @return Read-only pointer to the buffer (Useful for executors.)
    */
   [[nodiscard]] virtual auto buffer(unsigned int id) const -> const void* = 0;
 
   protected:
+#ifdef USE_MPI
+  void setCommInternal(MPI_Comm comm) { m_comm = comm; }
+#endif // USE_MPI
+
   void addBufferInternal(size_t size) {
     m_bufferSize.push_back(size);
-    m_bufferOrigin.push_back(m_hostBuffer);
+    m_bufferOrigin.push_back(&hostBufferOrigin());
   }
 
   void resizeBufferInternal(unsigned int id, size_t size) {
@@ -68,6 +104,16 @@ class ExecInfo {
   void removeBufferInternal(unsigned int id) {
     assert(id < numBuffers());
     m_bufferSize[id] = 0;
+  }
+
+  private:
+  /**
+   * The origin of all buffers in host memory; it holds no state, so one
+   * instance serves every buffer
+   */
+  static auto hostBufferOrigin() -> HostBufferOrigin& {
+    static HostBufferOrigin origin;
+    return origin;
   }
 };
 

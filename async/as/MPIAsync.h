@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "MPIBase.h"
+#include "async/Config.h"
 #include "async/ExecInfo.h"
 #include "async/as/Base.h"
 #include "async/as/MPIScheduler.h"
@@ -32,6 +33,9 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
     /** A sychnronized buffer */
     bool sync;
 
+    /** Only the first rank of the group sends a clone buffer */
+    bool clone;
+
     /**
      * The number of asynchronous request required for this buffer.
      *
@@ -50,7 +54,8 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
   std::vector<MPI_Request> m_asyncRequests;
 
   public:
-  MPIAsync() {
+  explicit MPIAsync(Config config = Config{})
+      : MPIBase<Executor, InitParameter, Parameter>(config) {
     // One request always required for the parameters
     m_asyncRequests.push_back(MPI_REQUEST_NULL);
   }
@@ -60,11 +65,13 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
   auto addSyncBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned override {
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone);
     const unsigned int id =
-        Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, false);
+        MPIBase<Executor, InitParameter, Parameter>::addBufferLocal(buffer, size, false);
+    MPIBase<Executor, InitParameter, Parameter>::keepCloneCopy(id, buffer, size, clone);
 
     // We directly send sync buffers
     BufInfo bufInfo{};
     bufInfo.sync = true;
+    bufInfo.clone = clone;
     bufInfo.requests = 0;
     m_buffer.push_back(bufInfo);
 
@@ -78,20 +85,18 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
    */
   auto addBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned override {
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone, false);
-    const auto id = Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size);
-
-    // Initialize the requests
-    std::size_t requests = 0;
-    if (size > 0 &&
-        (!clone || MPIBase<Executor, InitParameter, Parameter>::scheduler().groupRank() == 0)) {
-      requests = (size + MPIBase<Executor, InitParameter, Parameter>::maxSend() - 1) /
-                 MPIBase<Executor, InitParameter, Parameter>::maxSend();
-      m_asyncRequests.insert(m_asyncRequests.end(), requests * 2, MPI_REQUEST_NULL);
-    }
+    // (a buffer in a shared window needs no staging copy: this rank writes its part directly; nor
+    // does a copy of a clone that is not sent, which has memory of its own)
+    const bool unsent = MPIBase<Executor, InitParameter, Parameter>::unsentClone(buffer, clone);
+    const auto id = MPIBase<Executor, InitParameter, Parameter>::addBufferLocal(
+        buffer, size, !MPIBase<Executor, InitParameter, Parameter>::shared() && !unsent);
+    MPIBase<Executor, InitParameter, Parameter>::keepCloneCopy(id, buffer, size, clone);
 
     BufInfo bufInfo{};
     bufInfo.sync = false;
-    bufInfo.requests = requests;
+    bufInfo.clone = clone;
+    bufInfo.requests = requestsFor(bufInfo, size);
+    m_asyncRequests.insert(m_asyncRequests.end(), bufInfo.requests * 2, MPI_REQUEST_NULL);
     m_buffer.push_back(bufInfo);
 
     assert(m_buffer.size() == (Base<Executor, InitParameter, Parameter>::numBuffers()));
@@ -102,19 +107,17 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
   void resizeBuffer(unsigned int id, const void* buffer, size_t size) override {
     assert(id < m_buffer.size());
 
-    auto requests = m_buffer[id].requests;
-    if (requests > 0) {
-      m_buffer[id].requests = (size + MPIBase<Executor, InitParameter, Parameter>::maxSend() - 1) /
-                              MPIBase<Executor, InitParameter, Parameter>::maxSend();
-
-      requests = m_buffer[id].requests - requests;
+    // (the requests are not tied to a position in the list; only their number matters)
+    const auto oldRequests = m_buffer[id].requests;
+    const auto newRequests = requestsFor(m_buffer[id], size);
+    if (newRequests > oldRequests) {
+      m_asyncRequests.insert(
+          m_asyncRequests.end(), (newRequests - oldRequests) * 2, MPI_REQUEST_NULL);
+    } else {
+      m_asyncRequests.erase(m_asyncRequests.end() - (oldRequests - newRequests) * 2,
+                            m_asyncRequests.end());
     }
-
-    if (requests > 0) {
-      m_asyncRequests.insert(m_asyncRequests.end(), requests * 2, MPI_REQUEST_NULL);
-    } else if (requests < 0) {
-      m_asyncRequests.erase(m_asyncRequests.end() + requests * 2, m_asyncRequests.end());
-    }
+    m_buffer[id].requests = newRequests;
 
     MPIBase<Executor, InitParameter, Parameter>::resizeBuffer(id, buffer, size);
   }
@@ -135,6 +138,25 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
     }
 
     return Base<Executor, InitParameter, Parameter>::bufferInternal(id);
+  }
+
+  auto managedBuffer(unsigned int id) -> void* override {
+    if (MPIBase<Executor, InitParameter, Parameter>::hasCloneCopy(id)) {
+      return MPIBase<Executor, InitParameter, Parameter>::cloneCopy(id);
+    }
+
+    if (MPIBase<Executor, InitParameter, Parameter>::shared()) {
+      // what the application writes there is in the aggregate already
+      return MPIBase<Executor, InitParameter, Parameter>::localOrigin(id) == nullptr
+                 ? MPIBase<Executor, InitParameter, Parameter>::sharedOwn(id)
+                 : nullptr;
+    }
+
+    if (MPIBase<Executor, InitParameter, Parameter>::scheduler().isColocated()) {
+      return MPIBase<Executor, InitParameter, Parameter>::localManagedBuffer(id);
+    }
+
+    return Base<Executor, InitParameter, Parameter>::managedBuffer(id);
   }
 
   /**
@@ -158,7 +180,8 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
 
     assert(id < (Base<Executor, InitParameter, Parameter>::numBuffers()));
 
-    if (m_buffer[id].sync) {
+    if (m_buffer[id].sync || MPIBase<Executor, InitParameter, Parameter>::shared() ||
+        MPIBase<Executor, InitParameter, Parameter>::scheduler().isColocated()) {
       MPIBase<Executor, InitParameter, Parameter>::sendBuffer(id, size);
       return;
     }
@@ -193,6 +216,8 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
   void call(const Parameter& parameters) override {
     iSendAllBuffers();
 
+    MPIBase<Executor, InitParameter, Parameter>::publishWindows();
+
     // Send parameters
     m_paramBuffer = parameters;
     m_asyncRequests[0] = MPIBase<Executor, InitParameter, Parameter>::scheduler().iSendParam(
@@ -201,6 +226,23 @@ class MPIAsync : public MPIBase<Executor, InitParameter, Parameter> {
 
   private:
   [[nodiscard]] auto useAsyncCopy() const -> bool override { return true; }
+
+  /**
+   * The number of chunks this rank sends for a buffer of the given size
+   */
+  [[nodiscard]] auto requestsFor(const BufInfo& bufInfo, size_t size) const -> std::size_t {
+    // a co-located executor rank copies its own contribution into the aggregation buffer, so it
+    // never sends one
+    if (bufInfo.sync || size == 0 || MPIBase<Executor, InitParameter, Parameter>::shared() ||
+        MPIBase<Executor, InitParameter, Parameter>::scheduler().isColocated() ||
+        (bufInfo.clone &&
+         MPIBase<Executor, InitParameter, Parameter>::scheduler().groupRank() != 0)) {
+      return 0;
+    }
+
+    return (size + MPIBase<Executor, InitParameter, Parameter>::maxSend() - 1) /
+           MPIBase<Executor, InitParameter, Parameter>::maxSend();
+  }
 
   /**
    * Sends all buffers asynchronously

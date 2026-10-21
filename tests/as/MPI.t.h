@@ -7,22 +7,27 @@
 #include "async/as/MPIScheduler.h"
 #include <array>
 #include <cstddef>
+#include <cstdlib>
 #include <mpi.h>
+#include <sstream>
+#include <string>
 
+#include <chrono>
 #include <pthread.h>
+#include <thread>
 #include <vector>
 
 #include <cxxtest/GlobalFixture.h>
 #include <cxxtest/TestSuite.h>
 
-#ifdef ASYNC_MPI_COPY
+#if ASYNC_MPI_COPY
 #include "async/as/MPIAsync.h"
 #else // ASYNC_MPI_COPY
 #include "async/as/MPI.h"
 #endif // ASYNC_MPI_COPY
 #include "Executor.h"
 
-#ifdef ASYNC_MPI_COPY
+#if ASYNC_MPI_COPY
 template <class Executor, typename InitParameter, typename Parameter>
 struct MPITest {
   using Type = async::as::MPIAsync<Executor, InitParameter, Parameter>;
@@ -42,7 +47,7 @@ class LargeBuffer : public CxxTest::GlobalFixture {
 
   public:
   auto setUpWorld() -> bool override {
-    m_size = (3 * async::Config::maxSend()) / 2 + 2;
+    m_size = (3 * async::Config{}.maxSend()) / 2 + 2;
     return true;
   }
 
@@ -53,6 +58,54 @@ class LargeBuffer : public CxxTest::GlobalFixture {
 
 // NOLINTNEXTLINE
 static LargeBuffer largeBuffer;
+
+/**
+ * @return The node of every rank from ASYNC_TEST_NODES; empty if unset
+ */
+inline auto testNodes() -> std::vector<int> {
+  std::vector<int> nodes;
+  const char* list = std::getenv("ASYNC_TEST_NODES");
+  if (list != nullptr) {
+    std::istringstream stream(list);
+    std::string node;
+    while (std::getline(stream, node, ',')) {
+      nodes.push_back(std::stoi(node));
+    }
+  }
+  return nodes;
+}
+
+/**
+ * Set up the groups of the tests: ranks {0, 1, 2} and {3, 4}, with an
+ * executor of their own each, rank 2 and 4.
+ *
+ * ASYNC_TEST_NODES lists a node for every rank (as in "0,0,1,2,3"), so
+ * that a single machine can stand in for several nodes. The groups then span
+ * ASYNC_GROUP_NODES of these nodes each, which has to lead to the same
+ * groups.
+ */
+inline void setUpGroups(async::as::MPIScheduler& scheduler) {
+  const async::Config config;
+  scheduler.setAllowSharedMemory(config.sharedMemory());
+
+  const auto nodes = testNodes();
+  if (nodes.empty()) {
+    scheduler.setCommunicator(MPI_COMM_WORLD, 2);
+    return;
+  }
+
+  int rank = 0;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+  MPI_Comm nodeComm = MPI_COMM_NULL;
+  MPI_Comm_split(MPI_COMM_WORLD, nodes.at(rank), rank, &nodeComm);
+
+  auto layout = config.groupLayout();
+  layout.exclusive = true;
+  scheduler.setCommunicator(MPI_COMM_WORLD, nodeComm, layout);
+
+  MPI_Comm_free(&nodeComm);
+}
 
 class TestMPI : public CxxTest::TestSuite {
   async::as::MPIScheduler* m_scheduler{};
@@ -67,6 +120,10 @@ class TestMPI : public CxxTest::TestSuite {
 
   bool m_largeBufferTest{};
 
+  /** Sizes (per compute rank) of the steps of the chunked resize test */
+  std::vector<size_t> m_chunkSizes;
+  int m_chunkSteps{0};
+
   public:
   void setUp() override {
     MPI_Comm_rank(MPI_COMM_WORLD, &m_rank);
@@ -77,9 +134,11 @@ class TestMPI : public CxxTest::TestSuite {
     m_async = nullptr;
     m_buffers.clear();
     m_largeBufferTest = false;
+    m_chunkSizes.clear();
+    m_chunkSteps = 0;
 
     m_scheduler = new async::as::MPIScheduler();
-    m_scheduler->setCommunicator(MPI_COMM_WORLD, 2);
+    setUpGroups(*m_scheduler);
   }
 
   void tearDown() override {
@@ -94,7 +153,22 @@ class TestMPI : public CxxTest::TestSuite {
     m_values.push_back(value);
     pthread_spin_unlock(&m_valueLock);
 
-    if (m_largeBufferTest) {
+    if (!m_chunkSizes.empty()) {
+      if (value > 0) {
+        // step value holds a buffer of m_chunkSizes[value - 1] bytes per compute rank, all of them
+        // 'a' + value - 1
+        const auto perRank = m_chunkSizes.at(value - 1);
+        const auto total = m_async->bufferSize(0);
+        TS_ASSERT_EQUALS(total % perRank, 0);
+        const char* buf = reinterpret_cast<const char*>(m_async->buffer(0));
+        size_t wrong = 0;
+        for (size_t i = 0; i < total; i++) {
+          wrong += buf[i] != static_cast<char>('a' + value - 1) ? 1 : 0;
+        }
+        TS_ASSERT_EQUALS(wrong, 0);
+        m_chunkSteps++;
+      }
+    } else if (m_largeBufferTest) {
       // Group size without the communicator
       const int groupSize = static_cast<int>(m_async->bufferSize(0) / largeBuffer.size());
       TS_ASSERT_LESS_THAN_EQUALS(1, groupSize);
@@ -119,6 +193,33 @@ class TestMPI : public CxxTest::TestSuite {
         }
       }
     }
+  }
+
+  /**
+   * The groups are the same in every variant; where they span several
+   * nodes, the last rank of every node but the one of the executor hands on
+   * the parts of its node
+   */
+  void testGroups() {
+    const bool executor = m_rank == 2 || m_rank == 4;
+    TS_ASSERT_EQUALS(m_scheduler->isExecutor(), executor);
+    TS_ASSERT_EQUALS(m_scheduler->isCompute(), !executor);
+    TS_ASSERT_EQUALS(m_scheduler->groupRank(), m_rank < 3 ? m_rank : m_rank - 3);
+    TS_ASSERT_EQUALS(m_scheduler->sharedMemory(), async::Config{}.sharedMemory());
+
+    const auto nodes = testNodes();
+    if (nodes.empty()) {
+      TS_ASSERT(m_scheduler->onExecutorNode());
+      TS_ASSERT(!m_scheduler->isForwarder());
+      return;
+    }
+
+    const int groupExecutor = m_rank < 3 ? 2 : 4;
+    const bool remote = nodes.at(m_rank) != nodes.at(groupExecutor);
+    const bool lastOfNode =
+        m_rank + 1 == static_cast<int>(nodes.size()) || nodes.at(m_rank + 1) != nodes.at(m_rank);
+    TS_ASSERT_EQUALS(m_scheduler->onExecutorNode(), !remote);
+    TS_ASSERT_EQUALS(m_scheduler->isForwarder(), remote && lastOfNode);
   }
 
   void testInit() {
@@ -700,6 +801,43 @@ class TestMPI : public CxxTest::TestSuite {
     }
   }
 
+  /** A buffer ASYNC manages, resized to the size it has */
+  void testResizeManagedBufferSameSize() {
+    Executor<TestMPI> executor(this);
+
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async;
+    async.setScheduler(*m_scheduler);
+
+    async.setExecutor(executor);
+    m_async = &async;
+
+    if (m_scheduler->isExecutor()) {
+      m_scheduler->loop();
+
+      TS_ASSERT_EQUALS(m_buffers.size(),
+                       2 * static_cast<std::size_t>(m_scheduler->numComputeRanks()));
+      for (const auto& i : m_buffers) {
+        TS_ASSERT_EQUALS(i, 7);
+      }
+    } else {
+      async.addBuffer(nullptr, 2 * sizeof(int));
+
+      async.wait();
+
+      async.resizeBuffer(0, nullptr, 2 * sizeof(int));
+
+      auto* managed = static_cast<int*>(async.managedBuffer(0));
+      managed[0] = 7;
+      managed[1] = 7;
+      async.sendBuffer(0, 2 * sizeof(int));
+
+      const Parameter parameter;
+      async.call(parameter);
+
+      async.wait();
+    }
+  }
+
   void testMultiple() {
     Executor<TestMPI> executor(this);
 
@@ -732,6 +870,52 @@ class TestMPI : public CxxTest::TestSuite {
     }
   }
 
+  /**
+   * A contribution that comes late: the executor has to wait for it, and so
+   * does a rank that hands on the parts of its node
+   */
+  void testLateContribution() {
+    Executor<TestMPI> executor(this);
+
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async;
+    async.setScheduler(*m_scheduler);
+
+    async.setExecutor(executor);
+    m_async = &async;
+
+    const int steps = 2;
+    if (m_scheduler->isExecutor()) {
+      m_scheduler->loop();
+
+      // the value of every step from every compute rank of the group
+      const auto contributors = static_cast<std::size_t>(m_scheduler->numComputeRanks());
+      TS_ASSERT_EQUALS(m_buffers.size(), steps * contributors);
+      for (std::size_t i = 0; i < m_buffers.size(); i++) {
+        TS_ASSERT_EQUALS(m_buffers[i], static_cast<int>(i / contributors) + 1);
+      }
+    } else {
+      int value = 0;
+      async.addBuffer(&value, sizeof(int));
+
+      async.wait();
+
+      const Parameter parameter;
+      for (int step = 1; step <= steps; step++) {
+        if (m_rank == 0) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        value = step;
+        async.sendBuffer(0, sizeof(int));
+        async.call(parameter);
+
+        // what the rank sent is out of its hands
+        value = -1;
+
+        async.wait();
+      }
+    }
+  }
+
   void testLargeBuffer() {
     Executor<TestMPI> executor(this);
 
@@ -760,6 +944,47 @@ class TestMPI : public CxxTest::TestSuite {
       async.wait();
 
       delete[] buffer;
+    }
+  }
+
+  /**
+   * A buffer of several chunks that shrinks to fewer and grows again, which
+   * changes the number of sends the asynchronous copy needs per rank
+   */
+  void testResizeChunks() {
+    Executor<TestMPI> executor(this);
+
+    MPITest<Executor<TestMPI>, Parameter, Parameter>::Type async;
+    async.setScheduler(*m_scheduler);
+
+    async.setExecutor(executor);
+    m_async = &async;
+
+    const size_t maxSend = async::Config{}.maxSend();
+    m_chunkSizes = {(5 * maxSend) / 2, maxSend / 2, (3 * maxSend) / 2};
+
+    if (m_scheduler->isExecutor()) {
+      m_scheduler->loop();
+
+      TS_ASSERT_EQUALS(m_chunkSteps, 3);
+    } else {
+      std::vector<char> data(m_chunkSizes[0], 'a');
+      async.addBuffer(data.data(), data.size());
+
+      Parameter parameter;
+      async.callInit(parameter);
+      async.wait();
+
+      for (int step = 1; step <= 3; step++) {
+        const auto size = m_chunkSizes[step - 1];
+        data.assign(size, static_cast<char>('a' + step - 1));
+        async.resizeBuffer(0, data.data(), size);
+        async.sendBuffer(0, size);
+
+        parameter.value = step;
+        async.call(parameter);
+        async.wait();
+      }
     }
   }
 

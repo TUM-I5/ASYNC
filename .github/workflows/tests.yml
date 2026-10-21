@@ -8,8 +8,12 @@ on:
 
 jobs:
   unittest:
-    name: unittest
+    name: unittest (${{ matrix.build_type }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Debug, Release]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -27,16 +31,48 @@ jobs:
         run: |
           mkdir build-nompi
           cd build-nompi
-          cmake .. -GNinja -DUSE_MPI=OFF -DTESTING=ON
+          cmake .. -GNinja -DUSE_MPI=OFF -DTESTING=ON -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
           ninja
-          ctest --rerun-failed --output-on-failure
+          ctest --output-on-failure
           cd ..
 
       - name: build-mpi
         run: |
           mkdir build-mpi
           cd build-mpi
-          cmake .. -GNinja -DUSE_MPI=ON -DTESTING=ON
+          cmake .. -GNinja -DUSE_MPI=ON -DTESTING=ON -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
           ninja
-          ctest --rerun-failed --output-on-failure
+          ctest --output-on-failure
+          cd ..
+
+  sanitizers:
+    name: sanitizers (${{ matrix.sanitizers }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizers: ['address;undefined', 'thread']
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: 'true'
+
+      - name: install-packages
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y libopenmpi-dev openmpi-bin openmpi-common ninja-build cxxtest
+
+      # the sanitizers place their shadow memory where the kernel would put randomized mappings
+      # with more entropy
+      - name: address-space
+        run: sudo sysctl vm.mmap_rnd_bits=28
+
+      - name: build-mpi
+        run: |
+          mkdir build-mpi
+          cd build-mpi
+          cmake .. -GNinja -DUSE_MPI=ON -DTESTING=ON -DCMAKE_BUILD_TYPE=Debug \
+            "-DASYNC_TEST_SANITIZERS=${{ matrix.sanitizers }}"
+          ninja
+          ctest --output-on-failure
           cd ..

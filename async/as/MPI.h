@@ -11,7 +11,7 @@
 #include <cassert>
 
 #include "MPIBase.h"
-#include "async/as/Base.h"
+#include "async/Config.h"
 
 namespace async::as {
 
@@ -21,45 +21,69 @@ namespace async::as {
 template <class Executor, typename InitParameter, typename Parameter>
 class MPI : public MPIBase<Executor, InitParameter, Parameter> {
   public:
-  MPI() = default;
+  explicit MPI(Config config = Config{}) : MPIBase<Executor, InitParameter, Parameter>(config) {}
 
   ~MPI() override = default;
 
   auto addSyncBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned override {
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone);
-    return Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, false);
+    const auto id =
+        MPIBase<Executor, InitParameter, Parameter>::addBufferLocal(buffer, size, false);
+    MPIBase<Executor, InitParameter, Parameter>::keepCloneCopy(id, buffer, size, clone);
+    return id;
   }
 
   auto addBuffer(const void* buffer, size_t size, bool clone = false) -> unsigned override {
-    if (buffer == nullptr) {
+    // (in a shared window, a buffer ASYNC manages lives in the window; a copy of a clone that is
+    // not sent has memory of its own)
+    if (buffer == nullptr && !MPIBase<Executor, InitParameter, Parameter>::shared() &&
+        !MPIBase<Executor, InitParameter, Parameter>::unsentClone(buffer, clone)) {
       MPIBase<Executor, InitParameter, Parameter>::scheduler().addManagedBuffer(size);
     }
 
     MPIBase<Executor, InitParameter, Parameter>::addBuffer(buffer, size, clone);
-    return Base<Executor, InitParameter, Parameter>::addBufferInternal(buffer, size, false);
+    const auto id =
+        MPIBase<Executor, InitParameter, Parameter>::addBufferLocal(buffer, size, false);
+    MPIBase<Executor, InitParameter, Parameter>::keepCloneCopy(id, buffer, size, clone);
+    return id;
   }
 
   void resizeBuffer(unsigned int id, const void* buffer, size_t size) override {
-    if (Base<Executor, InitParameter, Parameter>::origin(id) == nullptr) {
+    if (MPIBase<Executor, InitParameter, Parameter>::localOrigin(id) == nullptr &&
+        !MPIBase<Executor, InitParameter, Parameter>::shared() &&
+        !MPIBase<Executor, InitParameter, Parameter>::hasCloneCopy(id)) {
       // Resize the managed buffer
       MPIBase<Executor, InitParameter, Parameter>::scheduler().resizeManagedBuffer(
-          Base<Executor, InitParameter, Parameter>::bufferSize(id), size);
+          MPIBase<Executor, InitParameter, Parameter>::localBufferSize(id), size);
     }
 
     MPIBase<Executor, InitParameter, Parameter>::resizeBuffer(id, buffer, size);
   }
 
   void removeBuffer(unsigned int id) override {
-    if (Base<Executor, InitParameter, Parameter>::origin(id) == nullptr) {
+    if (MPIBase<Executor, InitParameter, Parameter>::localOrigin(id) == nullptr &&
+        !MPIBase<Executor, InitParameter, Parameter>::shared() &&
+        !MPIBase<Executor, InitParameter, Parameter>::hasCloneCopy(id)) {
       MPIBase<Executor, InitParameter, Parameter>::scheduler().removeManagedBuffer(
-          Base<Executor, InitParameter, Parameter>::bufferSize(id));
+          MPIBase<Executor, InitParameter, Parameter>::localBufferSize(id));
     }
 
     MPIBase<Executor, InitParameter, Parameter>::removeBuffer(id);
   }
 
   auto managedBuffer(unsigned int id) -> void* override {
-    if (Base<Executor, InitParameter, Parameter>::origin(id) == nullptr) {
+    if (MPIBase<Executor, InitParameter, Parameter>::hasCloneCopy(id)) {
+      return MPIBase<Executor, InitParameter, Parameter>::cloneCopy(id);
+    }
+
+    if (MPIBase<Executor, InitParameter, Parameter>::shared()) {
+      // what the application writes there is in the aggregate already
+      return MPIBase<Executor, InitParameter, Parameter>::localOrigin(id) == nullptr
+                 ? MPIBase<Executor, InitParameter, Parameter>::sharedOwn(id)
+                 : nullptr;
+    }
+
+    if (MPIBase<Executor, InitParameter, Parameter>::localOrigin(id) == nullptr) {
       return MPIBase<Executor, InitParameter, Parameter>::scheduler().managedBuffer();
     }
 
@@ -71,13 +95,14 @@ class MPI : public MPIBase<Executor, InitParameter, Parameter> {
       return MPIBase<Executor, InitParameter, Parameter>::buffer(id);
     }
 
-    return Base<Executor, InitParameter, Parameter>::origin(id);
+    return MPIBase<Executor, InitParameter, Parameter>::localOrigin(id);
   }
 
   /**
    * @warning Only the parameter from one task will be considered
    */
   void call(const Parameter& parameters) override {
+    MPIBase<Executor, InitParameter, Parameter>::publishWindows();
     MPIBase<Executor, InitParameter, Parameter>::scheduler().sendParam(
         MPIBase<Executor, InitParameter, Parameter>::id(), parameters);
   }

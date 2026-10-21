@@ -8,8 +8,11 @@
 
 #include <vector>
 
+#include "Config.h"
+
 #ifdef USE_MPI
 #include "async/as/MPIScheduler.h"
+#include <mpi.h>
 #endif // USE_MPI
 
 namespace async {
@@ -46,12 +49,28 @@ class ModuleBase {
   virtual void setUp() = 0;
 
   /**
+   * Call {@link setUp} unless it has run already.
+   *
+   * A rank that is executor and compute rank at once is reached from both
+   * sides, and setting a module up twice would start a second executor
+   * thread.
+   */
+  void setUpOnce() {
+    if (!m_setUp) {
+      m_setUp = true;
+      setUp();
+    }
+  }
+
+  /**
    * Called after finalization. Is also called on MPI
    * executors.
    */
   virtual void tearDown() {}
 
   private:
+  bool m_setUp{false};
+
   /**
    * List of all I/O modules (required by the dispatcher)
    */
@@ -61,11 +80,21 @@ class ModuleBase {
     return moduleList;
   }
 
+  /**
+   * Take the mode of the dispatcher, if this module was created with AUTO.
+   */
+  virtual void setMode(Mode mode) = 0;
+
 #ifdef USE_MPI
   /**
    * Set the scheduler for this module.
    */
   virtual void setScheduler(as::MPIScheduler& scheduler) = 0;
+
+  /**
+   * Set the communicator spanning the ranks that execute this module.
+   */
+  virtual void setComm(MPI_Comm comm) = 0;
 #endif // USE_MPI
 };
 

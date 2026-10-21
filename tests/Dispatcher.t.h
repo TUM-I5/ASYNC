@@ -16,9 +16,10 @@
  */
 class TestDispatcher : public CxxTest::TestSuite {
   public:
-  static void testGroupSize() {
+  static void testGroupLayout() {
     const async::Dispatcher dispatcher;
-    TS_ASSERT_EQUALS(dispatcher.groupSize(), 1);
+    TS_ASSERT_EQUALS(dispatcher.groupLayout().executorsPerNode, 1);
+    TS_ASSERT_EQUALS(dispatcher.groupLayout().groupNodes, 1);
   }
 
   static void testGroupComm() {

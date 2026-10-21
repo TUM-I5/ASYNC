@@ -13,6 +13,10 @@
 #include <type_traits>
 #include <vector>
 
+#ifdef USE_MPI
+#include <mpi.h>
+#endif // USE_MPI
+
 #include "Pin.h"
 #include "utils/logger.h"
 
@@ -45,6 +49,13 @@ class Base : public async::ExecInfo {
     const void* origin;
     /** The buffer on the executor */
     void* buffer;
+    /**
+     * Whether the memory of the buffer is allocated here; it is allocated as
+     * soon as the buffer holds anything
+     */
+    bool allocate;
+    /** Memory that somebody else owns (a shared window), never freed here */
+    bool external;
   };
 
   /** The executor for the asynchronous call */
@@ -56,13 +67,13 @@ class Base : public async::ExecInfo {
   /** Already cleanup everything? */
   bool m_finalized{false};
 
-  /** Aligment of buffers (might be requested for I/O back-ends) */
-  const size_t mAlignment;
+  /** The settings this object was created with */
+  Config m_config;
 
   Parameter m_lastParameters;
 
   protected:
-  Base() : m_executor(nullptr), mAlignment(async::Config::alignment()) {}
+  explicit Base(Config config) : m_executor(nullptr), m_config(config) {}
 
   public:
   ~Base() override { finalizeInternal(); }
@@ -76,6 +87,10 @@ class Base : public async::ExecInfo {
    * Only required in asynchronous MPI mode
    */
   virtual void setScheduler(MPIScheduler& scheduler) {}
+
+#ifdef USE_MPI
+  virtual void setComm(MPI_Comm comm) { async::ExecInfo::setCommInternal(comm); }
+#endif // USE_MPI
 
   virtual void setExecutor(Executor& executor) { m_executor = &executor; }
 
@@ -126,8 +141,7 @@ class Base : public async::ExecInfo {
     assert(id < numBuffers());
 
     m_buffer[id].origin = nullptr;
-    freeBuffer(m_buffer[id].buffer);
-    m_buffer[id].buffer = nullptr;
+    releaseBuffer(id);
     async::ExecInfo::removeBufferInternal(id);
   }
 
@@ -147,6 +161,26 @@ class Base : public async::ExecInfo {
   }
 
   /**
+   * The memory this rank contributes to a buffer.
+   *
+   * Differs from {@link buffer} where the buffer slot describes an aggregate
+   * rather than the memory of this rank alone.
+   */
+  [[nodiscard]] virtual auto localBuffer(unsigned int id) const -> const void* {
+    return buffer(id);
+  }
+
+  /**
+   * The size this rank contributes to a buffer.
+   *
+   * Differs from {@link bufferSize} where the buffer slot describes an
+   * aggregate rather than the memory of this rank alone.
+   */
+  [[nodiscard]] virtual auto localBufferSize(unsigned int id) const -> size_t {
+    return async::ExecInfo::bufferSize(id);
+  }
+
+  /**
    * @param size The size that should be transfered
    */
   virtual void sendBuffer(unsigned int id, size_t size) = 0;
@@ -162,6 +196,10 @@ class Base : public async::ExecInfo {
   virtual void finalize() { finalizeInternal(); }
 
   protected:
+  [[nodiscard]] auto config() const -> const Config& { return m_config; }
+
+  [[nodiscard]] auto alignment() const -> size_t { return m_config.alignment(); }
+
   auto executor() -> Executor& { return *m_executor; }
 
   auto addBufferInternal(const void* origin, size_t size, bool allocate = true) -> unsigned int {
@@ -169,16 +207,8 @@ class Base : public async::ExecInfo {
 
     BufInfo buffer{};
     buffer.origin = origin;
-
-    if ((size != 0U) && allocate) {
-      if (mAlignment > 0) {
-        buffer.buffer = allocateAlignedBuffer(size);
-      } else {
-        buffer.buffer = malloc(size);
-      }
-    } else {
-      buffer.buffer = nullptr;
-    }
+    buffer.allocate = allocate;
+    buffer.buffer = ((size != 0U) && allocate) ? allocateBuffer(size) : nullptr;
 
     m_buffer.push_back(buffer);
     assert(m_buffer.size() == numBuffers());
@@ -198,8 +228,11 @@ class Base : public async::ExecInfo {
 
     async::ExecInfo::resizeBufferInternal(id, size);
 
-    if (size && m_buffer[id].buffer) {
-      if (mAlignment > 0) {
+    if ((size != 0U) && m_buffer[id].allocate && !m_buffer[id].external) {
+      if (m_buffer[id].buffer == nullptr) {
+        // the buffer has been empty so far
+        m_buffer[id].buffer = allocateBuffer(size);
+      } else if (alignment() > 0) {
         freeBuffer(m_buffer[id].buffer);
         m_buffer[id].buffer = allocateAlignedBuffer(size);
       } else {
@@ -241,8 +274,7 @@ class Base : public async::ExecInfo {
 
     for (unsigned int i = 0; i < m_buffer.size(); i++) {
       m_buffer[i].origin = nullptr;
-      freeBuffer(m_buffer[i].buffer);
-      m_buffer[i].buffer = nullptr;
+      releaseBuffer(i);
       async::ExecInfo::removeBufferInternal(i);
     }
 
@@ -250,28 +282,66 @@ class Base : public async::ExecInfo {
     return true;
   }
 
+  /**
+   * Let a buffer use memory that somebody else owns; it is neither resized
+   * nor freed here
+   */
+  void setExternalBufferInternal(unsigned int id, void* buffer) {
+    assert(id < numBuffers());
+
+    releaseBuffer(id);
+    m_buffer[id].buffer = buffer;
+    m_buffer[id].external = true;
+  }
+
   private:
+  /**
+   * Free the memory of a buffer, unless somebody else owns it
+   */
+  void releaseBuffer(unsigned int id) {
+    if (!m_buffer[id].external) {
+      freeBuffer(m_buffer[id].buffer);
+    }
+    m_buffer[id].buffer = nullptr;
+    m_buffer[id].external = false;
+  }
+
   /**
    * Compute the allocated size depending on the requested size
    */
   auto allocSize(size_t size) -> size_t {
-    // Make the allocated buffer size a multiple of m_alignment
-    size_t allocBufferSize = (size + mAlignment - 1) / mAlignment;
-    allocBufferSize *= mAlignment;
+    // Make the allocated buffer size a multiple of the requested alignment
+    size_t allocBufferSize = (size + alignment() - 1) / alignment();
+    allocBufferSize *= alignment();
 
     return allocBufferSize;
   }
 
   /**
-   * Allocate a buffer aligned to mAlignment (which has to be non-zero)
+   * Allocate a buffer, aligned if an alignment is configured
+   */
+  auto allocateBuffer(size_t size) -> void* {
+    if (alignment() > 0) {
+      return allocateAlignedBuffer(size);
+    }
+
+    return checkAllocation(malloc(size));
+  }
+
+  /**
+   * Allocate a buffer aligned to the configured alignment (which has to be non-zero)
    */
   auto allocateAlignedBuffer(size_t size) -> void* {
     // (the aligned operator new only accepts powers of two)
-    if ((mAlignment & (mAlignment - 1)) != 0) {
-      logError() << "The buffer alignment has to be a power of two, but it is" << mAlignment;
+    if ((alignment() & (alignment() - 1)) != 0) {
+      logError() << "The buffer alignment has to be a power of two, but it is" << alignment();
     }
 
-    void* buffer = ::operator new(allocSize(size), std::align_val_t(mAlignment), std::nothrow);
+    return checkAllocation(
+        ::operator new(allocSize(size), std::align_val_t(alignment()), std::nothrow));
+  }
+
+  static auto checkAllocation(void* buffer) -> void* {
     if (buffer == nullptr) {
       logError() << "Could not allocate buffer";
     }
@@ -282,8 +352,8 @@ class Base : public async::ExecInfo {
    * Free a buffer allocated by addBufferInternal or resizeBufferInternal
    */
   void freeBuffer(void* buffer) {
-    if (mAlignment > 0) {
-      ::operator delete(buffer, std::align_val_t(mAlignment));
+    if (alignment() > 0) {
+      ::operator delete(buffer, std::align_val_t(alignment()));
     } else {
       free(buffer);
     }
