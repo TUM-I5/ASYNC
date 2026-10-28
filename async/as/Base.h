@@ -6,9 +6,11 @@
 #ifndef ASYNC_AS_BASE_H
 #define ASYNC_AS_BASE_H
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <new>
 #include <type_traits>
 #include <vector>
@@ -222,22 +224,21 @@ class Base : public async::ExecInfo {
       m_buffer[id].origin = origin;
     }
 
-    if (async::ExecInfo::bufferSize(id) == size) {
+    const size_t oldSize = async::ExecInfo::bufferSize(id);
+    if (oldSize == size) {
       return;
     }
 
     async::ExecInfo::resizeBufferInternal(id, size);
 
     if ((size != 0U) && m_buffer[id].allocate && !m_buffer[id].external) {
-      if (m_buffer[id].buffer == nullptr) {
-        // the buffer has been empty so far
-        m_buffer[id].buffer = allocateBuffer(size);
-      } else if (alignment() > 0) {
+      // like realloc, but with the allocator of all other buffers
+      void* resized = allocateBuffer(size);
+      if (m_buffer[id].buffer != nullptr) {
+        std::memcpy(resized, m_buffer[id].buffer, std::min(oldSize, size));
         freeBuffer(m_buffer[id].buffer);
-        m_buffer[id].buffer = allocateAlignedBuffer(size);
-      } else {
-        m_buffer[id].buffer = realloc(m_buffer[id].buffer, size);
       }
+      m_buffer[id].buffer = resized;
     }
   }
 
